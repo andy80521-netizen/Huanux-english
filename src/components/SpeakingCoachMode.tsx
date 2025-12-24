@@ -29,6 +29,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
   const transcriptRef = useRef<string>('');
   const recognitionRef = useRef<any>(null);
   const flowRef = useRef({ active: false });
+  const audioRef = useRef<HTMLAudioElement>(null);
 
   const filteredData = useMemo(() => { return coachCourse ? vocabData.filter(v => v.course === coachCourse && !v.isHidden) : []; }, [vocabData, coachCourse]);
   const currentEntry = filteredData.length > 0 ? filteredData[currentIndex] : null;
@@ -102,6 +103,9 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
     setIsPlayingFlow(true); 
     setShowResult(false); 
     setAudioURL(null);
+    if (audioRef.current) {
+        audioRef.current.src = "";
+    }
     transcriptRef.current = '';
     
     try {
@@ -130,6 +134,12 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
             const audioBlob = new Blob(audioChunksRef.current, { type: recordedType });
             const url = URL.createObjectURL(audioBlob);
             setAudioURL(url);
+            
+            // 重要：直接操作 DOM 元素設置 src，避免 React 渲染延遲導致 element 為 null
+            if (audioRef.current) {
+                audioRef.current.src = url;
+                audioRef.current.load();
+            }
             resolve(url);
           };
         } else resolve('');
@@ -149,7 +159,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
       recognitionRef.current?.stop();
       mediaRecorderRef.current?.stop();
       
-      const userAudioUrl = await onStopPromise;
+      await onStopPromise;
       const durationSec = (Date.now() - startTime) / 1000;
       if (!flowRef.current.active) return;
 
@@ -169,20 +179,33 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
       await speakTextPromise(currentEntry.answer, 1.0, voicePrefs);
       if (!flowRef.current.active) return;
 
-      const userAudioElement = document.getElementById('user-audio-playback') as HTMLAudioElement;
-      if (userAudioElement && userAudioUrl) {
+      // 播放使用者錄音
+      if (audioRef.current) {
           try {
-              // 在手機上，因為這是使用者剛剛錄製的互動結果，通常被允許播放
-              await userAudioElement.play();
-              await new Promise(r => {
-                  userAudioElement.onended = r;
-                  userAudioElement.onerror = (e) => {
-                      console.warn("Audio playback error", e);
-                      r(null);
-                  };
-                  setTimeout(r, 8000); 
-              });
-          } catch (e) { console.warn("Auto-play failed", e); }
+              // 嘗試自動播放
+              const playPromise = audioRef.current.play();
+              if (playPromise !== undefined) {
+                  await playPromise;
+                  // 如果成功開始播放，等待播放結束
+                  await new Promise(r => {
+                      const el = audioRef.current;
+                      if (!el) { r(null); return; }
+                      const onEnd = () => {
+                          el.removeEventListener('ended', onEnd);
+                          r(null);
+                      };
+                      el.addEventListener('ended', onEnd);
+                      // 安全機制：如果音訊損壞或事件沒觸發，強制超時
+                      setTimeout(r, (el.duration || 5) * 1000 + 1000); 
+                  });
+              }
+          } catch (e) {
+              // 手機瀏覽器 (iOS/Android) 經常會阻擋未經用戶互動的自動播放
+              // 這裡我們攔截錯誤，不要讓流程崩潰，而是繼續執行 (或等待用戶手動點擊)
+              console.warn("Auto-play blocked (expected on mobile without gesture)", e);
+              // 如果被阻擋，我們暫停一下讓用戶有機會看分數，然後自動繼續
+              await new Promise(r => setTimeout(r, 1500));
+          }
       }
 
       if (!flowRef.current.active) return;
@@ -213,6 +236,11 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
           mediaRecorderRef.current.stop();
       }
       recognitionRef.current?.stop();
+      // 停止音訊播放
+      if (audioRef.current) {
+          audioRef.current.pause();
+          audioRef.current.currentTime = 0;
+      }
     } catch(e) { console.warn(e); }
   };
 
@@ -323,22 +351,24 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
                  <div className="flex items-center gap-2"><BarChart2 className="text-white/70 w-5 h-5" /><span className="text-3xl font-black text-white">{scores.total}</span></div>
                </div>
 
-               <div className="bg-slate-50 dark:bg-slate-800 p-4 rounded-2xl border border-slate-100 dark:border-slate-700">
+               <div className="bg-slate-50 dark:bg-slate-800 p-4 rounded-2xl border border-slate-100 dark:border-slate-700 relative">
                  <div className="flex items-center justify-between mb-2">
                    <span className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase flex items-center gap-1"><Headphones size={12} /> 您的錄音回放</span>
                    {phase === 'reviewing' && <div className="text-[10px] text-indigo-500 dark:text-indigo-400 font-bold animate-pulse">播放中...</div>}
                  </div>
-                 {audioURL ? (
-                    <audio 
-                        id="user-audio-playback" 
-                        src={audioURL} 
-                        controls 
-                        className="w-full h-10" 
-                        playsInline // 增加 playsInline 屬性，優化 iOS 體驗
-                    />
-                 ) : (
-                    <div className="h-10 bg-slate-100 dark:bg-slate-700 rounded-lg flex items-center justify-center text-xs text-slate-300 dark:text-slate-500">準備中...</div>
-                 )}
+                 
+                 {/* 
+                    Mobile Fix: 
+                    Always render the audio element to ensure the ref is populated. 
+                    Control visibility with CSS instead of conditional rendering to avoid ref being null during async ops.
+                 */}
+                 <audio 
+                    ref={audioRef}
+                    controls 
+                    playsInline 
+                    className={`w-full h-10 ${audioURL ? '' : 'hidden'}`}
+                 />
+                 {!audioURL && <div className="h-10 bg-slate-100 dark:bg-slate-700 rounded-lg flex items-center justify-center text-xs text-slate-300 dark:text-slate-500">準備中...</div>}
                </div>
            </div>
 
