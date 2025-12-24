@@ -78,6 +78,23 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
       return { pronunciation: pronunciationScore, fluency: fluencyScore, stress: stressScore, total: totalScore };
   };
 
+  // 輔助函式：取得瀏覽器支援的 MIME Type
+  const getSupportedMimeType = () => {
+    const types = [
+      'audio/webm;codecs=opus',
+      'audio/webm',
+      'audio/mp4',
+      'audio/ogg',
+      'audio/aac',
+    ];
+    for (const type of types) {
+      if (MediaRecorder.isTypeSupported(type)) {
+        return type;
+      }
+    }
+    return ''; // 讓瀏覽器使用預設值
+  };
+
   const startFlow = async () => {
     if (!currentEntry || isRecording) return;
     
@@ -94,7 +111,12 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
 
       setPhase('recording');
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaRecorderRef.current = new MediaRecorder(stream);
+      
+      // 使用支援的 MIME Type 建立 MediaRecorder
+      const mimeType = getSupportedMimeType();
+      const options = mimeType ? { mimeType } : undefined;
+      mediaRecorderRef.current = new MediaRecorder(stream, options);
+      
       audioChunksRef.current = [];
       mediaRecorderRef.current.ondataavailable = (e) => {
         if (e.data.size > 0) audioChunksRef.current.push(e.data);
@@ -103,7 +125,9 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
       const onStopPromise = new Promise<string>((resolve) => {
         if (mediaRecorderRef.current) {
           mediaRecorderRef.current.onstop = () => {
-            const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+            // 使用 recorder 實際使用的 mimeType 建立 Blob，避免格式不符
+            const recordedType = mediaRecorderRef.current?.mimeType || 'audio/webm';
+            const audioBlob = new Blob(audioChunksRef.current, { type: recordedType });
             const url = URL.createObjectURL(audioBlob);
             setAudioURL(url);
             resolve(url);
@@ -148,10 +172,14 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
       const userAudioElement = document.getElementById('user-audio-playback') as HTMLAudioElement;
       if (userAudioElement && userAudioUrl) {
           try {
+              // 在手機上，因為這是使用者剛剛錄製的互動結果，通常被允許播放
               await userAudioElement.play();
               await new Promise(r => {
                   userAudioElement.onended = r;
-                  userAudioElement.onerror = r;
+                  userAudioElement.onerror = (e) => {
+                      console.warn("Audio playback error", e);
+                      r(null);
+                  };
                   setTimeout(r, 8000); 
               });
           } catch (e) { console.warn("Auto-play failed", e); }
@@ -181,9 +209,11 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
     setIsRecording(false);
     window.speechSynthesis.cancel(); 
     try {
-      mediaRecorderRef.current?.stop();
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+          mediaRecorderRef.current.stop();
+      }
       recognitionRef.current?.stop();
-    } catch(e) {}
+    } catch(e) { console.warn(e); }
   };
 
   const handleNext = () => {
@@ -298,7 +328,17 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
                    <span className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase flex items-center gap-1"><Headphones size={12} /> 您的錄音回放</span>
                    {phase === 'reviewing' && <div className="text-[10px] text-indigo-500 dark:text-indigo-400 font-bold animate-pulse">播放中...</div>}
                  </div>
-                 {audioURL ? <audio id="user-audio-playback" src={audioURL} controls className="w-full h-10" /> : <div className="h-10 bg-slate-100 dark:bg-slate-700 rounded-lg flex items-center justify-center text-xs text-slate-300 dark:text-slate-500">準備中...</div>}
+                 {audioURL ? (
+                    <audio 
+                        id="user-audio-playback" 
+                        src={audioURL} 
+                        controls 
+                        className="w-full h-10" 
+                        playsInline // 增加 playsInline 屬性，優化 iOS 體驗
+                    />
+                 ) : (
+                    <div className="h-10 bg-slate-100 dark:bg-slate-700 rounded-lg flex items-center justify-center text-xs text-slate-300 dark:text-slate-500">準備中...</div>
+                 )}
                </div>
            </div>
 

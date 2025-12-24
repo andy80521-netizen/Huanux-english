@@ -49,7 +49,7 @@ if (configStr && configStr !== '{}') {
 // 檢查是否為有效配置
 const isValidConfig = Object.keys(firebaseConfig).length > 0 && (firebaseConfig as any).apiKey && (firebaseConfig as any).apiKey !== "dummy";
 
-// Initialize Firebase
+// Initialize Firebase using named import
 const app = initializeApp(isValidConfig ? firebaseConfig : defaultFirebaseConfig);
 
 export const auth = getAuth(app);
