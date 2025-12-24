@@ -1,0 +1,7 @@
+{
+  "name": "Huanux ENGLISH",
+  "description": "An advanced English learning application featuring Walkman mode, listening and speaking coaches, and a gamified badge system.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
