@@ -77,9 +77,6 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
 
   const calculateFinalScores = (userText: string, targetText: string, durationSec: number) => {
       // iOS Hack: 如果在循環模式下無法辨識語音(因為權限被擋)，給一個基礎分或顯示提示
-      // 這裡如果 userText 是空的，我們假設可能是 iOS 沒錄到文字，但也可能只是沒講話
-      // 為了不讓使用者太挫折，如果錄音有長度但沒文字，我們給予 "Review Mode" (0分但顯示回放)
-      
       if (!userText || userText.trim().length === 0) return { pronunciation: 0, fluency: 0, stress: 0, total: 0 };
       const pronunciationScore = calculateSimilarity(userText, targetText);
       const targetWordCount = targetText.split(/\s+/).length;
@@ -121,10 +118,10 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
       try {
           const stream = await navigator.mediaDevices.getUserMedia({ 
             audio: {
-                echoCancellation: true, 
+                // 關閉回音消除通常能解決「錄不到聲音」或「聲音斷斷續續」的問題，因為系統不會過度介入
+                echoCancellation: false, 
                 noiseSuppression: true,
-                autoGainControl: true,
-                channelCount: 1 // Mono is usually safer for mobile web
+                autoGainControl: true
             } 
           });
           streamRef.current = stream;
@@ -169,14 +166,12 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
 
       setPhase('recording');
       
-      // [iOS Hack] 2. 獲取流 (如果是用戶點擊，強制重新獲取以確保狀態新鮮；如果是循環，嘗試重用)
+      // [iOS Hack] 2. 獲取流
       let stream;
       if (isUserGesture) {
-          // 第一次點擊，強制刷新流
           fullReleaseMicrophone();
           stream = await getPersistentStream();
       } else {
-          // 自動循環，必須重用，因為 iOS 禁止在 setTimeout 中 getUserMedia
           stream = await getPersistentStream(); 
       }
       
@@ -187,7 +182,9 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
       
       audioChunksRef.current = [];
       mediaRecorderRef.current.ondataavailable = (e) => {
-        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+        if (e.data && e.data.size > 0) {
+            audioChunksRef.current.push(e.data);
+        }
       };
       
       const onStopPromise = new Promise<string>((resolve) => {
@@ -207,10 +204,10 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
         } else resolve('');
       });
 
-      mediaRecorderRef.current.start();
+      // 修正：使用 timeslice (200ms) 確保在移動設備上能定期寫入數據，避免錄到空檔案
+      mediaRecorderRef.current.start(200);
       
       // 4. 嘗試啟動辨識 
-      // [iOS Hack] 在循環中 SpeechRecognition 幾乎肯定會失敗，我們必須 Catch 住它，不要讓整個流程崩潰
       try {
         if (recognitionRef.current) {
             try { recognitionRef.current.stop(); } catch(e) {}
@@ -244,7 +241,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
           mediaRecorderRef.current.stop();
       }
       
-      // 重要：絕對不要釋放麥克風，讓它在背景保持活躍，因為 iOS 不會讓我們在下一次循環重新開啟
+      // 重要：絕對不要釋放麥克風，讓它在背景保持活躍
 
       await onStopPromise;
       const durationSec = (Date.now() - startTime) / 1000;
