@@ -348,8 +348,8 @@ const WalkmanMode: React.FC<Props> = ({ vocabData, courses, voicePrefs }) => {
   if (filteredData.length === 0) return <div className="p-8 text-center text-slate-500 dark:text-slate-400 flex flex-col items-center justify-center h-full"><p className="mb-4">此課程沒有題目</p><button onClick={() => setSelectedCourse(null)} className="text-indigo-600 dark:text-indigo-400 font-bold">返回課程選擇</button></div>;
 
   return (
-    <div className="flex flex-col h-full bg-slate-900 text-white relative">
-      {/* Silent Audio for Background Play - Force playsinline and ensure it is in DOM but hidden via style */}
+    <div className="flex flex-col h-full bg-slate-900 text-white relative overflow-hidden">
+      {/* Silent Audio for Background Play */}
       <audio 
         ref={silentAudioRef} 
         src={SILENT_AUDIO} 
@@ -360,14 +360,20 @@ const WalkmanMode: React.FC<Props> = ({ vocabData, courses, voicePrefs }) => {
       />
 
       <div className="absolute inset-0 w-full h-full overflow-hidden pointer-events-none"><div className="absolute top-[-20%] left-[-20%] w-[140%] h-[140%] bg-[radial-gradient(circle,rgba(79,70,229,0.4)_0%,rgba(0,0,0,0)_70%)] opacity-50 blur-3xl animate-pulse-slow"></div></div>
-      <div className="p-6 flex justify-between items-center z-10 relative shrink-0"><button onClick={() => { stopAudioImmediately(); setIsPlaying(false); disableBackgroundAudioHack(); setSelectedCourse(null); }} className="p-2 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-md transition-all"><ArrowLeft size={20} /></button><span className="text-sm font-bold opacity-80 uppercase tracking-widest">Walkman</span><div className="w-10"></div></div>
       
-      {/* Main Container */}
-      <div className="flex-1 overflow-y-auto z-10 w-full scroll-smooth flex flex-col">
-          <div className="flex flex-col items-center flex-1 p-6 max-w-md mx-auto w-full min-h-[300px]">
+      {/* Header - Fixed Top */}
+      <div className="p-6 flex justify-between items-center z-10 relative shrink-0">
+          <button onClick={() => { stopAudioImmediately(); setIsPlaying(false); disableBackgroundAudioHack(); setSelectedCourse(null); }} className="p-2 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-md transition-all"><ArrowLeft size={20} /></button>
+          <span className="text-sm font-bold opacity-80 uppercase tracking-widest">Walkman</span>
+          <div className="w-10"></div>
+      </div>
+      
+      {/* Scrollable Content Area */}
+      <div className="flex-1 overflow-y-auto z-0 w-full scroll-smooth">
+          <div className="flex flex-col items-center p-6 max-w-md mx-auto w-full pb-[340px]">
               
               {/* Playback Status Indicator */}
-              <div className="min-h-[2rem] flex items-center justify-center mb-4 gap-2">
+              <div className="min-h-[2rem] flex items-center justify-center mb-6 gap-2">
                 {isPlaying && repeatCount > 1 && (
                     <div className="bg-indigo-600 text-white text-[10px] font-bold px-3 py-1 rounded-full shadow-lg border border-indigo-400 animate-pulse">
                         播放中: {visualRepeatCount} / {repeatCount}
@@ -382,38 +388,40 @@ const WalkmanMode: React.FC<Props> = ({ vocabData, courses, voicePrefs }) => {
               </div>
 
               {/* Question */}
-              <div className="w-full text-center px-2 mb-4">
-                  <h3 className="text-xl sm:text-2xl font-bold text-indigo-300 leading-relaxed drop-shadow-md whitespace-pre-wrap break-words">
+              <div className="w-full text-center px-2 mb-6">
+                  <h3 className="text-xl sm:text-2xl font-bold text-indigo-200 leading-relaxed drop-shadow-md whitespace-pre-wrap break-words">
                     {currentEntry?.question}
                   </h3>
               </div>
 
               {/* Phonetic */}
               {currentEntry?.phonetic && (
-                <div className="mb-6 px-4 py-1.5 rounded-full bg-white/5 border border-white/10 text-slate-300 font-mono text-sm tracking-wider shadow-sm text-center">
+                <div className="mb-8 px-4 py-2 rounded-full bg-white/5 border border-white/10 text-slate-300 font-mono text-sm tracking-wider shadow-sm text-center">
                     {currentEntry.phonetic}
                 </div>
               )}
               
-              {/* Answer */}
-              <div className="w-full text-center px-2 mb-8 flex-1 flex items-center justify-center">
-                <h2 className="text-3xl sm:text-4xl font-black text-white drop-shadow-xl leading-tight whitespace-pre-wrap break-words">
+              {/* Answer - Sized appropriately and ensuring it doesn't get cut off */}
+              <div className="w-full text-center px-2 mb-8 flex flex-col items-center justify-center min-h-[100px]">
+                <h2 className="text-2xl sm:text-3xl font-black text-white drop-shadow-xl leading-snug whitespace-pre-wrap break-words">
                     {currentEntry?.answer}
                 </h2>
               </div>
               
               <p className="text-slate-500 text-xs font-bold tracking-widest uppercase opacity-70 mb-4">{selectedCourse} • {currentIndex + 1} / {filteredData.length}</p>
           </div>
-          
-          {/* Control Panel - Fixed at bottom of flow */}
-          <div className="w-full shrink-0 p-6 pt-0 max-w-md mx-auto mb-safe">
-              <div className="bg-white/10 backdrop-blur-lg rounded-3xl p-5 border border-white/10 shadow-xl space-y-5">
+      </div>
+      
+      {/* Control Panel - Fixed at bottom */}
+      <div className="absolute bottom-0 left-0 right-0 z-20 w-full p-4 pb-safe bg-gradient-to-t from-slate-900 via-slate-900/95 to-transparent pt-12">
+          <div className="max-w-md mx-auto">
+              <div className="bg-slate-800/80 backdrop-blur-xl rounded-3xl p-5 border border-white/10 shadow-2xl space-y-4">
                   {/* Functional Controls */}
                   <div className="flex flex-col gap-3">
                       <div className="grid grid-cols-2 gap-3">
                             <button onClick={toggleRepeatCount} className="flex items-center justify-center gap-2 bg-white/5 hover:bg-white/10 active:bg-white/20 py-3 rounded-xl transition-all border border-white/5 group">
                                 <span className="p-1.5 bg-indigo-500/30 rounded-full text-indigo-300 group-hover:text-white transition-colors"><RotateCw size={16} /></span>
-                                <span className="text-xs font-bold text-indigo-100">單句重複: {repeatCount} 次</span>
+                                <span className="text-xs font-bold text-indigo-100">重複: {repeatCount}次</span>
                             </button>
                             <button onClick={toggleSpeed} className="flex items-center justify-center gap-2 bg-white/5 hover:bg-white/10 active:bg-white/20 py-3 rounded-xl transition-all border border-white/5 group">
                                 <span className="p-1.5 bg-indigo-500/30 rounded-full text-indigo-300 group-hover:text-white transition-colors"><Clock size={16} /></span>
@@ -422,7 +430,7 @@ const WalkmanMode: React.FC<Props> = ({ vocabData, courses, voicePrefs }) => {
                       </div>
                       <button onClick={togglePlaybackMode} className="w-full flex items-center justify-center gap-2 bg-white/5 hover:bg-white/10 active:bg-white/20 py-3 rounded-xl transition-all border border-white/5 group">
                           <span className="p-1.5 bg-indigo-500/30 rounded-full text-indigo-300 group-hover:text-white transition-colors">{getModeDisplay().icon}</span>
-                          <span className="text-xs font-bold text-indigo-100">播放模式: {getModeDisplay().label}</span>
+                          <span className="text-xs font-bold text-indigo-100">模式: {getModeDisplay().label}</span>
                       </button>
                   </div>
 
@@ -436,6 +444,8 @@ const WalkmanMode: React.FC<Props> = ({ vocabData, courses, voicePrefs }) => {
                   </div>
               </div>
           </div>
+          {/* Safe Area Padding Spacer */}
+          <div className="h-[env(safe-area-inset-bottom)]"></div>
       </div>
     </div>
   );
