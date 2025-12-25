@@ -207,21 +207,26 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
       // 修正：使用 timeslice (200ms) 確保在移動設備上能定期寫入數據，避免錄到空檔案
       mediaRecorderRef.current.start(200);
       
-      // 4. 嘗試啟動辨識 
-      try {
-        if (recognitionRef.current) {
-            try { recognitionRef.current.stop(); } catch(e) {}
-            // 延遲一點點啟動
-            setTimeout(() => {
-                try { 
-                    recognitionRef.current?.start(); 
-                } catch(e) {
-                    console.warn("Speech recognition failed to start (expected on iOS loop):", e);
-                }
-            }, 100);
+      // 4. 嘗試啟動辨識 (僅在使用者手勢觸發時啟動，避免 iOS 循環時搶佔音訊導致錄音失敗)
+      if (isUserGesture) {
+        try {
+            if (recognitionRef.current) {
+                try { recognitionRef.current.stop(); } catch(e) {}
+                setTimeout(() => {
+                    try { 
+                        recognitionRef.current?.start(); 
+                    } catch(e) {
+                        console.warn("Speech recognition failed to start:", e);
+                    }
+                }, 100);
+            }
+        } catch (e) {
+            console.warn("Speech recognition setup failed:", e);
         }
-      } catch (e) {
-        console.warn("Speech recognition setup failed:", e);
+      } else {
+          // 在循環模式下，為了保證 MediaRecorder 錄音正常，我們放棄語音辨識
+          // 因為 iOS 上同時進行這兩者在無手勢情況下極不穩定
+          console.log("Skipping speech recognition in loop to protect audio recording session");
       }
       
       setIsRecording(true);
@@ -262,25 +267,41 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
       await speakTextPromise(currentEntry.answer, 1.0, voicePrefs);
       if (!flowRef.current.active) return;
 
+      // 播放錄音回放 (修正：確保播放完整，不要被錯誤的 timeout 切斷)
       if (audioRef.current) {
           try {
-              const playPromise = audioRef.current.play();
-              if (playPromise !== undefined) {
-                  await playPromise;
-                  await new Promise(r => {
-                      const el = audioRef.current;
-                      if (!el) { r(null); return; }
-                      const onEnd = () => {
-                          el.removeEventListener('ended', onEnd);
-                          r(null);
-                      };
-                      el.addEventListener('ended', onEnd);
-                      setTimeout(r, (el.duration || 5) * 1000 + 1000); 
+              const audio = audioRef.current;
+              // 確保音量正常
+              audio.volume = 1.0; 
+              
+              await new Promise<void>((resolve) => {
+                  const handleEnded = () => {
+                      audio.removeEventListener('ended', handleEnded);
+                      resolve();
+                  };
+                  
+                  // 設定一個足夠長的超時保護 (30秒)，避免因格式錯誤導致永遠不結束
+                  // 不再依賴 duration 計算，因為 Blob 流的 duration 可能是 Infinity
+                  const safetyTimer = setTimeout(() => {
+                      audio.removeEventListener('ended', handleEnded);
+                      resolve();
+                  }, 30000); 
+
+                  audio.addEventListener('ended', () => {
+                      clearTimeout(safetyTimer);
+                      handleEnded();
                   });
-              }
+
+                  audio.play().catch(e => {
+                      console.warn("Auto-play blocked or failed", e);
+                      clearTimeout(safetyTimer);
+                      // 如果播放失敗，稍微等待一下就繼續，避免流程卡死
+                      setTimeout(resolve, 1500); 
+                  });
+              });
+              
           } catch (e) {
-              console.warn("Auto-play blocked", e);
-              await new Promise(r => setTimeout(r, 1500));
+              console.warn("Playback process error", e);
           }
       }
 
