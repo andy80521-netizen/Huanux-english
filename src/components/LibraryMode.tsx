@@ -124,8 +124,11 @@ const LibraryMode: React.FC<Props> = ({ vocabData, courses, onSaveItem, onDelete
     if (!bulkText.trim() || !activeCourse) return;
     setIsProcessing(true);
     const lines = bulkText.split('\n');
+    // 使用當前時間作為基準 ID，確保批量新增時 ID 的連續性和順序
+    const baseId = Date.now();
+    
     try {
-      const processedItems = await Promise.all(lines.map(async (line) => {
+      const processedItems = await Promise.all(lines.map(async (line, index) => {
           const trimmedLine = line.trim();
           if (!trimmedLine) return null;
           let parts: string[] = [];
@@ -137,7 +140,17 @@ const LibraryMode: React.FC<Props> = ({ vocabData, courses, onSaveItem, onDelete
               const answer = parts.slice(1).join(' ').trim();
               if (question && answer) {
                   const ipa = await fetchIPA(answer);
-                  return { course: activeCourse, question, answer, phonetic: ipa ? `/${ipa}/` : '', type: 'Q&A', mastery: 0, listeningMastery: 0, isHidden: false };
+                  return { 
+                      id: baseId + index, // 強制指定 ID 以確保排序與貼上順序一致
+                      course: activeCourse, 
+                      question, 
+                      answer, 
+                      phonetic: ipa ? `/${ipa}/` : '', 
+                      type: 'Q&A', 
+                      mastery: 0, 
+                      listeningMastery: 0, 
+                      isHidden: false 
+                  };
               }
           }
           return null;
@@ -386,7 +399,7 @@ const LibraryMode: React.FC<Props> = ({ vocabData, courses, onSaveItem, onDelete
 
                         {/* List */}
                         <div className="space-y-3 p-4 pt-0">
-                            {filtered.map(item => {
+                            {filtered.map((item, index) => {
                                 const speakInfo = getBadgeInfo(item.mastery, BADGE_LEVELS);
                                 const listenInfo = getBadgeInfo(item.listeningMastery, LISTENING_BADGE_LEVELS);
                                 
@@ -403,6 +416,7 @@ const LibraryMode: React.FC<Props> = ({ vocabData, courses, onSaveItem, onDelete
                                             </div>
                                             <div className="flex-1 min-w-0 cursor-pointer" onClick={() => { setEditingQuestionId(item.id); setQuestionFormData({ question: item.question, answer: item.answer, phonetic: item.phonetic }); setIsEditingQuestion(true); }}>
                                                 <h4 className={`text-base font-bold text-slate-800 dark:text-slate-100 leading-snug mb-1.5 ${item.isHidden ? 'line-through opacity-50 decoration-2 decoration-slate-300' : ''}`}>
+                                                    <span className="text-slate-300 dark:text-slate-600 font-mono text-sm mr-2 select-none">{index + 1}.</span>
                                                     {item.question}
                                                 </h4>
                                                 <p className="text-sm font-medium text-indigo-600 dark:text-indigo-400 font-mono leading-relaxed break-words">
