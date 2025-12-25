@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   ChevronRight, Headphones, PlayCircle, PauseCircle, SkipForward, SkipBack, 
-  RefreshCcw, Activity, Clock, ArrowLeft, RotateCw, List
+  RefreshCcw, Activity, Clock, ArrowLeft, RotateCw, List, Zap
 } from 'lucide-react';
 import { VocabItem } from '../constants';
 import { speakTextPromise } from '../utils';
@@ -31,6 +31,7 @@ const WalkmanMode: React.FC<Props> = ({ vocabData, courses, voicePrefs }) => {
   const flowRef = useRef({ active: false });
   const currentRepeatRef = useRef(0);
   const silentAudioRef = useRef<HTMLAudioElement>(null);
+  const audioContextRef = useRef<AudioContext | null>(null); // Web Audio API Keep-Alive
   const wakeLockRef = useRef<any>(null); // Screen Wake Lock
   
   // 智慧隨機播放池：記錄本輪尚未播放的索引
@@ -71,11 +72,64 @@ const WalkmanMode: React.FC<Props> = ({ vocabData, courses, voicePrefs }) => {
     }
   };
 
+  // Advanced Background Keep-Alive (AudioContext Oscillator)
+  const enableBackgroundAudioHack = () => {
+      try {
+          // 1. Initialize AudioContext if not exists
+          if (!audioContextRef.current) {
+              const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+              if (AudioContext) {
+                  const ctx = new AudioContext();
+                  audioContextRef.current = ctx;
+                  
+                  // Create a silent oscillator to keep the thread active
+                  const osc = ctx.createOscillator();
+                  const gain = ctx.createGain();
+                  
+                  osc.connect(gain);
+                  gain.connect(ctx.destination);
+                  
+                  osc.frequency.value = 20; // Low frequency
+                  gain.gain.value = 0.001; // Extremely low volume (but not zero to avoid OS optimization)
+                  
+                  osc.start();
+                  console.log("Background AudioContext Hack Enabled");
+              }
+          }
+
+          // 2. Resume Context if suspended
+          if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+              audioContextRef.current.resume();
+          }
+
+          // 3. Play HTML5 Audio element
+          if (silentAudioRef.current) {
+              silentAudioRef.current.volume = 0.01; // Non-zero volume
+              silentAudioRef.current.play().catch(e => console.warn("Silent audio play failed", e));
+          }
+      } catch (e) {
+          console.error("Failed to enable background audio hack", e);
+      }
+  };
+
+  const disableBackgroundAudioHack = () => {
+      if (audioContextRef.current) {
+          audioContextRef.current.suspend();
+      }
+      if (silentAudioRef.current) {
+          silentAudioRef.current.pause();
+      }
+  };
+
   // Re-acquire wake lock on visibility change
   useEffect(() => {
     const handleVisibilityChange = () => {
        if (document.visibilityState === 'visible' && isPlaying) {
            requestWakeLock();
+           // Re-trigger audio context if user comes back
+           if (audioContextRef.current?.state === 'suspended') {
+               audioContextRef.current.resume();
+           }
        }
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -121,6 +175,9 @@ const WalkmanMode: React.FC<Props> = ({ vocabData, courses, voicePrefs }) => {
               title: currentEntry.question,
               artist: 'Huanux ENGLISH',
               album: selectedCourse || '',
+              artwork: [
+                { src: 'https://cdn-icons-png.flaticon.com/512/3845/3845868.png', sizes: '512x512', type: 'image/png' }
+              ]
           });
           
           navigator.mediaSession.setActionHandler('play', () => { togglePlayPause(); });
@@ -128,7 +185,7 @@ const WalkmanMode: React.FC<Props> = ({ vocabData, courses, voicePrefs }) => {
           navigator.mediaSession.setActionHandler('previoustrack', handlePrev);
           navigator.mediaSession.setActionHandler('nexttrack', handleNext);
       }
-  }, [currentEntry, selectedCourse]); // Remove isPlaying dependency to avoid loop
+  }, [currentEntry, selectedCourse]);
 
   useEffect(() => {
       stopAudioImmediately();
@@ -140,7 +197,7 @@ const WalkmanMode: React.FC<Props> = ({ vocabData, courses, voicePrefs }) => {
              currentRepeatRef.current = 0; 
              setVisualRepeatCount(1);      
              runPlaybackCycle();
-          }, 50);
+          }, 100); // Increased delay slightly for stability
       }
 
       return () => {
@@ -152,9 +209,9 @@ const WalkmanMode: React.FC<Props> = ({ vocabData, courses, voicePrefs }) => {
   const runPlaybackCycle = async () => {
       if (!currentEntry) return;
       
-      // Ensure silent audio is playing for timing in background
-      if (silentAudioRef.current && silentAudioRef.current.paused) {
-          silentAudioRef.current.play().catch(() => {});
+      // Keep-Alive Check: Ensure background hack is active during cycles
+      if (isPlaying && (!audioContextRef.current || audioContextRef.current.state === 'suspended')) {
+          enableBackgroundAudioHack();
       }
 
       await speakTextPromise(currentEntry.question, playbackSpeed, voicePrefs);
@@ -255,16 +312,12 @@ const WalkmanMode: React.FC<Props> = ({ vocabData, courses, voicePrefs }) => {
       if (isPlaying) {
           stopAudioImmediately();
           setIsPlaying(false);
+          disableBackgroundAudioHack();
           releaseWakeLock();
-          if (silentAudioRef.current) silentAudioRef.current.pause();
       } else {
           setIsPlaying(true);
           requestWakeLock();
-          // Important: Play silent audio on user interaction to whitelist the audio context
-          if (silentAudioRef.current) {
-              silentAudioRef.current.volume = 0.1;
-              silentAudioRef.current.play().catch(e => console.warn("Background audio blocked", e));
-          }
+          enableBackgroundAudioHack(); // Critical: Start the hack on user interaction
       }
   };
 
@@ -307,23 +360,23 @@ const WalkmanMode: React.FC<Props> = ({ vocabData, courses, voicePrefs }) => {
       />
 
       <div className="absolute inset-0 w-full h-full overflow-hidden pointer-events-none"><div className="absolute top-[-20%] left-[-20%] w-[140%] h-[140%] bg-[radial-gradient(circle,rgba(79,70,229,0.4)_0%,rgba(0,0,0,0)_70%)] opacity-50 blur-3xl animate-pulse-slow"></div></div>
-      <div className="p-6 flex justify-between items-center z-10 relative shrink-0"><button onClick={() => { stopAudioImmediately(); setIsPlaying(false); setSelectedCourse(null); }} className="p-2 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-md transition-all"><ArrowLeft size={20} /></button><span className="text-sm font-bold opacity-80 uppercase tracking-widest">Walkman</span><div className="w-10"></div></div>
+      <div className="p-6 flex justify-between items-center z-10 relative shrink-0"><button onClick={() => { stopAudioImmediately(); setIsPlaying(false); disableBackgroundAudioHack(); setSelectedCourse(null); }} className="p-2 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-md transition-all"><ArrowLeft size={20} /></button><span className="text-sm font-bold opacity-80 uppercase tracking-widest">Walkman</span><div className="w-10"></div></div>
       
       {/* Main Container */}
       <div className="flex-1 overflow-y-auto z-10 w-full scroll-smooth flex flex-col">
           <div className="flex flex-col items-center flex-1 p-6 max-w-md mx-auto w-full min-h-[300px]">
               
               {/* Playback Status Indicator */}
-              <div className="min-h-[2rem] flex items-center justify-center mb-4">
+              <div className="min-h-[2rem] flex items-center justify-center mb-4 gap-2">
                 {isPlaying && repeatCount > 1 && (
                     <div className="bg-indigo-600 text-white text-[10px] font-bold px-3 py-1 rounded-full shadow-lg border border-indigo-400 animate-pulse">
                         播放中: {visualRepeatCount} / {repeatCount}
                     </div>
                 )}
                 {isPlaying && (
-                    <div className="flex items-center gap-1.5 bg-green-500/20 px-3 py-1 rounded-full border border-green-500/30 ml-2">
-                        <Activity size={10} className="text-green-400 animate-pulse" />
-                        <span className="text-[10px] text-green-300 font-bold">Wake Lock On</span>
+                    <div className="flex items-center gap-1.5 bg-green-500/20 px-3 py-1 rounded-full border border-green-500/30">
+                        <Zap size={10} className="text-green-400 animate-pulse" />
+                        <span className="text-[10px] text-green-300 font-bold">背景播放模式</span>
                     </div>
                 )}
               </div>
