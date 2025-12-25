@@ -27,131 +27,131 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
   const [audioURL, setAudioURL] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   
+  // Resources
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
+  const streamRef = useRef<MediaStream | null>(null); // Persistent Microphone Stream
   const audioChunksRef = useRef<Blob[]>([]);
-  const transcriptRef = useRef<string>(''); // Thread 1: Real-time transcript
+  const transcriptRef = useRef<string>(''); 
   const recognitionRef = useRef<any>(null);
   const flowRef = useRef({ active: false });
   const audioRef = useRef<HTMLAudioElement>(null);
-  const silentAudioRef = useRef<HTMLAudioElement>(null); // iOS Keep-Alive Player
+  const silentAudioRef = useRef<HTMLAudioElement>(null);
 
   const filteredData = useMemo(() => { return coachCourse ? vocabData.filter(v => v.course === coachCourse && !v.isHidden) : []; }, [vocabData, coachCourse]);
   const currentEntry = filteredData.length > 0 ? filteredData[currentIndex] : null;
 
+  // Initialize Speech Recognition
   useEffect(() => {
-    // Thread 1 Setup: Speech Recognition (Dedicated to Scoring)
     if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
         const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-        recognitionRef.current = new SpeechRecognition();
-        recognitionRef.current.continuous = true; // Changed to true to capture stream continuously
-        recognitionRef.current.interimResults = true;
-        recognitionRef.current.lang = 'en-US';
-        recognitionRef.current.onresult = (event: any) => {
-            let finalTranscript = '';
-            for (let i = event.resultIndex; i < event.results.length; ++i) {
-                if (event.results[i].isFinal) finalTranscript += event.results[i][0].transcript;
-            }
-            // Fallback for Android which sometimes doesn't mark isFinal correctly in short sessions
-            if (!finalTranscript && event.results.length > 0) {
-                 const lastResult = event.results[event.results.length - 1];
-                 finalTranscript = lastResult[0].transcript;
-            }
-            if (finalTranscript) {
-                console.log("Thread 1 (Scoring) detected:", finalTranscript);
-                transcriptRef.current = finalTranscript;
-            }
-        };
-        recognitionRef.current.onerror = (event: any) => {
-             console.warn("Speech recognition error", event.error);
-        };
+        try {
+            recognitionRef.current = new SpeechRecognition();
+            recognitionRef.current.continuous = true; // Continuous to catch phrases better
+            recognitionRef.current.interimResults = true;
+            recognitionRef.current.lang = 'en-US';
+            
+            recognitionRef.current.onresult = (event: any) => {
+                let finalTranscript = '';
+                let interimTranscript = '';
+                
+                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    if (event.results[i].isFinal) {
+                        finalTranscript += event.results[i][0].transcript;
+                    } else {
+                        interimTranscript += event.results[i][0].transcript;
+                    }
+                }
+                
+                // Prefer final, fallback to interim
+                const txt = finalTranscript || interimTranscript;
+                if (txt) {
+                    transcriptRef.current = txt;
+                    // Debugging log for scoring thread
+                    // console.log("Thread A (Scoring) Update:", txt);
+                }
+            };
+
+            recognitionRef.current.onerror = (event: any) => {
+                // Ignore errors here, we want the flow to continue even if scoring fails
+                // console.warn("Thread A (Scoring) Error:", event.error);
+            };
+        } catch (e) {
+            console.warn("Speech Recognition not supported properly");
+        }
     }
-    // Component unmount cleanup
+    
     return () => {
-        stopFlow();
-        fullReleaseMicrophone(); // Ensure hardware is released on unmount
+        stopFlow(true); // cleanup: force release
     };
   }, []);
 
-  // Watch index changes for auto loop
+  // Watch index for auto-loop triggers
   useEffect(() => {
     if ((isAutoLoop || isRandomLoop) && isPlayingFlow && flowRef.current.active && filteredData.length > 0) {
       const timer = setTimeout(() => {
-        startFlow(false); // Pass false to indicate this is a loop iteration (no user gesture)
+        startFlow(false); // Pass false: This is an automatic iteration (no gesture)
       }, 1000); 
       return () => clearTimeout(timer);
     }
   }, [currentIndex]);
 
   const calculateFinalScores = (userText: string, targetText: string, durationSec: number) => {
-      // 確保即使沒收到辨識結果，如果是 iOS 循環模式，也給使用者一個"回放模式"的體驗，但不給分
-      if (!userText || userText.trim().length === 0) return { pronunciation: 0, fluency: 0, stress: 0, total: 0 };
+      // Robust scoring that doesn't crash on empty input
+      if (!userText || userText.trim().length === 0) {
+          // If silence, return 0 but allow flow to continue
+          return { pronunciation: 0, fluency: 0, stress: 0, total: 0 };
+      }
       
       const pronunciationScore = calculateSimilarity(userText, targetText);
-      
-      // 改進的流利度演算法：針對單字題給予寬容度
       const targetWordCount = targetText.split(/\s+/).length;
       const userWordCount = userText.split(/\s+/).length;
       
       let fluencyScore = 100;
-      
-      if (targetWordCount === 1) {
-          // 單字題：只要辨識出的字相似度高，流利度就給高，忽略時間長短 (只要不超過極限)
-          if (pronunciationScore > 80) fluencyScore = 100;
-          else if (pronunciationScore > 50) fluencyScore = 80;
-          else fluencyScore = 40;
+      if (targetWordCount <= 1) {
+          // Single word logic: lenient on time
+          fluencyScore = pronunciationScore > 60 ? 100 : 50;
       } else {
-          // 句子題：保留時間計算
+          // Sentence logic: time based
           const idealMinTime = targetWordCount * 0.4; 
           const idealMaxTime = targetWordCount * 0.8 + 1.5; 
           if (durationSec > idealMaxTime) fluencyScore -= (durationSec - idealMaxTime) * 10; 
           else if (durationSec < idealMinTime) fluencyScore -= (idealMinTime - durationSec) * 20; 
-          
-          // 根據字數完成度打折
           fluencyScore = Math.round(fluencyScore * Math.min(1, userWordCount / targetWordCount));
       }
-      
       fluencyScore = Math.max(0, Math.min(100, fluencyScore));
 
-      // 語調重音 (模擬)：根據發音與流利度的加權
       let stressScore = Math.round(pronunciationScore * 0.7 + fluencyScore * 0.3);
-      if (pronunciationScore > 90) stressScore = Math.min(100, stressScore + 5); // 獎勵高分
+      if (pronunciationScore > 90) stressScore = Math.min(100, stressScore + 5);
 
       const totalScore = Math.round((pronunciationScore + fluencyScore + stressScore) / 3);
-      
-      console.log(`Scoring - Text: "${userText}" vs "${targetText}". Scores: P=${pronunciationScore}, F=${fluencyScore}, S=${stressScore}`);
-      
       return { pronunciation: pronunciationScore, fluency: fluencyScore, stress: stressScore, total: totalScore };
   };
 
   const getSupportedMimeType = () => {
-    const types = [
-      'audio/webm;codecs=opus',
-      'audio/webm',
-      'audio/mp4',
-      'audio/ogg',
-      'audio/aac',
-    ];
+    const types = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/aac'];
     for (const type of types) {
-      if (MediaRecorder.isTypeSupported(type)) {
-        return type;
-      }
+      if (MediaRecorder.isTypeSupported(type)) return type;
     }
     return '';
   };
 
-  // 初始化或獲取現有的麥克風流
-  const getPersistentStream = async () => {
-      // 檢查流是否活躍
-      if (streamRef.current && streamRef.current.active && streamRef.current.getAudioTracks().some(t => t.readyState === 'live')) {
-          return streamRef.current;
+  // --- Thread B: Stream Management ---
+  const ensureMicrophoneStream = async () => {
+      // 1. Check if existing stream is still alive
+      if (streamRef.current && streamRef.current.active) {
+          const audioTracks = streamRef.current.getAudioTracks();
+          if (audioTracks.length > 0 && audioTracks[0].readyState === 'live') {
+              // console.log("Reusing existing microphone stream");
+              return streamRef.current;
+          }
       }
-      
+
+      // 2. If dead or missing, get new one
       try {
+          // console.log("Acquiring new microphone stream...");
           const stream = await navigator.mediaDevices.getUserMedia({ 
             audio: {
-                // 關閉回音消除通常能解決「錄不到聲音」或「聲音斷斷續續」的問題，因為系統不會過度介入
-                echoCancellation: false, 
+                echoCancellation: false, // Important for quality
                 noiseSuppression: true,
                 autoGainControl: true
             } 
@@ -159,17 +159,14 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
           streamRef.current = stream;
           return stream;
       } catch (e) {
-          console.error("Microphone permission denied or error", e);
+          console.error("Microphone access failed:", e);
           throw e;
       }
   };
 
-  // 真正釋放麥克風 (只在停止測驗時呼叫)
-  const fullReleaseMicrophone = () => {
+  const releaseMicrophone = () => {
     if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => {
-            try { track.stop(); } catch(e) { console.warn('Failed to stop track', e); }
-        });
+        streamRef.current.getTracks().forEach(track => track.stop());
         streamRef.current = null;
     }
   };
@@ -177,119 +174,125 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
   const startFlow = async (isUserGesture = true) => {
     if (!currentEntry || isRecording) return;
     
-    // [iOS Hack] 1. 確保無聲音樂在播放 (保活 Audio Session)
-    if (silentAudioRef.current && silentAudioRef.current.paused) {
-        silentAudioRef.current.play().catch(e => console.warn("Silent audio blocked", e));
+    // 0. Environment Prep
+    if (isUserGesture && silentAudioRef.current && silentAudioRef.current.paused) {
+        silentAudioRef.current.play().catch(() => {});
     }
     
     flowRef.current.active = true; 
     setIsPlayingFlow(true); 
     setShowResult(false); 
     setAudioURL(null);
-    if (audioRef.current) {
-        audioRef.current.src = "";
-    }
-    transcriptRef.current = '';
+    transcriptRef.current = ''; // Reset Thread A Data
+    audioChunksRef.current = []; // Reset Thread B Data
     
     try {
+      // 1. Phase: Read Question
       setPhase('reading_question'); 
       await speakTextPromise(currentEntry.question, 1.0, voicePrefs); 
       if (!flowRef.current.active) return;
 
+      // 2. Phase: Recording Setup
       setPhase('recording');
       
-      // [Thread Setup] 獲取音訊流 (供兩條線共用，但邏輯分離)
-      let stream;
-      if (isUserGesture) {
-          fullReleaseMicrophone();
-          stream = await getPersistentStream();
-      } else {
-          stream = await getPersistentStream(); 
-      }
-      
-      // Thread 1: Start MediaRecorder (錄音存檔線)
-      const mimeType = getSupportedMimeType();
-      const options = mimeType ? { mimeType } : undefined;
-      mediaRecorderRef.current = new MediaRecorder(stream, options);
-      
-      audioChunksRef.current = [];
-      mediaRecorderRef.current.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) {
-            audioChunksRef.current.push(e.data);
-        }
-      };
-      
-      const onStopPromise = new Promise<string>((resolve) => {
-        if (mediaRecorderRef.current) {
-          mediaRecorderRef.current.onstop = () => {
-            const recordedType = mediaRecorderRef.current?.mimeType || 'audio/webm';
-            const audioBlob = new Blob(audioChunksRef.current, { type: recordedType });
-            const url = URL.createObjectURL(audioBlob);
-            setAudioURL(url);
-            
-            if (audioRef.current) {
-                audioRef.current.src = url;
-                audioRef.current.load();
-            }
-            resolve(url);
-          };
-        } else resolve('');
-      });
-
-      // 啟動錄音器 (每 200ms 切片防止丟失)
-      mediaRecorderRef.current.start(200);
-      
-      // Thread 2: Start SpeechRecognition (即時評分線)
-      // 只有在手勢觸發時才啟動這條線，因為 iOS 循環時 Speech API 容易中斷音訊流
-      // 如果是循環模式，我們僅依賴錄音功能，評分可能為 0 或顯示 "Review Mode"
-      if (isUserGesture) {
-        try {
-            if (recognitionRef.current) {
-                try { recognitionRef.current.stop(); } catch(e) {}
-                setTimeout(() => {
-                    try { 
-                        recognitionRef.current?.start(); 
-                    } catch(e) {
-                        console.warn("Speech recognition failed to start:", e);
-                    }
-                }, 100);
-            }
-        } catch (e) {
-            console.warn("Speech recognition setup failed:", e);
-        }
-      } else {
-          console.log("Thread 1 (Scoring) skipped in auto-loop to protect Thread 2 (Recording)");
-      }
-      
-      setIsRecording(true);
-      
+      // Calculate duration dynamically
       const wordCount = currentEntry.answer.split(' ').length;
-      const recordDuration = Math.max(3000, (wordCount * 800) + 2000);
-      const startTime = Date.now();
+      const recordDuration = Math.max(3000, (wordCount * 800) + 1500);
+
+      // --- START PARALLEL THREADS ---
       
-      // 等待錄音時間
+      // Get Stream (Shared Resource)
+      // Note: We try to reuse stream to prevent mobile browser freezing
+      const stream = await ensureMicrophoneStream();
+
+      // Thread A: Scoring (Speech Recognition)
+      // We wrap this in a separate block so failure doesn't stop recording
+      const startRecognition = () => {
+          if (!recognitionRef.current) return;
+          try {
+              // Always stop before start to prevent "already started" errors
+              recognitionRef.current.abort(); 
+          } catch(e) {}
+          
+          setTimeout(() => {
+             if (!flowRef.current.active) return;
+             try {
+                 recognitionRef.current.start();
+                 // console.log("Thread A Started");
+             } catch(e) {
+                 // On mobile auto-loop, this might fail. We ignore it.
+                 // The app will just score 0, but recording will work.
+                 console.warn("Thread A failed to start (expected on mobile loop):", e);
+             }
+          }, 50);
+      };
+
+      // Thread B: Recording (MediaRecorder)
+      const startRecorder = () => {
+          const mimeType = getSupportedMimeType();
+          const options = mimeType ? { mimeType } : undefined;
+          
+          try {
+              mediaRecorderRef.current = new MediaRecorder(stream, options);
+              mediaRecorderRef.current.ondataavailable = (e) => {
+                if (e.data && e.data.size > 0) audioChunksRef.current.push(e.data);
+              };
+              // Timeslice 200ms to ensure data is written even if crashed
+              mediaRecorderRef.current.start(200); 
+              // console.log("Thread B Started");
+          } catch (e) {
+              console.error("Thread B failed:", e);
+          }
+      };
+
+      // Execute Threads
+      startRecognition();
+      startRecorder();
+      setIsRecording(true);
+
+      const startTime = Date.now();
+
+      // 3. Wait for Recording Duration
       await new Promise(r => setTimeout(r, recordDuration));
       
-      // --- 錄音結束 (停止兩條線) ---
+      // --- STOP PARALLEL THREADS ---
       setIsRecording(false);
       
-      try { recognitionRef.current?.stop(); } catch(e) {} // Stop Thread 1
+      // Stop Thread A
+      try { recognitionRef.current?.stop(); } catch(e) {}
       
+      // Stop Thread B
+      let blobUrl = '';
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-          mediaRecorderRef.current.stop(); // Stop Thread 2
+          await new Promise<void>(resolve => {
+              if (!mediaRecorderRef.current) { resolve(); return; }
+              mediaRecorderRef.current.onstop = () => {
+                  const recordedType = mediaRecorderRef.current?.mimeType || 'audio/webm';
+                  const audioBlob = new Blob(audioChunksRef.current, { type: recordedType });
+                  blobUrl = URL.createObjectURL(audioBlob);
+                  setAudioURL(blobUrl);
+                  
+                  if (audioRef.current) {
+                      audioRef.current.src = blobUrl;
+                      audioRef.current.load();
+                  }
+                  resolve();
+              };
+              mediaRecorderRef.current.stop();
+          });
       }
-      
-      // 等待錄音檔案生成 (Thread 2 完成)
-      await onStopPromise;
-      
-      const durationSec = (Date.now() - startTime) / 1000;
+
+      // DO NOT release microphone stream here during loops. 
+      // Keeping it active fixes the "2nd question silence" bug on mobile.
+
       if (!flowRef.current.active) return;
 
-      // --- 評分階段 ---
+      // 4. Scoring Phase
       setPhase('scoring');
-      await new Promise(r => setTimeout(r, 600));
+      const durationSec = (Date.now() - startTime) / 1000;
+      await new Promise(r => setTimeout(r, 500));
       
-      // 使用 Thread 1 收集到的 transcriptRef 進行評分
+      // Calculate using data from Thread A
       const finalScores = calculateFinalScores(transcriptRef.current, currentEntry.answer, durationSec);
       setScores(finalScores);
       
@@ -299,97 +302,95 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
 
       setShowResult(true);
 
-      // --- 回放階段 (先播正確答案 -> 再播使用者錄音) ---
+      // 5. Review Phase
       setPhase('reviewing'); 
       
-      // 1. 播放正確答案
+      // Play Target Audio
       await speakTextPromise(currentEntry.answer, 1.0, voicePrefs);
       if (!flowRef.current.active) return;
 
-      // 2. 播放使用者錄音 (Thread 2 的產物)
-      if (audioRef.current) {
+      // Play User Recording (Thread B Result)
+      if (audioRef.current && blobUrl) {
           try {
-              const audio = audioRef.current;
-              audio.volume = 1.0; 
-              
+              audioRef.current.volume = 1.0;
               await new Promise<void>((resolve) => {
-                  const handleEnded = () => {
-                      audio.removeEventListener('ended', handleEnded);
+                  const el = audioRef.current;
+                  if (!el) { resolve(); return; }
+                  
+                  const onEnded = () => {
+                      el.removeEventListener('ended', onEnded);
                       resolve();
                   };
                   
-                  // 安全計時器
-                  const safetyTimer = setTimeout(() => {
-                      audio.removeEventListener('ended', handleEnded);
+                  // Safety timeout in case ended event doesn't fire
+                  const safety = setTimeout(() => {
+                      el.removeEventListener('ended', onEnded);
                       resolve();
-                  }, 30000); 
+                  }, 30000);
 
-                  audio.addEventListener('ended', () => {
-                      clearTimeout(safetyTimer);
-                      handleEnded();
-                  });
-
-                  audio.play().catch(e => {
-                      console.warn("Auto-play blocked or failed", e);
-                      clearTimeout(safetyTimer);
-                      setTimeout(resolve, 1500); 
+                  el.addEventListener('ended', onEnded);
+                  
+                  el.play().catch(e => {
+                      console.warn("Autoplay blocked", e);
+                      clearTimeout(safety);
+                      setTimeout(resolve, 1000);
                   });
               });
-              
           } catch (e) {
-              console.warn("Playback process error", e);
+              console.warn("Audio playback error", e);
           }
       }
 
       if (!flowRef.current.active) return;
 
+      // 6. Next Step Logic
       if (isAutoLoop || isRandomLoop) {
           setPhase('idle');
-          await new Promise(r => setTimeout(r, 1200));
+          await new Promise(r => setTimeout(r, 1000));
           if (isRandomLoop) handleRandomNext();
           else handleNext();
       } else {
-          setIsPlayingFlow(false);
-          setPhase('idle');
-          fullReleaseMicrophone();
-          if (silentAudioRef.current) silentAudioRef.current.pause();
+          stopFlow(false); // End of single flow
       }
+
     } catch(e) { 
-      console.error("Speaking coach flow error:", e);
-      stopFlow();
+      console.error("Flow Error:", e);
+      stopFlow(true);
     }
   };
 
-  const stopFlow = () => { 
+  const stopFlow = (fullyRelease = true) => { 
     flowRef.current.active = false; 
     setIsPlayingFlow(false); 
     setPhase('idle'); 
     setIsRecording(false);
     window.speechSynthesis.cancel(); 
+    
     try {
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
           mediaRecorderRef.current.stop();
       }
-      recognitionRef.current?.abort();
+      if (recognitionRef.current) recognitionRef.current.abort();
       
-      // 只有在完全停止測驗時，才真正釋放硬體資源
-      fullReleaseMicrophone();
-      
-      // 停止無聲音樂
       if (silentAudioRef.current) {
           silentAudioRef.current.pause();
           silentAudioRef.current.currentTime = 0;
       }
-
+      
       if (audioRef.current) {
           audioRef.current.pause();
           audioRef.current.currentTime = 0;
+      }
+
+      // Only fully release hardware if user explicitly stops or leaves
+      if (fullyRelease) {
+          releaseMicrophone();
       }
     } catch(e) { console.warn(e); }
   };
 
   const handleNext = () => {
-    // 這裡不 call stopFlow，保持狀態
+    // Just change index, let the useEffect trigger the next flow
     window.speechSynthesis.cancel();
     setPhase('idle');
     setShowResult(false);
@@ -398,7 +399,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
   };
 
   const handlePrev = () => {
-    stopFlow(); 
+    stopFlow(true); 
     setPhase('idle');
     setShowResult(false);
     setAudioURL(null);
@@ -433,7 +434,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
       <div className="bg-white dark:bg-slate-900 p-4 shadow-sm sticky top-0 z-10">
         <div className="flex justify-between items-center mb-4">
            <div className="flex items-center gap-2 flex-1 min-w-0">
-             <button onClick={() => { stopFlow(); setCoachCourse(null); }} className="p-1 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 shrink-0"><ArrowLeft size={20} className="text-slate-500 dark:text-slate-400"/></button>
+             <button onClick={() => { stopFlow(true); setCoachCourse(null); }} className="p-1 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 shrink-0"><ArrowLeft size={20} className="text-slate-500 dark:text-slate-400"/></button>
              <span className="text-xs font-bold text-slate-400 dark:text-slate-500 bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded truncate">{coachCourse}</span>
            </div>
 
@@ -446,7 +447,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
              </div>
              <select 
                 value={currentIndex} 
-                onChange={(e) => { stopFlow(); setCurrentIndex(Number(e.target.value)); }} 
+                onChange={(e) => { stopFlow(true); setCurrentIndex(Number(e.target.value)); }} 
                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
              >
                {filteredData.map((item, index) => (
@@ -457,8 +458,8 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
         </div>
         <div className="flex items-center justify-between gap-2">
             {!isAutoLoop && !isRandomLoop && <button onClick={handlePrev} className="px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"><SkipBack size={20} /></button>}
-            <button onClick={() => { setIsAutoLoop(!isAutoLoop); setIsRandomLoop(false); if(isPlayingFlow) stopFlow(); }} className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold transition-all ${isAutoLoop ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200 dark:shadow-none' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'}`}><RefreshCcw size={18} className={isAutoLoop ? 'animate-spin-slow' : ''} />自動</button>
-            <button onClick={() => { setIsRandomLoop(!isRandomLoop); setIsAutoLoop(false); if(isPlayingFlow) stopFlow(); }} className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold transition-all ${isRandomLoop ? 'bg-purple-600 text-white shadow-lg shadow-purple-200 dark:shadow-none' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'}`}><Shuffle size={18} />隨機</button>
+            <button onClick={() => { setIsAutoLoop(!isAutoLoop); setIsRandomLoop(false); if(isPlayingFlow) stopFlow(true); }} className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold transition-all ${isAutoLoop ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200 dark:shadow-none' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'}`}><RefreshCcw size={18} className={isAutoLoop ? 'animate-spin-slow' : ''} />自動</button>
+            <button onClick={() => { setIsRandomLoop(!isRandomLoop); setIsAutoLoop(false); if(isPlayingFlow) stopFlow(true); }} className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold transition-all ${isRandomLoop ? 'bg-purple-600 text-white shadow-lg shadow-purple-200 dark:shadow-none' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'}`}><Shuffle size={18} />隨機</button>
             {!isAutoLoop && !isRandomLoop && <button onClick={handleNext} className="px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"><SkipForward size={20} /></button>}
         </div>
       </div>
@@ -524,7 +525,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
         </div>
 
         <button 
-          onClick={() => isPlayingFlow ? stopFlow() : startFlow(true)} 
+          onClick={() => isPlayingFlow ? stopFlow(true) : startFlow(true)} 
           className={`w-full max-w-md py-4 rounded-2xl font-bold text-lg shadow-xl transition-all flex items-center justify-center gap-3 ${isPlayingFlow ? 'bg-red-50 dark:bg-red-900/20 text-red-500 dark:text-red-400 border border-red-100 dark:border-red-900' : 'bg-indigo-600 text-white shadow-indigo-200 dark:shadow-none hover:scale-105 active:scale-95'}`}
         >
           {isPlayingFlow ? <><StopCircle /> 停止測驗</> : <><PlayCircle /> 開始測驗</>}
@@ -533,7 +534,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
         {(isAutoLoop || isRandomLoop) && isPlayingFlow && (
           <div className="mt-4 flex flex-col items-center gap-2">
              <p className="text-xs font-bold text-slate-400 dark:text-slate-500 flex items-center gap-1 animate-pulse"><Activity size={12} /> {isAutoLoop ? '自動' : '隨機'}模式：完成複習後自動跳轉</p>
-             <button onClick={stopFlow} className="text-[10px] text-indigo-500 dark:text-indigo-400 font-bold hover:underline">取消循環</button>
+             <button onClick={() => stopFlow(true)} className="text-[10px] text-indigo-500 dark:text-indigo-400 font-bold hover:underline">取消循環</button>
           </div>
         )}
       </div>
