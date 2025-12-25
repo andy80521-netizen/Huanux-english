@@ -63,7 +63,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
     if ((isAutoLoop || isRandomLoop) && isPlayingFlow && flowRef.current.active && filteredData.length > 0) {
       const timer = setTimeout(() => {
         startFlow();
-      }, 800); // 稍微增加延遲，讓音訊系統有時間重置
+      }, 1000); // 增加延遲到 1秒，確保手機音訊系統有足夠時間重置狀態
       return () => clearTimeout(timer);
     }
   }, [currentIndex]);
@@ -102,10 +102,11 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
   };
 
   // 關鍵修復：釋放麥克風硬體資源
+  // 這能解決手機上錄音後音量變小(ducking)以及下一題錄不到聲音(resource lock)的問題
   const releaseMicrophone = () => {
     if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => {
-            try { track.stop(); } catch(e) {}
+            try { track.stop(); } catch(e) { console.warn('Failed to stop track', e); }
         });
         streamRef.current = null;
     }
@@ -114,7 +115,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
   const startFlow = async () => {
     if (!currentEntry || isRecording) return;
     
-    // 確保上一輪的資源已清理
+    // 確保上一輪的資源已清理，防止資源衝突
     releaseMicrophone();
     
     flowRef.current.active = true; 
@@ -215,7 +216,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
       setShowResult(true);
 
       setPhase('reviewing'); 
-      // 麥克風已釋放，這裡的播放音量應該恢復正常
+      // 麥克風已釋放，這裡的播放音量應該已恢復正常 (不再被 ducking)
       await speakTextPromise(currentEntry.answer, 1.0, voicePrefs);
       if (!flowRef.current.active) return;
 
