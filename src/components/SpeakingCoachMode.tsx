@@ -25,6 +25,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
   const [isRecording, setIsRecording] = useState(false);
   
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null); // 新增：用於追蹤並關閉麥克風硬體
   const audioChunksRef = useRef<Blob[]>([]);
   const transcriptRef = useRef<string>('');
   const recognitionRef = useRef<any>(null);
@@ -49,6 +50,10 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
             if (!finalTranscript && event.results.length > 0) finalTranscript = event.results[0][0].transcript;
             if (finalTranscript) transcriptRef.current = finalTranscript;
         };
+        // Add onerror handler to catch other potential errors silently
+        recognitionRef.current.onerror = (event: any) => {
+             // console.warn('Speech recognition error', event.error);
+        };
     }
     return () => stopFlow();
   }, []);
@@ -58,7 +63,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
     if ((isAutoLoop || isRandomLoop) && isPlayingFlow && flowRef.current.active && filteredData.length > 0) {
       const timer = setTimeout(() => {
         startFlow();
-      }, 600);
+      }, 800); // 稍微增加延遲，讓音訊系統有時間重置
       return () => clearTimeout(timer);
     }
   }, [currentIndex]);
@@ -96,8 +101,21 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
     return ''; // 讓瀏覽器使用預設值
   };
 
+  // 關鍵修復：釋放麥克風硬體資源
+  const releaseMicrophone = () => {
+    if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => {
+            try { track.stop(); } catch(e) {}
+        });
+        streamRef.current = null;
+    }
+  };
+
   const startFlow = async () => {
     if (!currentEntry || isRecording) return;
+    
+    // 確保上一輪的資源已清理
+    releaseMicrophone();
     
     flowRef.current.active = true; 
     setIsPlayingFlow(true); 
@@ -114,7 +132,10 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
       if (!flowRef.current.active) return;
 
       setPhase('recording');
+      
+      // 請求新的麥克風權限
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream; // 存入 Ref 以便後續關閉
       
       // 使用支援的 MIME Type 建立 MediaRecorder
       const mimeType = getSupportedMimeType();
@@ -135,7 +156,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
             const url = URL.createObjectURL(audioBlob);
             setAudioURL(url);
             
-            // 重要：直接操作 DOM 元素設置 src，避免 React 渲染延遲導致 element 為 null
+            // 重要：直接操作 DOM 元素設置 src
             if (audioRef.current) {
                 audioRef.current.src = url;
                 audioRef.current.load();
@@ -146,7 +167,14 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
       });
 
       mediaRecorderRef.current.start();
-      recognitionRef.current?.start();
+      
+      try {
+        // 防止 "recognition has already started" 錯誤
+        recognitionRef.current?.start();
+      } catch (e) {
+        console.warn("Speech recognition start ignored:", e);
+      }
+      
       setIsRecording(true);
       
       const wordCount = currentEntry.answer.split(' ').length;
@@ -155,10 +183,21 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
       
       await new Promise(r => setTimeout(r, recordDuration));
       
+      // --- 錄音結束處理 ---
       setIsRecording(false);
-      recognitionRef.current?.stop();
-      mediaRecorderRef.current?.stop();
       
+      // 1. 停止辨識
+      try { recognitionRef.current?.stop(); } catch(e) {}
+      
+      // 2. 停止錄音器
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+          mediaRecorderRef.current.stop();
+      }
+      
+      // 3. 關鍵修復：立即釋放麥克風硬體
+      // 這會讓手機退出「通話模式」，恢復正常音量，並釋放硬體給下一次使用
+      releaseMicrophone();
+
       await onStopPromise;
       const durationSec = (Date.now() - startTime) / 1000;
       if (!flowRef.current.active) return;
@@ -176,17 +215,16 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
       setShowResult(true);
 
       setPhase('reviewing'); 
+      // 麥克風已釋放，這裡的播放音量應該恢復正常
       await speakTextPromise(currentEntry.answer, 1.0, voicePrefs);
       if (!flowRef.current.active) return;
 
       // 播放使用者錄音
       if (audioRef.current) {
           try {
-              // 嘗試自動播放
               const playPromise = audioRef.current.play();
               if (playPromise !== undefined) {
                   await playPromise;
-                  // 如果成功開始播放，等待播放結束
                   await new Promise(r => {
                       const el = audioRef.current;
                       if (!el) { r(null); return; }
@@ -195,15 +233,11 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
                           r(null);
                       };
                       el.addEventListener('ended', onEnd);
-                      // 安全機制：如果音訊損壞或事件沒觸發，強制超時
                       setTimeout(r, (el.duration || 5) * 1000 + 1000); 
                   });
               }
           } catch (e) {
-              // 手機瀏覽器 (iOS/Android) 經常會阻擋未經用戶互動的自動播放
-              // 這裡我們攔截錯誤，不要讓流程崩潰，而是繼續執行 (或等待用戶手動點擊)
-              console.warn("Auto-play blocked (expected on mobile without gesture)", e);
-              // 如果被阻擋，我們暫停一下讓用戶有機會看分數，然後自動繼續
+              console.warn("Auto-play blocked", e);
               await new Promise(r => setTimeout(r, 1500));
           }
       }
@@ -235,8 +269,11 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
           mediaRecorderRef.current.stop();
       }
-      recognitionRef.current?.stop();
-      // 停止音訊播放
+      recognitionRef.current?.abort();
+      
+      // 停止時也要確保釋放硬體
+      releaseMicrophone();
+
       if (audioRef.current) {
           audioRef.current.pause();
           audioRef.current.currentTime = 0;
