@@ -30,7 +30,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
-  const transcriptRef = useRef<string>('');
+  const transcriptRef = useRef<string>(''); // Thread 1: Real-time transcript
   const recognitionRef = useRef<any>(null);
   const flowRef = useRef({ active: false });
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -40,10 +40,11 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
   const currentEntry = filteredData.length > 0 ? filteredData[currentIndex] : null;
 
   useEffect(() => {
+    // Thread 1 Setup: Speech Recognition (Dedicated to Scoring)
     if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
         const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
         recognitionRef.current = new SpeechRecognition();
-        recognitionRef.current.continuous = false;
+        recognitionRef.current.continuous = true; // Changed to true to capture stream continuously
         recognitionRef.current.interimResults = true;
         recognitionRef.current.lang = 'en-US';
         recognitionRef.current.onresult = (event: any) => {
@@ -51,11 +52,18 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
             for (let i = event.resultIndex; i < event.results.length; ++i) {
                 if (event.results[i].isFinal) finalTranscript += event.results[i][0].transcript;
             }
-            if (!finalTranscript && event.results.length > 0) finalTranscript = event.results[0][0].transcript;
-            if (finalTranscript) transcriptRef.current = finalTranscript;
+            // Fallback for Android which sometimes doesn't mark isFinal correctly in short sessions
+            if (!finalTranscript && event.results.length > 0) {
+                 const lastResult = event.results[event.results.length - 1];
+                 finalTranscript = lastResult[0].transcript;
+            }
+            if (finalTranscript) {
+                console.log("Thread 1 (Scoring) detected:", finalTranscript);
+                transcriptRef.current = finalTranscript;
+            }
         };
         recognitionRef.current.onerror = (event: any) => {
-             // Silently handle errors
+             console.warn("Speech recognition error", event.error);
         };
     }
     // Component unmount cleanup
@@ -76,19 +84,43 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
   }, [currentIndex]);
 
   const calculateFinalScores = (userText: string, targetText: string, durationSec: number) => {
-      // iOS Hack: 如果在循環模式下無法辨識語音(因為權限被擋)，給一個基礎分或顯示提示
+      // 確保即使沒收到辨識結果，如果是 iOS 循環模式，也給使用者一個"回放模式"的體驗，但不給分
       if (!userText || userText.trim().length === 0) return { pronunciation: 0, fluency: 0, stress: 0, total: 0 };
+      
       const pronunciationScore = calculateSimilarity(userText, targetText);
+      
+      // 改進的流利度演算法：針對單字題給予寬容度
       const targetWordCount = targetText.split(/\s+/).length;
       const userWordCount = userText.split(/\s+/).length;
-      const idealMinTime = targetWordCount * 0.4; 
-      const idealMaxTime = targetWordCount * 0.8 + 1.5; 
+      
       let fluencyScore = 100;
-      if (durationSec > idealMaxTime) fluencyScore -= (durationSec - idealMaxTime) * 10; 
-      else if (durationSec < idealMinTime) fluencyScore -= (idealMinTime - durationSec) * 20; 
-      fluencyScore = Math.max(0, Math.min(100, Math.round(fluencyScore * Math.min(1, userWordCount / targetWordCount)))); 
-      let stressScore = Math.max(0, Math.min(100, Math.round(pronunciationScore * 0.8 + fluencyScore * 0.2 + (Math.random() * 10 - 5))));
+      
+      if (targetWordCount === 1) {
+          // 單字題：只要辨識出的字相似度高，流利度就給高，忽略時間長短 (只要不超過極限)
+          if (pronunciationScore > 80) fluencyScore = 100;
+          else if (pronunciationScore > 50) fluencyScore = 80;
+          else fluencyScore = 40;
+      } else {
+          // 句子題：保留時間計算
+          const idealMinTime = targetWordCount * 0.4; 
+          const idealMaxTime = targetWordCount * 0.8 + 1.5; 
+          if (durationSec > idealMaxTime) fluencyScore -= (durationSec - idealMaxTime) * 10; 
+          else if (durationSec < idealMinTime) fluencyScore -= (idealMinTime - durationSec) * 20; 
+          
+          // 根據字數完成度打折
+          fluencyScore = Math.round(fluencyScore * Math.min(1, userWordCount / targetWordCount));
+      }
+      
+      fluencyScore = Math.max(0, Math.min(100, fluencyScore));
+
+      // 語調重音 (模擬)：根據發音與流利度的加權
+      let stressScore = Math.round(pronunciationScore * 0.7 + fluencyScore * 0.3);
+      if (pronunciationScore > 90) stressScore = Math.min(100, stressScore + 5); // 獎勵高分
+
       const totalScore = Math.round((pronunciationScore + fluencyScore + stressScore) / 3);
+      
+      console.log(`Scoring - Text: "${userText}" vs "${targetText}". Scores: P=${pronunciationScore}, F=${fluencyScore}, S=${stressScore}`);
+      
       return { pronunciation: pronunciationScore, fluency: fluencyScore, stress: stressScore, total: totalScore };
   };
 
@@ -166,7 +198,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
 
       setPhase('recording');
       
-      // [iOS Hack] 2. 獲取流
+      // [Thread Setup] 獲取音訊流 (供兩條線共用，但邏輯分離)
       let stream;
       if (isUserGesture) {
           fullReleaseMicrophone();
@@ -175,7 +207,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
           stream = await getPersistentStream(); 
       }
       
-      // 3. 建立錄音器
+      // Thread 1: Start MediaRecorder (錄音存檔線)
       const mimeType = getSupportedMimeType();
       const options = mimeType ? { mimeType } : undefined;
       mediaRecorderRef.current = new MediaRecorder(stream, options);
@@ -204,10 +236,12 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
         } else resolve('');
       });
 
-      // 修正：使用 timeslice (200ms) 確保在移動設備上能定期寫入數據，避免錄到空檔案
+      // 啟動錄音器 (每 200ms 切片防止丟失)
       mediaRecorderRef.current.start(200);
       
-      // 4. 嘗試啟動辨識 (僅在使用者手勢觸發時啟動，避免 iOS 循環時搶佔音訊導致錄音失敗)
+      // Thread 2: Start SpeechRecognition (即時評分線)
+      // 只有在手勢觸發時才啟動這條線，因為 iOS 循環時 Speech API 容易中斷音訊流
+      // 如果是循環模式，我們僅依賴錄音功能，評分可能為 0 或顯示 "Review Mode"
       if (isUserGesture) {
         try {
             if (recognitionRef.current) {
@@ -224,9 +258,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
             console.warn("Speech recognition setup failed:", e);
         }
       } else {
-          // 在循環模式下，為了保證 MediaRecorder 錄音正常，我們放棄語音辨識
-          // 因為 iOS 上同時進行這兩者在無手勢情況下極不穩定
-          console.log("Skipping speech recognition in loop to protect audio recording session");
+          console.log("Thread 1 (Scoring) skipped in auto-loop to protect Thread 2 (Recording)");
       }
       
       setIsRecording(true);
@@ -235,25 +267,29 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
       const recordDuration = Math.max(3000, (wordCount * 800) + 2000);
       const startTime = Date.now();
       
+      // 等待錄音時間
       await new Promise(r => setTimeout(r, recordDuration));
       
-      // --- 錄音結束 ---
+      // --- 錄音結束 (停止兩條線) ---
       setIsRecording(false);
       
-      try { recognitionRef.current?.stop(); } catch(e) {}
+      try { recognitionRef.current?.stop(); } catch(e) {} // Stop Thread 1
       
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-          mediaRecorderRef.current.stop();
+          mediaRecorderRef.current.stop(); // Stop Thread 2
       }
       
-      // 重要：絕對不要釋放麥克風，讓它在背景保持活躍
-
+      // 等待錄音檔案生成 (Thread 2 完成)
       await onStopPromise;
+      
       const durationSec = (Date.now() - startTime) / 1000;
       if (!flowRef.current.active) return;
 
+      // --- 評分階段 ---
       setPhase('scoring');
       await new Promise(r => setTimeout(r, 600));
+      
+      // 使用 Thread 1 收集到的 transcriptRef 進行評分
       const finalScores = calculateFinalScores(transcriptRef.current, currentEntry.answer, durationSec);
       setScores(finalScores);
       
@@ -263,15 +299,17 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
 
       setShowResult(true);
 
+      // --- 回放階段 (先播正確答案 -> 再播使用者錄音) ---
       setPhase('reviewing'); 
+      
+      // 1. 播放正確答案
       await speakTextPromise(currentEntry.answer, 1.0, voicePrefs);
       if (!flowRef.current.active) return;
 
-      // 播放錄音回放 (修正：確保播放完整，不要被錯誤的 timeout 切斷)
+      // 2. 播放使用者錄音 (Thread 2 的產物)
       if (audioRef.current) {
           try {
               const audio = audioRef.current;
-              // 確保音量正常
               audio.volume = 1.0; 
               
               await new Promise<void>((resolve) => {
@@ -280,8 +318,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
                       resolve();
                   };
                   
-                  // 設定一個足夠長的超時保護 (30秒)，避免因格式錯誤導致永遠不結束
-                  // 不再依賴 duration 計算，因為 Blob 流的 duration 可能是 Infinity
+                  // 安全計時器
                   const safetyTimer = setTimeout(() => {
                       audio.removeEventListener('ended', handleEnded);
                       resolve();
@@ -295,7 +332,6 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
                   audio.play().catch(e => {
                       console.warn("Auto-play blocked or failed", e);
                       clearTimeout(safetyTimer);
-                      // 如果播放失敗，稍微等待一下就繼續，避免流程卡死
                       setTimeout(resolve, 1500); 
                   });
               });
@@ -315,9 +351,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
       } else {
           setIsPlayingFlow(false);
           setPhase('idle');
-          // 如果不是循環模式，單題結束後可以釋放麥克風
           fullReleaseMicrophone();
-          // 停止無聲音樂
           if (silentAudioRef.current) silentAudioRef.current.pause();
       }
     } catch(e) { 

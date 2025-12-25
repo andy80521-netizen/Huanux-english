@@ -66,19 +66,55 @@ export const speakTextPromise = async (text: string, rate = 1.0, voicePrefs: { z
   });
 };
 
+// Levenshtein Distance Algorithm: Calculates the minimum number of single-character edits
+const levenshteinDistance = (a: string, b: string) => {
+  const matrix = [];
+
+  for (let i = 0; i <= b.length; i++) {
+    matrix[i] = [i];
+  }
+
+  for (let j = 0; j <= a.length; j++) {
+    matrix[0][j] = j;
+  }
+
+  for (let i = 1; i <= b.length; i++) {
+    for (let j = 1; j <= a.length; j++) {
+      if (b.charAt(i - 1) === a.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1, // substitution
+          Math.min(
+            matrix[i][j - 1] + 1, // insertion
+            matrix[i - 1][j] + 1 // deletion
+          )
+        );
+      }
+    }
+  }
+
+  return matrix[b.length][a.length];
+};
+
 export const calculateSimilarity = (str1: string, str2: string) => {
     if (!str1 || !str2) return 0;
+    
+    // Normalize: lowercase and remove special characters
     const s1 = str1.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
     const s2 = str2.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+    
     if (!s1 || !s2) return 0;
     if (s1 === s2) return 100;
-    const words1 = s1.split(/\s+/);
-    const words2 = s2.split(/\s+/);
-    const set2 = new Set(words2);
-    let matchCount = 0;
-    words1.forEach(w => { if (set2.has(w)) matchCount++; });
-    const matchScore = (matchCount / Math.max(words1.length, words2.length)) * 100;
-    return Math.min(100, Math.max(0, Math.round(matchScore)));
+
+    // Use Levenshtein distance for better accuracy on short words
+    const distance = levenshteinDistance(s1, s2);
+    const maxLength = Math.max(s1.length, s2.length);
+    
+    // Calculate similarity percentage
+    const similarity = ((maxLength - distance) / maxLength) * 100;
+    
+    return Math.max(0, Math.min(100, Math.round(similarity)));
 };
 
 export const fetchIPA = async (text: string) => {
