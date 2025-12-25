@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
-  Mic, Mic2, StopCircle, PlayCircle, SkipForward, SkipBack, RefreshCcw, Shuffle, ArrowLeft, Volume2, BarChart2, Headphones, ChevronRight, Activity, Loader2
+  Mic, Mic2, StopCircle, PlayCircle, SkipForward, SkipBack, RefreshCcw, Shuffle, ArrowLeft, Volume2, BarChart2, Headphones, ChevronRight, Activity, Loader2, Zap
 } from 'lucide-react';
 import { VocabItem } from '../constants';
 import { speakTextPromise, calculateSimilarity, getBadgeInfo } from '../utils';
@@ -36,6 +36,10 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
   const flowRef = useRef({ active: false });
   const audioRef = useRef<HTMLAudioElement>(null);
   const silentAudioRef = useRef<HTMLAudioElement>(null);
+  
+  // Smart Detection Refs
+  const recordingResolverRef = useRef<(() => void) | null>(null); // To manually stop recording from Speech API
+  const speechEndTimerRef = useRef<any>(null);
 
   const filteredData = useMemo(() => { return coachCourse ? vocabData.filter(v => v.course === coachCourse && !v.isHidden) : []; }, [vocabData, coachCourse]);
   const currentEntry = filteredData.length > 0 ? filteredData[currentIndex] : null;
@@ -53,21 +57,35 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
             recognitionRef.current.onresult = (event: any) => {
                 let finalTranscript = '';
                 let interimTranscript = '';
+                let hasFinal = false;
                 
                 for (let i = event.resultIndex; i < event.results.length; ++i) {
                     if (event.results[i].isFinal) {
                         finalTranscript += event.results[i][0].transcript;
+                        hasFinal = true;
                     } else {
                         interimTranscript += event.results[i][0].transcript;
                     }
                 }
                 
-                // Prefer final, fallback to interim
                 const txt = finalTranscript || interimTranscript;
                 if (txt) {
                     transcriptRef.current = txt;
-                    // Debugging log for scoring thread
-                    // console.log("Thread A (Scoring) Update:", txt);
+                }
+
+                // --- Smart Loop Logic: Auto-detect end of speech ---
+                // If we get a "Final" result, user likely finished the sentence.
+                // We wait a short buffer (e.g., 800ms) to ensure no more words coming, then trigger stop.
+                if (hasFinal && flowRef.current.active) {
+                    if (speechEndTimerRef.current) clearTimeout(speechEndTimerRef.current);
+                    
+                    speechEndTimerRef.current = setTimeout(() => {
+                        // Only auto-stop if we have a resolver (meaning we are in recording phase)
+                        if (recordingResolverRef.current) {
+                            console.log("Smart Detect: Speech finished, advancing flow...");
+                            recordingResolverRef.current(); // Resolve the recording promise early
+                        }
+                    }, 800); // 800ms buffer
                 }
             };
 
@@ -96,9 +114,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
   }, [currentIndex]);
 
   const calculateFinalScores = (userText: string, targetText: string, durationSec: number) => {
-      // Robust scoring that doesn't crash on empty input
       if (!userText || userText.trim().length === 0) {
-          // If silence, return 0 but allow flow to continue
           return { pronunciation: 0, fluency: 0, stress: 0, total: 0 };
       }
       
@@ -108,10 +124,8 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
       
       let fluencyScore = 100;
       if (targetWordCount <= 1) {
-          // Single word logic: lenient on time
           fluencyScore = pronunciationScore > 60 ? 100 : 50;
       } else {
-          // Sentence logic: time based
           const idealMinTime = targetWordCount * 0.4; 
           const idealMaxTime = targetWordCount * 0.8 + 1.5; 
           if (durationSec > idealMaxTime) fluencyScore -= (durationSec - idealMaxTime) * 10; 
@@ -151,7 +165,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
           // console.log("Acquiring new microphone stream...");
           const stream = await navigator.mediaDevices.getUserMedia({ 
             audio: {
-                echoCancellation: false, // Important for quality
+                echoCancellation: false, 
                 noiseSuppression: true,
                 autoGainControl: true
             } 
@@ -183,8 +197,10 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
     setIsPlayingFlow(true); 
     setShowResult(false); 
     setAudioURL(null);
-    transcriptRef.current = ''; // Reset Thread A Data
-    audioChunksRef.current = []; // Reset Thread B Data
+    transcriptRef.current = ''; 
+    audioChunksRef.current = []; 
+    recordingResolverRef.current = null; // Reset resolver
+    if (speechEndTimerRef.current) clearTimeout(speechEndTimerRef.current);
     
     try {
       // 1. Phase: Read Question
@@ -195,22 +211,17 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
       // 2. Phase: Recording Setup
       setPhase('recording');
       
-      // Calculate duration dynamically
+      // Calculate max duration dynamically (fallback)
       const wordCount = currentEntry.answer.split(' ').length;
-      const recordDuration = Math.max(3000, (wordCount * 800) + 1500);
+      const recordDuration = Math.max(3500, (wordCount * 800) + 2000);
 
       // --- START PARALLEL THREADS ---
-      
-      // Get Stream (Shared Resource)
-      // Note: We try to reuse stream to prevent mobile browser freezing
       const stream = await ensureMicrophoneStream();
 
       // Thread A: Scoring (Speech Recognition)
-      // We wrap this in a separate block so failure doesn't stop recording
       const startRecognition = () => {
           if (!recognitionRef.current) return;
           try {
-              // Always stop before start to prevent "already started" errors
               recognitionRef.current.abort(); 
           } catch(e) {}
           
@@ -218,10 +229,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
              if (!flowRef.current.active) return;
              try {
                  recognitionRef.current.start();
-                 // console.log("Thread A Started");
              } catch(e) {
-                 // On mobile auto-loop, this might fail. We ignore it.
-                 // The app will just score 0, but recording will work.
                  console.warn("Thread A failed to start (expected on mobile loop):", e);
              }
           }, 50);
@@ -237,31 +245,33 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
               mediaRecorderRef.current.ondataavailable = (e) => {
                 if (e.data && e.data.size > 0) audioChunksRef.current.push(e.data);
               };
-              // Timeslice 200ms to ensure data is written even if crashed
               mediaRecorderRef.current.start(200); 
-              // console.log("Thread B Started");
           } catch (e) {
               console.error("Thread B failed:", e);
           }
       };
 
-      // Execute Threads
       startRecognition();
       startRecorder();
       setIsRecording(true);
 
       const startTime = Date.now();
 
-      // 3. Wait for Recording Duration
-      await new Promise(r => setTimeout(r, recordDuration));
+      // 3. Wait for Recording (RACE: Smart Detection vs Max Time)
+      // This allows the app to jump early if speech finishes
+      const maxTimePromise = new Promise<void>(resolve => setTimeout(resolve, recordDuration));
+      const smartDetectPromise = new Promise<void>(resolve => {
+          recordingResolverRef.current = resolve;
+      });
+
+      await Promise.race([maxTimePromise, smartDetectPromise]);
       
       // --- STOP PARALLEL THREADS ---
       setIsRecording(false);
+      recordingResolverRef.current = null; // Clear resolver
       
-      // Stop Thread A
       try { recognitionRef.current?.stop(); } catch(e) {}
       
-      // Stop Thread B
       let blobUrl = '';
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
           await new Promise<void>(resolve => {
@@ -282,17 +292,14 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
           });
       }
 
-      // DO NOT release microphone stream here during loops. 
-      // Keeping it active fixes the "2nd question silence" bug on mobile.
-
       if (!flowRef.current.active) return;
 
       // 4. Scoring Phase
       setPhase('scoring');
+      // If we jumped early, duration is shorter, which is good for fluency score
       const durationSec = (Date.now() - startTime) / 1000;
       await new Promise(r => setTimeout(r, 500));
       
-      // Calculate using data from Thread A
       const finalScores = calculateFinalScores(transcriptRef.current, currentEntry.answer, durationSec);
       setScores(finalScores);
       
@@ -309,7 +316,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
       await speakTextPromise(currentEntry.answer, 1.0, voicePrefs);
       if (!flowRef.current.active) return;
 
-      // Play User Recording (Thread B Result)
+      // Play User Recording
       if (audioRef.current && blobUrl) {
           try {
               audioRef.current.volume = 1.0;
@@ -322,14 +329,12 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
                       resolve();
                   };
                   
-                  // Safety timeout in case ended event doesn't fire
                   const safety = setTimeout(() => {
                       el.removeEventListener('ended', onEnded);
                       resolve();
                   }, 30000);
 
                   el.addEventListener('ended', onEnded);
-                  
                   el.play().catch(e => {
                       console.warn("Autoplay blocked", e);
                       clearTimeout(safety);
@@ -346,11 +351,11 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
       // 6. Next Step Logic
       if (isAutoLoop || isRandomLoop) {
           setPhase('idle');
-          await new Promise(r => setTimeout(r, 1000));
+          await new Promise(r => setTimeout(r, 800)); // Short pause before next
           if (isRandomLoop) handleRandomNext();
           else handleNext();
       } else {
-          stopFlow(false); // End of single flow
+          stopFlow(false);
       }
 
     } catch(e) { 
@@ -364,6 +369,8 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
     setIsPlayingFlow(false); 
     setPhase('idle'); 
     setIsRecording(false);
+    recordingResolverRef.current = null;
+    if (speechEndTimerRef.current) clearTimeout(speechEndTimerRef.current);
     window.speechSynthesis.cancel(); 
     
     try {
@@ -382,7 +389,6 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
           audioRef.current.currentTime = 0;
       }
 
-      // Only fully release hardware if user explicitly stops or leaves
       if (fullyRelease) {
           releaseMicrophone();
       }
@@ -390,7 +396,6 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
   };
 
   const handleNext = () => {
-    // Just change index, let the useEffect trigger the next flow
     window.speechSynthesis.cancel();
     setPhase('idle');
     setShowResult(false);
@@ -533,7 +538,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
         
         {(isAutoLoop || isRandomLoop) && isPlayingFlow && (
           <div className="mt-4 flex flex-col items-center gap-2">
-             <p className="text-xs font-bold text-slate-400 dark:text-slate-500 flex items-center gap-1 animate-pulse"><Activity size={12} /> {isAutoLoop ? '自動' : '隨機'}模式：完成複習後自動跳轉</p>
+             <p className="text-xs font-bold text-slate-400 dark:text-slate-500 flex items-center gap-1 animate-pulse"><Zap size={12} className="text-orange-500"/> {isAutoLoop ? '自動' : '隨機'}模式：智慧偵測講完即評分</p>
              <button onClick={() => stopFlow(true)} className="text-[10px] text-indigo-500 dark:text-indigo-400 font-bold hover:underline">取消循環</button>
           </div>
         )}
