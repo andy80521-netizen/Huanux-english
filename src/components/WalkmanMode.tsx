@@ -31,6 +31,7 @@ const WalkmanMode: React.FC<Props> = ({ vocabData, courses, voicePrefs }) => {
   const flowRef = useRef({ active: false });
   const currentRepeatRef = useRef(0);
   const silentAudioRef = useRef<HTMLAudioElement>(null);
+  const wakeLockRef = useRef<any>(null); // Screen Wake Lock
   
   // 智慧隨機播放池：記錄本輪尚未播放的索引
   const unplayedIndicesRef = useRef<number[]>([]);
@@ -45,6 +46,44 @@ const WalkmanMode: React.FC<Props> = ({ vocabData, courses, voicePrefs }) => {
   useEffect(() => {
       unplayedIndicesRef.current = [];
   }, [selectedCourse, filteredData.length]);
+
+  // Wake Lock Management
+  const requestWakeLock = async () => {
+    if ('wakeLock' in navigator) {
+      try {
+        wakeLockRef.current = await (navigator as any).wakeLock.request('screen');
+        console.log('Wake Lock is active');
+      } catch (err: any) {
+        console.warn(`Wake Lock error: ${err.name}, ${err.message}`);
+      }
+    }
+  };
+
+  const releaseWakeLock = async () => {
+    if (wakeLockRef.current) {
+      try {
+        await wakeLockRef.current.release();
+        wakeLockRef.current = null;
+        console.log('Wake Lock released');
+      } catch (e) {
+        console.warn('Wake Lock release error', e);
+      }
+    }
+  };
+
+  // Re-acquire wake lock on visibility change
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+       if (document.visibilityState === 'visible' && isPlaying) {
+           requestWakeLock();
+       }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+        releaseWakeLock();
+    };
+  }, [isPlaying]);
 
   // 取得下一個智慧隨機索引 (取後不放回，直到全部播完才重置)
   const getNextSmartRandomIndex = () => {
@@ -76,18 +115,6 @@ const WalkmanMode: React.FC<Props> = ({ vocabData, courses, voicePrefs }) => {
 
   // Media Session Handler & Background Audio Management
   useEffect(() => {
-      // Background Audio Logic
-      if (isPlaying) {
-          if (silentAudioRef.current) {
-              silentAudioRef.current.volume = 0.1; // 微小音量確保系統認定為播放中
-              silentAudioRef.current.play().catch(e => console.warn("Background audio blocked", e));
-          }
-      } else {
-          if (silentAudioRef.current) {
-              silentAudioRef.current.pause();
-          }
-      }
-
       // Media Session
       if ('mediaSession' in navigator && currentEntry) {
           navigator.mediaSession.metadata = new MediaMetadata({
@@ -101,7 +128,7 @@ const WalkmanMode: React.FC<Props> = ({ vocabData, courses, voicePrefs }) => {
           navigator.mediaSession.setActionHandler('previoustrack', handlePrev);
           navigator.mediaSession.setActionHandler('nexttrack', handleNext);
       }
-  }, [currentEntry, selectedCourse, isPlaying]);
+  }, [currentEntry, selectedCourse]); // Remove isPlaying dependency to avoid loop
 
   useEffect(() => {
       stopAudioImmediately();
@@ -125,6 +152,11 @@ const WalkmanMode: React.FC<Props> = ({ vocabData, courses, voicePrefs }) => {
   const runPlaybackCycle = async () => {
       if (!currentEntry) return;
       
+      // Ensure silent audio is playing for timing in background
+      if (silentAudioRef.current && silentAudioRef.current.paused) {
+          silentAudioRef.current.play().catch(() => {});
+      }
+
       await speakTextPromise(currentEntry.question, playbackSpeed, voicePrefs);
       if (!flowRef.current.active) return;
       
@@ -223,8 +255,16 @@ const WalkmanMode: React.FC<Props> = ({ vocabData, courses, voicePrefs }) => {
       if (isPlaying) {
           stopAudioImmediately();
           setIsPlaying(false);
+          releaseWakeLock();
+          if (silentAudioRef.current) silentAudioRef.current.pause();
       } else {
           setIsPlaying(true);
+          requestWakeLock();
+          // Important: Play silent audio on user interaction to whitelist the audio context
+          if (silentAudioRef.current) {
+              silentAudioRef.current.volume = 0.1;
+              silentAudioRef.current.play().catch(e => console.warn("Background audio blocked", e));
+          }
       }
   };
 
@@ -256,8 +296,15 @@ const WalkmanMode: React.FC<Props> = ({ vocabData, courses, voicePrefs }) => {
 
   return (
     <div className="flex flex-col h-full bg-slate-900 text-white relative">
-      {/* Silent Audio for Background Play */}
-      <audio ref={silentAudioRef} src={SILENT_AUDIO} loop playsInline muted={false} className="hidden" />
+      {/* Silent Audio for Background Play - Force playsinline and ensure it is in DOM but hidden via style */}
+      <audio 
+        ref={silentAudioRef} 
+        src={SILENT_AUDIO} 
+        loop 
+        playsInline 
+        muted={false} 
+        style={{ pointerEvents: 'none', opacity: 0, position: 'absolute', width: 1, height: 1 }} 
+      />
 
       <div className="absolute inset-0 w-full h-full overflow-hidden pointer-events-none"><div className="absolute top-[-20%] left-[-20%] w-[140%] h-[140%] bg-[radial-gradient(circle,rgba(79,70,229,0.4)_0%,rgba(0,0,0,0)_70%)] opacity-50 blur-3xl animate-pulse-slow"></div></div>
       <div className="p-6 flex justify-between items-center z-10 relative shrink-0"><button onClick={() => { stopAudioImmediately(); setIsPlaying(false); setSelectedCourse(null); }} className="p-2 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-md transition-all"><ArrowLeft size={20} /></button><span className="text-sm font-bold opacity-80 uppercase tracking-widest">Walkman</span><div className="w-10"></div></div>
@@ -271,6 +318,12 @@ const WalkmanMode: React.FC<Props> = ({ vocabData, courses, voicePrefs }) => {
                 {isPlaying && repeatCount > 1 && (
                     <div className="bg-indigo-600 text-white text-[10px] font-bold px-3 py-1 rounded-full shadow-lg border border-indigo-400 animate-pulse">
                         播放中: {visualRepeatCount} / {repeatCount}
+                    </div>
+                )}
+                {isPlaying && (
+                    <div className="flex items-center gap-1.5 bg-green-500/20 px-3 py-1 rounded-full border border-green-500/30 ml-2">
+                        <Activity size={10} className="text-green-400 animate-pulse" />
+                        <span className="text-[10px] text-green-300 font-bold">Wake Lock On</span>
                     </div>
                 )}
               </div>

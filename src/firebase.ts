@@ -1,5 +1,5 @@
-// Fix: Use namespace import to avoid "no exported member 'initializeApp'" error
-import * as firebaseApp from 'firebase/app';
+
+import { initializeApp } from 'firebase/app';
 import { getAuth, GithubAuthProvider } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 
@@ -51,8 +51,7 @@ if (configStr && configStr !== '{}') {
 const isValidConfig = Object.keys(firebaseConfig).length > 0 && (firebaseConfig as any).apiKey && (firebaseConfig as any).apiKey !== "dummy";
 
 // Initialize Firebase using named import
-// Fix: Use namespace import object to call initializeApp
-const app = firebaseApp.initializeApp(isValidConfig ? firebaseConfig : defaultFirebaseConfig);
+const app = initializeApp(isValidConfig ? firebaseConfig : defaultFirebaseConfig);
 
 export const auth = getAuth(app);
 export const db = getFirestore(app);
