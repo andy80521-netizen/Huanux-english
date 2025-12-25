@@ -27,6 +27,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
   const [audioURL, setAudioURL] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [isMicReady, setIsMicReady] = useState(false); // UI status for mic
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   
   // Resources
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -37,6 +38,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
   const flowRef = useRef({ active: false });
   const audioRef = useRef<HTMLAudioElement>(null);
   const silentAudioRef = useRef<HTMLAudioElement>(null);
+  const audioContextRef = useRef<AudioContext | null>(null); // Hack for iOS
   
   // Smart Detection Refs
   const recordingResolverRef = useRef<(() => void) | null>(null); 
@@ -87,9 +89,8 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
                 }
             };
             
-            // Critical: Don't let errors crash the flow. 
-            // If SR fails (common on mobile loop), we just ignore it and rely on MediaRecorder + Timer.
             recognitionRef.current.onerror = (event: any) => {
+                // Ignore errors gracefully
                 console.warn("Speech Recognition Error (Ignored):", event.error);
             };
 
@@ -106,7 +107,6 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
   // Watch index for auto-loop triggers
   useEffect(() => {
     if ((isAutoLoop || isRandomLoop) && isPlayingFlow && flowRef.current.active && filteredData.length > 0) {
-      // Small delay to allow UI to settle before starting next flow
       const timer = setTimeout(() => {
         startFlow(false); // isUserGesture = false (Auto loop)
       }, 800); 
@@ -114,8 +114,34 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
     }
   }, [currentIndex]);
 
+  // --- AUDIO CONTEXT HACK FOR iOS ---
+  // This creates a silent oscillator to force the browser to keep the audio session "Active/PlayAndRecord"
+  const enableBackgroundAudioHack = () => {
+      try {
+          if (!audioContextRef.current) {
+              const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+              if (AudioContext) {
+                  const ctx = new AudioContext();
+                  audioContextRef.current = ctx;
+                  const osc = ctx.createOscillator();
+                  const gain = ctx.createGain();
+                  osc.connect(gain);
+                  gain.connect(ctx.destination);
+                  osc.frequency.value = 20; 
+                  gain.gain.value = 0.001; // barely audible
+                  osc.start();
+                  console.log("AudioContext Hack Enabled");
+              }
+          }
+          if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+              audioContextRef.current.resume();
+          }
+      } catch (e) {
+          console.error("Audio Hack Failed", e);
+      }
+  };
+
   const calculateFinalScores = (userText: string, targetText: string, durationSec: number) => {
-      // Fallback for silence or recognition failure
       if (!userText || userText.trim().length === 0) {
           return { pronunciation: 0, fluency: 0, stress: 0, total: 0 };
       }
@@ -153,22 +179,21 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
 
   // --- Thread B: Robust Stream Management ---
   const ensureMicrophoneStream = async () => {
-      // 1. HOT MIC CHECK: If we already have a live stream, USE IT.
-      // This is the most critical fix for iOS looping.
+      // 1. HOT MIC CHECK
       if (streamRef.current && streamRef.current.active) {
           const audioTracks = streamRef.current.getAudioTracks();
-          if (audioTracks.length > 0 && audioTracks[0].readyState === 'live') {
-              // console.log("Reusing existing microphone stream (Hot Mic)");
+          if (audioTracks.length > 0 && audioTracks[0].readyState === 'live' && !audioTracks[0].muted) {
               return streamRef.current;
+          } else {
+              console.warn("Stream exists but track is dead or muted, refreshing...");
           }
       }
 
-      // 2. If no stream, request it.
+      // 2. Request New Stream
       try {
-          // console.log("Requesting new microphone stream...");
           const stream = await navigator.mediaDevices.getUserMedia({ 
             audio: {
-                echoCancellation: false, // Better for language learning apps
+                echoCancellation: false, 
                 noiseSuppression: true,
                 autoGainControl: true
             } 
@@ -189,20 +214,29 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
         streamRef.current = null;
         setIsMicReady(false);
     }
+    // Also cleanup AudioContext hack
+    if (audioContextRef.current) {
+        audioContextRef.current.close().catch(() => {});
+        audioContextRef.current = null;
+    }
   };
 
   const startFlow = async (isUserGesture = true) => {
     if (!currentEntry || isRecording) return;
     
-    // 0. iOS Keep-Alive: Play silent audio on gesture
-    if (isUserGesture && silentAudioRef.current && silentAudioRef.current.paused) {
-        silentAudioRef.current.play().catch(() => {});
+    // 0. Environment Prep (iOS Hack)
+    if (isUserGesture) {
+        if (silentAudioRef.current && silentAudioRef.current.paused) {
+            silentAudioRef.current.play().catch(() => {});
+        }
+        enableBackgroundAudioHack();
     }
     
     flowRef.current.active = true; 
     setIsPlayingFlow(true); 
     setShowResult(false); 
     setAudioURL(null);
+    setErrorMsg(null);
     transcriptRef.current = ''; 
     audioChunksRef.current = []; 
     recordingResolverRef.current = null;
@@ -211,6 +245,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
     try {
       // 1. Phase: Read Question
       setPhase('reading_question'); 
+      // Ensure we don't kill the stream while speaking
       await speakTextPromise(currentEntry.question, 1.0, voicePrefs); 
       if (!flowRef.current.active) return;
 
@@ -218,122 +253,119 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
       setPhase('recording');
       
       const wordCount = currentEntry.answer.split(' ').length;
-      // Basic duration fallback
       const recordDuration = Math.max(3500, (wordCount * 800) + 2000);
 
-      // --- CRITICAL: Get Stream (Reusing if possible) ---
       let stream;
+      let isErrorState = false;
+
+      // --- CRITICAL: Stream Acquisition with Fallback ---
       try {
         stream = await ensureMicrophoneStream();
       } catch (err) {
-        // If mic fails in loop, stop everything
-        alert("無法存取麥克風，請刷新頁面或檢查權限。");
-        stopFlow(true);
-        return;
+        // If mic fails in loop (common on iOS), we DON'T stop the app.
+        // We set an error flag and simulate the recording duration so the user sees it skipped.
+        console.warn("Loop Mic Fail (Recovering...):", err);
+        setErrorMsg("麥克風無法存取 (iOS限制)，跳過本題...");
+        isErrorState = true;
       }
-
-      // --- Thread A: Scoring (Speech Recognition) ---
-      // This is "Nice to have". If it fails on mobile loop, we proceed without it.
-      let recognitionStarted = false;
-      const startRecognition = () => {
-          if (!recognitionRef.current) return;
-          try {
-              recognitionRef.current.abort(); 
-          } catch(e) {}
-          
-          setTimeout(() => {
-             if (!flowRef.current.active) return;
-             try {
-                 recognitionRef.current.start();
-                 recognitionStarted = true;
-             } catch(e) {
-                 // Common iOS error on auto-loop: 'not-allowed'. 
-                 // We Log it but DO NOT STOP the flow.
-                 console.warn("SpeechRecognition start failed (iOS Auto-Loop limitation):", e);
-             }
-          }, 50);
-      };
-
-      // --- Thread B: Recording (MediaRecorder) ---
-      // This MUST work for the feature to be useful.
-      const startRecorder = () => {
-          const mimeType = getSupportedMimeType();
-          const options = mimeType ? { mimeType } : undefined;
-          
-          try {
-              mediaRecorderRef.current = new MediaRecorder(stream, options);
-              mediaRecorderRef.current.ondataavailable = (e) => {
-                if (e.data && e.data.size > 0) audioChunksRef.current.push(e.data);
-              };
-              mediaRecorderRef.current.start(200); // 200ms timeslice prevents data loss on crash
-          } catch (e) {
-              console.error("MediaRecorder start failed:", e);
-              // If recorder fails, we can't really continue meaningful practice
-              throw e;
-          }
-      };
-
-      startRecognition();
-      startRecorder();
-      setIsRecording(true);
 
       const startTime = Date.now();
 
-      // 3. Wait for Recording (RACE Condition)
-      // If recognition started successfully, we can use "Smart Detect".
-      // If recognition failed (iOS loop), we rely SOLELY on maxTimePromise.
-      const maxTimePromise = new Promise<void>(resolve => setTimeout(resolve, recordDuration));
-      
-      const racePromises: Promise<void>[] = [maxTimePromise];
-      
-      // Only add smart detection if we successfully started recognition
-      // However, we can add the promise regardless; if resolve is never called, maxTime wins.
-      const smartDetectPromise = new Promise<void>(resolve => {
-          recordingResolverRef.current = resolve;
-      });
-      racePromises.push(smartDetectPromise);
+      if (!isErrorState && stream) {
+          // --- Thread A: Scoring ---
+          const startRecognition = () => {
+              if (!recognitionRef.current) return;
+              try { recognitionRef.current.abort(); } catch(e) {}
+              
+              setTimeout(() => {
+                 if (!flowRef.current.active) return;
+                 try {
+                     recognitionRef.current.start();
+                 } catch(e) {
+                     // Silently fail on loop
+                 }
+              }, 50);
+          };
 
-      await Promise.race(racePromises);
+          // --- Thread B: Recording ---
+          const startRecorder = () => {
+              const mimeType = getSupportedMimeType();
+              const options = mimeType ? { mimeType } : undefined;
+              
+              try {
+                  mediaRecorderRef.current = new MediaRecorder(stream, options);
+                  mediaRecorderRef.current.ondataavailable = (e) => {
+                    if (e.data && e.data.size > 0) audioChunksRef.current.push(e.data);
+                  };
+                  mediaRecorderRef.current.start(200); 
+              } catch (e) {
+                  console.error("MediaRecorder start failed:", e);
+                  isErrorState = true; // Mark as error if recorder crashes
+              }
+          };
+
+          startRecognition();
+          startRecorder();
+          setIsRecording(true);
+      }
+
+      // 3. Wait Phase (Race or Fallback)
+      if (isErrorState) {
+          // Just wait 2 seconds then move on
+          await new Promise(r => setTimeout(r, 2000));
+      } else {
+          // Normal Race
+          const maxTimePromise = new Promise<void>(resolve => setTimeout(resolve, recordDuration));
+          const smartDetectPromise = new Promise<void>(resolve => {
+              recordingResolverRef.current = resolve;
+          });
+          await Promise.race([maxTimePromise, smartDetectPromise]);
+      }
       
       // --- STOP RECORDING ---
       setIsRecording(false);
       recordingResolverRef.current = null; 
       
-      // Stop Recognition (Thread A)
       try { recognitionRef.current?.stop(); } catch(e) {}
       
-      // Stop MediaRecorder (Thread B) - BUT KEEP STREAM ALIVE
       let blobUrl = '';
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      if (!isErrorState && mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
           await new Promise<void>(resolve => {
               if (!mediaRecorderRef.current) { resolve(); return; }
               mediaRecorderRef.current.onstop = () => {
-                  const recordedType = mediaRecorderRef.current?.mimeType || 'audio/webm';
-                  const audioBlob = new Blob(audioChunksRef.current, { type: recordedType });
-                  blobUrl = URL.createObjectURL(audioBlob);
-                  setAudioURL(blobUrl);
-                  
-                  if (audioRef.current) {
-                      audioRef.current.src = blobUrl;
-                      audioRef.current.load();
-                  }
+                  try {
+                      const recordedType = mediaRecorderRef.current?.mimeType || 'audio/webm';
+                      const audioBlob = new Blob(audioChunksRef.current, { type: recordedType });
+                      if (audioBlob.size > 0) {
+                          blobUrl = URL.createObjectURL(audioBlob);
+                          setAudioURL(blobUrl);
+                          if (audioRef.current) {
+                              audioRef.current.src = blobUrl;
+                              audioRef.current.load();
+                          }
+                      }
+                  } catch(e) { console.warn("Blob creation failed", e); }
                   resolve();
               };
               mediaRecorderRef.current.stop();
           });
       }
 
-      // DO NOT call releaseMicrophone() here. Keep the stream hot for the next loop.
+      // DO NOT RELEASE MIC HERE
 
       if (!flowRef.current.active) return;
 
       // 4. Scoring Phase
       setPhase('scoring');
+      
+      // If error state, scores are 0.
       const durationSec = (Date.now() - startTime) / 1000;
       await new Promise(r => setTimeout(r, 600));
       
-      // Calculate scores (transcriptRef might be empty if Recognition failed, that's okay)
       const finalScores = calculateFinalScores(transcriptRef.current, currentEntry.answer, durationSec);
+      
+      // Special check: If transcript is empty but we have audio, give partial credit?
+      // No, strictly need text for pronunciation. But we don't punish errors too hard visually.
       setScores(finalScores);
       
       if (finalScores.total >= 70) {
@@ -349,35 +381,22 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
       await speakTextPromise(currentEntry.answer, 1.0, voicePrefs);
       if (!flowRef.current.active) return;
 
-      // Play User Recording
+      // Play User Recording (Only if valid)
       if (audioRef.current && blobUrl) {
           try {
               audioRef.current.volume = 1.0;
               await new Promise<void>((resolve) => {
                   const el = audioRef.current;
                   if (!el) { resolve(); return; }
-                  
-                  const onEnded = () => {
-                      el.removeEventListener('ended', onEnded);
-                      resolve();
-                  };
-                  
-                  // Safety timer for playback
-                  const safety = setTimeout(() => {
-                      el.removeEventListener('ended', onEnded);
-                      resolve();
-                  }, 30000);
-
+                  const onEnded = () => { el.removeEventListener('ended', onEnded); resolve(); };
+                  const safety = setTimeout(() => { el.removeEventListener('ended', onEnded); resolve(); }, 30000);
                   el.addEventListener('ended', onEnded);
                   el.play().catch(e => {
-                      console.warn("Autoplay blocked (expected on some mobile browsers)", e);
                       clearTimeout(safety);
-                      setTimeout(resolve, 1500);
+                      setTimeout(resolve, 1000);
                   });
               });
-          } catch (e) {
-              console.warn("Audio playback error", e);
-          }
+          } catch (e) { console.warn("Audio playback error", e); }
       }
 
       if (!flowRef.current.active) return;
@@ -387,23 +406,19 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
           setPhase('idle');
           await new Promise(r => setTimeout(r, 800)); 
           
-          // DO NOT STOP FLOW HERE.
-          // We intentionally leave the microphone stream open (Hot Mic).
-          // Just switch the index, and the useEffect will trigger startFlow again.
-          
-          if (isRandomLoop) handleRandomNext(true); // pass true to retain stream
-          else handleNext(true); // pass true to retain stream
+          if (isRandomLoop) handleRandomNext(true); 
+          else handleNext(true); 
       } else {
-          stopFlow(false); // keep mic open just in case user clicks next immediately
+          stopFlow(false); 
       }
 
     } catch(e) { 
       console.error("Flow Error:", e);
-      stopFlow(true); // Error state: fully reset
+      // Even if major error, don't kill loop if possible, just reset
+      stopFlow(true); 
     }
   };
 
-  // Modified stopFlow to support Hot-Mic Handover
   const stopFlow = (fullyRelease = true) => { 
     flowRef.current.active = false; 
     setIsPlayingFlow(false); 
@@ -419,34 +434,31 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
       }
       if (recognitionRef.current) recognitionRef.current.abort();
       
-      if (silentAudioRef.current) {
-          silentAudioRef.current.pause();
-          silentAudioRef.current.currentTime = 0;
-      }
-      
       if (audioRef.current) {
           audioRef.current.pause();
           audioRef.current.currentTime = 0;
       }
 
-      // ONLY Release microphone if explicitly requested (e.g. user pressed Stop)
+      // ONLY Release microphone if explicitly requested (User pressed STOP)
+      // Otherwise keep it hot for loops
       if (fullyRelease) {
           releaseMicrophone();
+          if (silentAudioRef.current) {
+              silentAudioRef.current.pause();
+          }
       }
     } catch(e) { console.warn(e); }
   };
 
   const handleNext = (retainStream = false) => {
-    // If manually clicking next, we might want to retain stream if we are in a flow
     if (!retainStream) stopFlow(true); 
     else {
-        // Just clear UI state, don't kill media
         setShowResult(false);
         setAudioURL(null);
         setPhase('idle');
         transcriptRef.current = '';
+        setErrorMsg(null);
     }
-    
     window.speechSynthesis.cancel();
     setCurrentIndex(prev => (prev + 1) % filteredData.length);
   };
@@ -456,6 +468,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
     setPhase('idle');
     setShowResult(false);
     setAudioURL(null);
+    setErrorMsg(null);
     setCurrentIndex(prev => (prev - 1 + filteredData.length) % filteredData.length);
   };
 
@@ -466,6 +479,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
         setAudioURL(null);
         setPhase('idle');
         transcriptRef.current = '';
+        setErrorMsg(null);
     }
     window.speechSynthesis.cancel();
     const randIndex = Math.floor(Math.random() * filteredData.length);
@@ -529,6 +543,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
              <button onClick={() => currentEntry && speakTextPromise(currentEntry.question, 1.0, voicePrefs)} className="absolute right-0 top-0 p-2 text-indigo-200 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900 rounded-full transition-all"><Volume2 size={20} /></button>
              <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100 mb-2 px-6">{currentEntry?.question}</h3>
              {isRecording && <div className="flex items-center justify-center gap-2 text-red-500 font-bold animate-pulse"><Mic2 size={20} /> 正在錄音...</div>}
+             {errorMsg && <div className="flex items-center justify-center gap-1 text-orange-500 text-xs font-bold mt-2 animate-bounce"><AlertCircle size={14} /> {errorMsg}</div>}
            </div>
 
            <div className={`transition-all duration-500 w-full ${showResult ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-10 hidden'}`}>
@@ -577,7 +592,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
              <div className="flex-1 flex flex-col items-center justify-center opacity-30">
                <div className="w-24 h-24 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center mb-4"><Headphones size={48} className="text-slate-300 dark:text-slate-600" /></div>
                <p className="text-sm text-slate-400 dark:text-slate-500 font-bold">聆聽 • 複誦 • 評分</p>
-               {phase === 'recording' && !isMicReady && <p className="text-[10px] text-red-500 mt-2">連接麥克風中...</p>}
+               {phase === 'recording' && !isMicReady && !errorMsg && <p className="text-[10px] text-red-500 mt-2">連接麥克風中...</p>}
              </div>
            )}
         </div>
