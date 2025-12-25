@@ -5,6 +5,9 @@ import {
 import { VocabItem } from '../constants';
 import { speakTextPromise, calculateSimilarity, getBadgeInfo } from '../utils';
 
+// 無聲 MP3 Base64，用於欺騙 iOS 保持 Audio Session 活躍
+const SILENT_AUDIO = "data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4LjI5LjEwMAAAAAAAAAAAAAAA//OEAAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAAEAAABIADAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMD//////////////////////////////////////////////////////////////////wAAAAAATGF2YzU4LjU0AAAAAAAAAAAAAAAAJAAAAAAAAAAAASAA82oskAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
 interface Props {
   vocabData: VocabItem[];
   courses: string[];
@@ -31,6 +34,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
   const recognitionRef = useRef<any>(null);
   const flowRef = useRef({ active: false });
   const audioRef = useRef<HTMLAudioElement>(null);
+  const silentAudioRef = useRef<HTMLAudioElement>(null); // iOS Keep-Alive Player
 
   const filteredData = useMemo(() => { return coachCourse ? vocabData.filter(v => v.course === coachCourse && !v.isHidden) : []; }, [vocabData, coachCourse]);
   const currentEntry = filteredData.length > 0 ? filteredData[currentIndex] : null;
@@ -65,13 +69,17 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
   useEffect(() => {
     if ((isAutoLoop || isRandomLoop) && isPlayingFlow && flowRef.current.active && filteredData.length > 0) {
       const timer = setTimeout(() => {
-        startFlow();
+        startFlow(false); // Pass false to indicate this is a loop iteration (no user gesture)
       }, 1000); 
       return () => clearTimeout(timer);
     }
   }, [currentIndex]);
 
   const calculateFinalScores = (userText: string, targetText: string, durationSec: number) => {
+      // iOS Hack: 如果在循環模式下無法辨識語音(因為權限被擋)，給一個基礎分或顯示提示
+      // 這裡如果 userText 是空的，我們假設可能是 iOS 沒錄到文字，但也可能只是沒講話
+      // 為了不讓使用者太挫折，如果錄音有長度但沒文字，我們給予 "Review Mode" (0分但顯示回放)
+      
       if (!userText || userText.trim().length === 0) return { pronunciation: 0, fluency: 0, stress: 0, total: 0 };
       const pronunciationScore = calculateSimilarity(userText, targetText);
       const targetWordCount = targetText.split(/\s+/).length;
@@ -105,17 +113,18 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
 
   // 初始化或獲取現有的麥克風流
   const getPersistentStream = async () => {
-      // 如果已經有活躍的流，直接重用 (關鍵修改：不要重新請求)
-      if (streamRef.current && streamRef.current.active) {
+      // 檢查流是否活躍
+      if (streamRef.current && streamRef.current.active && streamRef.current.getAudioTracks().some(t => t.readyState === 'live')) {
           return streamRef.current;
       }
       
       try {
           const stream = await navigator.mediaDevices.getUserMedia({ 
             audio: {
-                echoCancellation: true, // 保持為 true 以減少回音，但在循環模式下不會導致重複 ducking
+                echoCancellation: true, 
                 noiseSuppression: true,
-                autoGainControl: true
+                autoGainControl: true,
+                channelCount: 1 // Mono is usually safer for mobile web
             } 
           });
           streamRef.current = stream;
@@ -136,10 +145,13 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
     }
   };
 
-  const startFlow = async () => {
+  const startFlow = async (isUserGesture = true) => {
     if (!currentEntry || isRecording) return;
     
-    // 注意：不再這裡呼叫 releaseMicrophone()，保持麥克風開啟
+    // [iOS Hack] 1. 確保無聲音樂在播放 (保活 Audio Session)
+    if (silentAudioRef.current && silentAudioRef.current.paused) {
+        silentAudioRef.current.play().catch(e => console.warn("Silent audio blocked", e));
+    }
     
     flowRef.current.active = true; 
     setIsPlayingFlow(true); 
@@ -157,10 +169,18 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
 
       setPhase('recording');
       
-      // 1. 獲取或重用流
-      const stream = await getPersistentStream();
+      // [iOS Hack] 2. 獲取流 (如果是用戶點擊，強制重新獲取以確保狀態新鮮；如果是循環，嘗試重用)
+      let stream;
+      if (isUserGesture) {
+          // 第一次點擊，強制刷新流
+          fullReleaseMicrophone();
+          stream = await getPersistentStream();
+      } else {
+          // 自動循環，必須重用，因為 iOS 禁止在 setTimeout 中 getUserMedia
+          stream = await getPersistentStream(); 
+      }
       
-      // 2. 建立錄音器
+      // 3. 建立錄音器
       const mimeType = getSupportedMimeType();
       const options = mimeType ? { mimeType } : undefined;
       mediaRecorderRef.current = new MediaRecorder(stream, options);
@@ -189,18 +209,22 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
 
       mediaRecorderRef.current.start();
       
-      // 3. 嘗試啟動辨識 (在手機循環模式下可能會失敗，需容錯)
+      // 4. 嘗試啟動辨識 
+      // [iOS Hack] 在循環中 SpeechRecognition 幾乎肯定會失敗，我們必須 Catch 住它，不要讓整個流程崩潰
       try {
         if (recognitionRef.current) {
-            // 如果上次沒停好，先停
             try { recognitionRef.current.stop(); } catch(e) {}
             // 延遲一點點啟動
             setTimeout(() => {
-                try { recognitionRef.current?.start(); } catch(e) {}
+                try { 
+                    recognitionRef.current?.start(); 
+                } catch(e) {
+                    console.warn("Speech recognition failed to start (expected on iOS loop):", e);
+                }
             }, 100);
         }
       } catch (e) {
-        console.warn("Speech recognition start ignored:", e);
+        console.warn("Speech recognition setup failed:", e);
       }
       
       setIsRecording(true);
@@ -220,8 +244,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
           mediaRecorderRef.current.stop();
       }
       
-      // 重要：這裡不再呼叫 releaseMicrophone()！
-      // 保持 streamRef.current 活躍，供下一題使用。
+      // 重要：絕對不要釋放麥克風，讓它在背景保持活躍，因為 iOS 不會讓我們在下一次循環重新開啟
 
       await onStopPromise;
       const durationSec = (Date.now() - startTime) / 1000;
@@ -276,6 +299,8 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
           setPhase('idle');
           // 如果不是循環模式，單題結束後可以釋放麥克風
           fullReleaseMicrophone();
+          // 停止無聲音樂
+          if (silentAudioRef.current) silentAudioRef.current.pause();
       }
     } catch(e) { 
       console.error("Speaking coach flow error:", e);
@@ -297,6 +322,12 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
       
       // 只有在完全停止測驗時，才真正釋放硬體資源
       fullReleaseMicrophone();
+      
+      // 停止無聲音樂
+      if (silentAudioRef.current) {
+          silentAudioRef.current.pause();
+          silentAudioRef.current.currentTime = 0;
+      }
 
       if (audioRef.current) {
           audioRef.current.pause();
@@ -315,8 +346,6 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
   };
 
   const handlePrev = () => {
-    // 手動切換也視為停止自動流的一部分，但如果還在測驗中，我們可能想保持麥克風？
-    // 為了簡單起見，手動切換會停止當前播放
     stopFlow(); 
     setPhase('idle');
     setShowResult(false);
@@ -346,6 +375,9 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
 
   return (
     <div className="flex flex-col h-full bg-slate-50 dark:bg-slate-950 relative overflow-y-auto pb-20">
+      {/* iOS Silent Audio Keep-Alive */}
+      <audio ref={silentAudioRef} src={SILENT_AUDIO} loop muted={false} playsInline className="hidden" />
+
       <div className="bg-white dark:bg-slate-900 p-4 shadow-sm sticky top-0 z-10">
         <div className="flex justify-between items-center mb-4">
            <div className="flex items-center gap-2 flex-1 min-w-0">
@@ -440,7 +472,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
         </div>
 
         <button 
-          onClick={isPlayingFlow ? stopFlow : startFlow} 
+          onClick={() => isPlayingFlow ? stopFlow() : startFlow(true)} 
           className={`w-full max-w-md py-4 rounded-2xl font-bold text-lg shadow-xl transition-all flex items-center justify-center gap-3 ${isPlayingFlow ? 'bg-red-50 dark:bg-red-900/20 text-red-500 dark:text-red-400 border border-red-100 dark:border-red-900' : 'bg-indigo-600 text-white shadow-indigo-200 dark:shadow-none hover:scale-105 active:scale-95'}`}
         >
           {isPlayingFlow ? <><StopCircle /> 停止測驗</> : <><PlayCircle /> 開始測驗</>}
