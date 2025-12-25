@@ -50,20 +50,23 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
             if (!finalTranscript && event.results.length > 0) finalTranscript = event.results[0][0].transcript;
             if (finalTranscript) transcriptRef.current = finalTranscript;
         };
-        // Add onerror handler to catch other potential errors silently
         recognitionRef.current.onerror = (event: any) => {
-             // console.warn('Speech recognition error', event.error);
+             // Silently handle errors
         };
     }
-    return () => stopFlow();
+    // Component unmount cleanup
+    return () => {
+        stopFlow();
+        fullReleaseMicrophone(); // Ensure hardware is released on unmount
+    };
   }, []);
 
-  // 監聽題目索引變化，僅在「測驗中」且「循環開啟」時自動開始下一輪
+  // Watch index changes for auto loop
   useEffect(() => {
     if ((isAutoLoop || isRandomLoop) && isPlayingFlow && flowRef.current.active && filteredData.length > 0) {
       const timer = setTimeout(() => {
         startFlow();
-      }, 1500); // 增加延遲到 1.5秒，確保手機音訊系統有足夠時間重置狀態
+      }, 1000); 
       return () => clearTimeout(timer);
     }
   }, [currentIndex]);
@@ -100,7 +103,31 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
     return '';
   };
 
-  const releaseMicrophone = () => {
+  // 初始化或獲取現有的麥克風流
+  const getPersistentStream = async () => {
+      // 如果已經有活躍的流，直接重用 (關鍵修改：不要重新請求)
+      if (streamRef.current && streamRef.current.active) {
+          return streamRef.current;
+      }
+      
+      try {
+          const stream = await navigator.mediaDevices.getUserMedia({ 
+            audio: {
+                echoCancellation: true, // 保持為 true 以減少回音，但在循環模式下不會導致重複 ducking
+                noiseSuppression: true,
+                autoGainControl: true
+            } 
+          });
+          streamRef.current = stream;
+          return stream;
+      } catch (e) {
+          console.error("Microphone permission denied or error", e);
+          throw e;
+      }
+  };
+
+  // 真正釋放麥克風 (只在停止測驗時呼叫)
+  const fullReleaseMicrophone = () => {
     if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => {
             try { track.stop(); } catch(e) { console.warn('Failed to stop track', e); }
@@ -112,10 +139,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
   const startFlow = async () => {
     if (!currentEntry || isRecording) return;
     
-    // 確保上一輪的資源已清理
-    releaseMicrophone();
-    // 給予系統一點時間處理資源釋放
-    await new Promise(r => setTimeout(r, 200));
+    // 注意：不再這裡呼叫 releaseMicrophone()，保持麥克風開啟
     
     flowRef.current.active = true; 
     setIsPlayingFlow(true); 
@@ -133,21 +157,10 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
 
       setPhase('recording');
       
-      // 使用特定的音訊約束，嘗試避免手機上的音量變小問題 (Echo Cancellation 往往是主因)
-      // 並且等待一下，確保 getUserMedia 成功
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        audio: {
-            echoCancellation: false,
-            noiseSuppression: false,
-            autoGainControl: false,
-            channelCount: 1
-        } 
-      });
-      streamRef.current = stream; 
-
-      // 等待流穩定
-      await new Promise(r => setTimeout(r, 300));
+      // 1. 獲取或重用流
+      const stream = await getPersistentStream();
       
+      // 2. 建立錄音器
       const mimeType = getSupportedMimeType();
       const options = mimeType ? { mimeType } : undefined;
       mediaRecorderRef.current = new MediaRecorder(stream, options);
@@ -176,14 +189,18 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
 
       mediaRecorderRef.current.start();
       
-      // 稍微延遲再啟動語音辨識，避免搶奪 Audio Context
-      await new Promise(r => setTimeout(r, 200));
-
+      // 3. 嘗試啟動辨識 (在手機循環模式下可能會失敗，需容錯)
       try {
-        // 在 iOS 循環模式下，這可能會因為沒有用戶手勢而失敗，但我們不能讓它阻斷錄音
-        recognitionRef.current?.start();
+        if (recognitionRef.current) {
+            // 如果上次沒停好，先停
+            try { recognitionRef.current.stop(); } catch(e) {}
+            // 延遲一點點啟動
+            setTimeout(() => {
+                try { recognitionRef.current?.start(); } catch(e) {}
+            }, 100);
+        }
       } catch (e) {
-        console.warn("Speech recognition start ignored (likely no user gesture in loop):", e);
+        console.warn("Speech recognition start ignored:", e);
       }
       
       setIsRecording(true);
@@ -194,7 +211,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
       
       await new Promise(r => setTimeout(r, recordDuration));
       
-      // --- 錄音結束處理 ---
+      // --- 錄音結束 ---
       setIsRecording(false);
       
       try { recognitionRef.current?.stop(); } catch(e) {}
@@ -203,8 +220,8 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
           mediaRecorderRef.current.stop();
       }
       
-      // 關鍵修復：立即釋放麥克風硬體
-      releaseMicrophone();
+      // 重要：這裡不再呼叫 releaseMicrophone()！
+      // 保持 streamRef.current 活躍，供下一題使用。
 
       await onStopPromise;
       const durationSec = (Date.now() - startTime) / 1000;
@@ -257,6 +274,8 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
       } else {
           setIsPlayingFlow(false);
           setPhase('idle');
+          // 如果不是循環模式，單題結束後可以釋放麥克風
+          fullReleaseMicrophone();
       }
     } catch(e) { 
       console.error("Speaking coach flow error:", e);
@@ -275,7 +294,10 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
           mediaRecorderRef.current.stop();
       }
       recognitionRef.current?.abort();
-      releaseMicrophone();
+      
+      // 只有在完全停止測驗時，才真正釋放硬體資源
+      fullReleaseMicrophone();
+
       if (audioRef.current) {
           audioRef.current.pause();
           audioRef.current.currentTime = 0;
@@ -284,6 +306,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
   };
 
   const handleNext = () => {
+    // 這裡不 call stopFlow，保持狀態
     window.speechSynthesis.cancel();
     setPhase('idle');
     setShowResult(false);
@@ -292,7 +315,9 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
   };
 
   const handlePrev = () => {
-    window.speechSynthesis.cancel();
+    // 手動切換也視為停止自動流的一部分，但如果還在測驗中，我們可能想保持麥克風？
+    // 為了簡單起見，手動切換會停止當前播放
+    stopFlow(); 
     setPhase('idle');
     setShowResult(false);
     setAudioURL(null);
