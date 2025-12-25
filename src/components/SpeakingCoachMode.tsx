@@ -25,7 +25,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
   const [isRecording, setIsRecording] = useState(false);
   
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const streamRef = useRef<MediaStream | null>(null); // 新增：用於追蹤並關閉麥克風硬體
+  const streamRef = useRef<MediaStream | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const transcriptRef = useRef<string>('');
   const recognitionRef = useRef<any>(null);
@@ -63,7 +63,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
     if ((isAutoLoop || isRandomLoop) && isPlayingFlow && flowRef.current.active && filteredData.length > 0) {
       const timer = setTimeout(() => {
         startFlow();
-      }, 1000); // 增加延遲到 1秒，確保手機音訊系統有足夠時間重置狀態
+      }, 1500); // 增加延遲到 1.5秒，確保手機音訊系統有足夠時間重置狀態
       return () => clearTimeout(timer);
     }
   }, [currentIndex]);
@@ -84,7 +84,6 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
       return { pronunciation: pronunciationScore, fluency: fluencyScore, stress: stressScore, total: totalScore };
   };
 
-  // 輔助函式：取得瀏覽器支援的 MIME Type
   const getSupportedMimeType = () => {
     const types = [
       'audio/webm;codecs=opus',
@@ -98,11 +97,9 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
         return type;
       }
     }
-    return ''; // 讓瀏覽器使用預設值
+    return '';
   };
 
-  // 關鍵修復：釋放麥克風硬體資源
-  // 這能解決手機上錄音後音量變小(ducking)以及下一題錄不到聲音(resource lock)的問題
   const releaseMicrophone = () => {
     if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => {
@@ -115,8 +112,10 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
   const startFlow = async () => {
     if (!currentEntry || isRecording) return;
     
-    // 確保上一輪的資源已清理，防止資源衝突
+    // 確保上一輪的資源已清理
     releaseMicrophone();
+    // 給予系統一點時間處理資源釋放
+    await new Promise(r => setTimeout(r, 200));
     
     flowRef.current.active = true; 
     setIsPlayingFlow(true); 
@@ -134,11 +133,21 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
 
       setPhase('recording');
       
-      // 請求新的麥克風權限
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream; // 存入 Ref 以便後續關閉
+      // 使用特定的音訊約束，嘗試避免手機上的音量變小問題 (Echo Cancellation 往往是主因)
+      // 並且等待一下，確保 getUserMedia 成功
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: {
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false,
+            channelCount: 1
+        } 
+      });
+      streamRef.current = stream; 
+
+      // 等待流穩定
+      await new Promise(r => setTimeout(r, 300));
       
-      // 使用支援的 MIME Type 建立 MediaRecorder
       const mimeType = getSupportedMimeType();
       const options = mimeType ? { mimeType } : undefined;
       mediaRecorderRef.current = new MediaRecorder(stream, options);
@@ -151,13 +160,11 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
       const onStopPromise = new Promise<string>((resolve) => {
         if (mediaRecorderRef.current) {
           mediaRecorderRef.current.onstop = () => {
-            // 使用 recorder 實際使用的 mimeType 建立 Blob，避免格式不符
             const recordedType = mediaRecorderRef.current?.mimeType || 'audio/webm';
             const audioBlob = new Blob(audioChunksRef.current, { type: recordedType });
             const url = URL.createObjectURL(audioBlob);
             setAudioURL(url);
             
-            // 重要：直接操作 DOM 元素設置 src
             if (audioRef.current) {
                 audioRef.current.src = url;
                 audioRef.current.load();
@@ -169,11 +176,14 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
 
       mediaRecorderRef.current.start();
       
+      // 稍微延遲再啟動語音辨識，避免搶奪 Audio Context
+      await new Promise(r => setTimeout(r, 200));
+
       try {
-        // 防止 "recognition has already started" 錯誤
+        // 在 iOS 循環模式下，這可能會因為沒有用戶手勢而失敗，但我們不能讓它阻斷錄音
         recognitionRef.current?.start();
       } catch (e) {
-        console.warn("Speech recognition start ignored:", e);
+        console.warn("Speech recognition start ignored (likely no user gesture in loop):", e);
       }
       
       setIsRecording(true);
@@ -187,16 +197,13 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
       // --- 錄音結束處理 ---
       setIsRecording(false);
       
-      // 1. 停止辨識
       try { recognitionRef.current?.stop(); } catch(e) {}
       
-      // 2. 停止錄音器
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
           mediaRecorderRef.current.stop();
       }
       
-      // 3. 關鍵修復：立即釋放麥克風硬體
-      // 這會讓手機退出「通話模式」，恢復正常音量，並釋放硬體給下一次使用
+      // 關鍵修復：立即釋放麥克風硬體
       releaseMicrophone();
 
       await onStopPromise;
@@ -208,7 +215,6 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
       const finalScores = calculateFinalScores(transcriptRef.current, currentEntry.answer, durationSec);
       setScores(finalScores);
       
-      // 只有 70 分以上才計入熟練度
       if (finalScores.total >= 70) {
         onUpdateVocab({ ...currentEntry, mastery: (currentEntry.mastery || 0) + finalScores.total });
       }
@@ -216,11 +222,9 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
       setShowResult(true);
 
       setPhase('reviewing'); 
-      // 麥克風已釋放，這裡的播放音量應該已恢復正常 (不再被 ducking)
       await speakTextPromise(currentEntry.answer, 1.0, voicePrefs);
       if (!flowRef.current.active) return;
 
-      // 播放使用者錄音
       if (audioRef.current) {
           try {
               const playPromise = audioRef.current.play();
@@ -271,10 +275,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
           mediaRecorderRef.current.stop();
       }
       recognitionRef.current?.abort();
-      
-      // 停止時也要確保釋放硬體
       releaseMicrophone();
-
       if (audioRef.current) {
           audioRef.current.pause();
           audioRef.current.currentTime = 0;
@@ -395,11 +396,6 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
                    {phase === 'reviewing' && <div className="text-[10px] text-indigo-500 dark:text-indigo-400 font-bold animate-pulse">播放中...</div>}
                  </div>
                  
-                 {/* 
-                    Mobile Fix: 
-                    Always render the audio element to ensure the ref is populated. 
-                    Control visibility with CSS instead of conditional rendering to avoid ref being null during async ops.
-                 */}
                  <audio 
                     ref={audioRef}
                     controls 
