@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   ChevronRight, Headphones, PlayCircle, PauseCircle, SkipForward, SkipBack, 
-  RefreshCcw, Activity, Clock, ArrowLeft, RotateCw, List, Zap
+  RefreshCcw, Activity, Clock, ArrowLeft, RotateCw, List, Zap, ChevronUp, ChevronDown
 } from 'lucide-react';
 import { VocabItem } from '../constants';
 import { speakTextPromise } from '../utils';
@@ -19,6 +19,7 @@ const WalkmanMode: React.FC<Props> = ({ vocabData, courses, voicePrefs }) => {
   const [selectedCourse, setSelectedCourse] = useState<string | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   
   // Settings
   const [playbackMode, setPlaybackMode] = useState<'loop' | 'single' | 'random'>('loop');
@@ -361,8 +362,8 @@ const WalkmanMode: React.FC<Props> = ({ vocabData, courses, voicePrefs }) => {
 
       <div className="absolute inset-0 w-full h-full overflow-hidden pointer-events-none"><div className="absolute top-[-20%] left-[-20%] w-[140%] h-[140%] bg-[radial-gradient(circle,rgba(79,70,229,0.4)_0%,rgba(0,0,0,0)_70%)] opacity-50 blur-3xl animate-pulse-slow"></div></div>
       
-      {/* Header - Fixed Top */}
-      <div className="p-6 flex justify-between items-center z-10 relative shrink-0">
+      {/* Header - Fixed Top - Reduced padding */}
+      <div className="p-4 flex justify-between items-center z-10 relative shrink-0">
           <button onClick={() => { stopAudioImmediately(); setIsPlaying(false); disableBackgroundAudioHack(); setSelectedCourse(null); }} className="p-2 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-md transition-all"><ArrowLeft size={20} /></button>
           <span className="text-sm font-bold opacity-80 uppercase tracking-widest">Walkman</span>
           <div className="w-10"></div>
@@ -370,10 +371,10 @@ const WalkmanMode: React.FC<Props> = ({ vocabData, courses, voicePrefs }) => {
       
       {/* Scrollable Content Area */}
       <div className="flex-1 overflow-y-auto z-0 w-full scroll-smooth">
-          <div className="flex flex-col items-center p-6 max-w-md mx-auto w-full pb-[340px]">
+          <div className="flex flex-col items-center px-4 pt-1 max-w-md mx-auto w-full pb-[340px]">
               
-              {/* Playback Status Indicator */}
-              <div className="min-h-[2rem] flex items-center justify-center mb-6 gap-2">
+              {/* Playback Status Indicator - Reduced margins */}
+              <div className="min-h-[1.5rem] flex items-center justify-center mb-2 gap-2">
                 {isPlaying && repeatCount > 1 && (
                     <div className="bg-indigo-600 text-white text-[10px] font-bold px-3 py-1 rounded-full shadow-lg border border-indigo-400 animate-pulse">
                         播放中: {visualRepeatCount} / {repeatCount}
@@ -387,55 +388,66 @@ const WalkmanMode: React.FC<Props> = ({ vocabData, courses, voicePrefs }) => {
                 )}
               </div>
 
-              {/* Question */}
-              <div className="w-full text-center px-2 mb-6">
-                  <h3 className="text-xl sm:text-2xl font-bold text-indigo-200 leading-relaxed drop-shadow-md whitespace-pre-wrap break-words">
+              {/* Question - Reduced font and margin */}
+              <div className="w-full text-center px-2 mb-1">
+                  <h3 className="text-lg sm:text-xl font-bold text-indigo-200 leading-relaxed drop-shadow-md whitespace-pre-wrap break-words">
                     {currentEntry?.question}
                   </h3>
               </div>
 
-              {/* Phonetic */}
+              {/* Answer - Reduced font, margin, min-height */}
+              <div className="w-full text-center px-2 mb-2 flex flex-col items-center justify-center min-h-[40px]">
+                <h2 className="text-xl sm:text-2xl font-black text-white drop-shadow-xl leading-snug whitespace-pre-wrap break-words">
+                    {currentEntry?.answer}
+                </h2>
+              </div>
+
+              {/* Phonetic - Reduced margin */}
               {currentEntry?.phonetic && (
-                <div className="mb-8 px-4 py-2 rounded-full bg-white/5 border border-white/10 text-slate-300 font-mono text-sm tracking-wider shadow-sm text-center">
+                <div className="mb-3 px-4 py-1 rounded-full bg-white/5 border border-white/10 text-slate-300 font-mono text-xs tracking-wider shadow-sm text-center">
                     {currentEntry.phonetic}
                 </div>
               )}
               
-              {/* Answer - Sized appropriately and ensuring it doesn't get cut off */}
-              <div className="w-full text-center px-2 mb-8 flex flex-col items-center justify-center min-h-[100px]">
-                <h2 className="text-2xl sm:text-3xl font-black text-white drop-shadow-xl leading-snug whitespace-pre-wrap break-words">
-                    {currentEntry?.answer}
-                </h2>
-              </div>
-              
-              <p className="text-slate-500 text-xs font-bold tracking-widest uppercase opacity-70 mb-4">{selectedCourse} • {currentIndex + 1} / {filteredData.length}</p>
+              <p className="text-slate-500 text-[10px] font-bold tracking-widest uppercase opacity-70 mb-4">{selectedCourse} • {currentIndex + 1} / {filteredData.length}</p>
           </div>
       </div>
       
       {/* Control Panel - Fixed at bottom */}
       <div className="absolute bottom-0 left-0 right-0 z-20 w-full p-4 pb-safe bg-gradient-to-t from-slate-900 via-slate-900/95 to-transparent pt-12">
           <div className="max-w-md mx-auto">
-              <div className="bg-slate-800/80 backdrop-blur-xl rounded-3xl p-5 border border-white/10 shadow-2xl space-y-4">
-                  {/* Functional Controls */}
-                  <div className="flex flex-col gap-3">
-                      <div className="grid grid-cols-2 gap-3">
-                            <button onClick={toggleRepeatCount} className="flex items-center justify-center gap-2 bg-white/5 hover:bg-white/10 active:bg-white/20 py-3 rounded-xl transition-all border border-white/5 group">
-                                <span className="p-1.5 bg-indigo-500/30 rounded-full text-indigo-300 group-hover:text-white transition-colors"><RotateCw size={16} /></span>
-                                <span className="text-xs font-bold text-indigo-100">重複: {repeatCount}次</span>
-                            </button>
-                            <button onClick={toggleSpeed} className="flex items-center justify-center gap-2 bg-white/5 hover:bg-white/10 active:bg-white/20 py-3 rounded-xl transition-all border border-white/5 group">
-                                <span className="p-1.5 bg-indigo-500/30 rounded-full text-indigo-300 group-hover:text-white transition-colors"><Clock size={16} /></span>
-                                <span className="text-xs font-bold text-indigo-100">語速: {playbackSpeed}x</span>
-                            </button>
-                      </div>
-                      <button onClick={togglePlaybackMode} className="w-full flex items-center justify-center gap-2 bg-white/5 hover:bg-white/10 active:bg-white/20 py-3 rounded-xl transition-all border border-white/5 group">
-                          <span className="p-1.5 bg-indigo-500/30 rounded-full text-indigo-300 group-hover:text-white transition-colors">{getModeDisplay().icon}</span>
-                          <span className="text-xs font-bold text-indigo-100">模式: {getModeDisplay().label}</span>
-                      </button>
+              <div className="bg-slate-800/80 backdrop-blur-xl rounded-3xl p-4 border border-white/10 shadow-2xl relative">
+                  
+                  {/* Toggle Settings Button */}
+                  <button 
+                    onClick={() => setShowSettings(!showSettings)}
+                    className="absolute -top-4 left-1/2 -translate-x-1/2 bg-slate-800 border border-white/10 text-white/50 hover:text-white p-1 rounded-full shadow-lg transition-all z-30"
+                  >
+                    {showSettings ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+                  </button>
+
+                  {/* Functional Controls (Collapsible) */}
+                  <div className={`transition-all duration-300 ease-in-out overflow-hidden ${showSettings ? 'max-h-[150px] opacity-100 mb-3' : 'max-h-0 opacity-0 mb-0'}`}>
+                    <div className="flex flex-col gap-2 pt-1">
+                        <div className="grid grid-cols-2 gap-2">
+                                <button onClick={toggleRepeatCount} className="flex items-center justify-center gap-2 bg-white/5 hover:bg-white/10 active:bg-white/20 py-3 rounded-xl transition-all border border-white/5 group">
+                                    <span className="p-1.5 bg-indigo-500/30 rounded-full text-indigo-300 group-hover:text-white transition-colors"><RotateCw size={16} /></span>
+                                    <span className="text-xs font-bold text-indigo-100">重複: {repeatCount}次</span>
+                                </button>
+                                <button onClick={toggleSpeed} className="flex items-center justify-center gap-2 bg-white/5 hover:bg-white/10 active:bg-white/20 py-3 rounded-xl transition-all border border-white/5 group">
+                                    <span className="p-1.5 bg-indigo-500/30 rounded-full text-indigo-300 group-hover:text-white transition-colors"><Clock size={16} /></span>
+                                    <span className="text-xs font-bold text-indigo-100">語速: {playbackSpeed}x</span>
+                                </button>
+                        </div>
+                        <button onClick={togglePlaybackMode} className="w-full flex items-center justify-center gap-2 bg-white/5 hover:bg-white/10 active:bg-white/20 py-3 rounded-xl transition-all border border-white/5 group">
+                            <span className="p-1.5 bg-indigo-500/30 rounded-full text-indigo-300 group-hover:text-white transition-colors">{getModeDisplay().icon}</span>
+                            <span className="text-xs font-bold text-indigo-100">模式: {getModeDisplay().label}</span>
+                        </button>
+                    </div>
                   </div>
 
                   {/* Playback Controls */}
-                  <div className="flex items-center justify-around pt-2">
+                  <div className="flex items-center justify-around">
                       <button onClick={handlePrev} className="p-4 text-white/70 hover:text-white hover:scale-110 transition-all active:scale-95"><SkipBack size={32} /></button>
                       <button onClick={togglePlayPause} className="w-20 h-20 rounded-full bg-white text-indigo-600 flex items-center justify-center shadow-2xl shadow-indigo-500/50 hover:scale-105 hover:bg-indigo-50 active:scale-95 transition-all">
                           {isPlaying ? <PauseCircle size={48} fill="currentColor" /> : <PlayCircle size={48} fill="currentColor" />}

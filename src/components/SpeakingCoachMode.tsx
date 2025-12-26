@@ -146,7 +146,18 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
           return { pronunciation: 0, fluency: 0, stress: 0, total: 0 };
       }
       
-      const pronunciationScore = calculateSimilarity(userText, targetText);
+      const rawSimilarity = calculateSimilarity(userText, targetText);
+      
+      // --- 發音評分調整：信心加成模式 (Confidence Boost) ---
+      // 為了給予使用者更多正面回饋，將原始相似度進行曲線提升。
+      // 算法：填補原始分數與 100 分之間 50% 的差距。
+      // 例如：原始 60 分 -> 60 + (40 * 0.5) = 80 分
+      // 例如：原始 80 分 -> 80 + (20 * 0.5) = 90 分
+      let pronunciationScore = rawSimilarity;
+      if (rawSimilarity > 0) {
+          pronunciationScore = Math.min(100, Math.round(rawSimilarity + (100 - rawSimilarity) * 0.5));
+      }
+
       const targetWordCount = targetText.split(/\s+/).length;
       const userWordCount = userText.split(/\s+/).length;
       
@@ -162,8 +173,9 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
       }
       fluencyScore = Math.max(0, Math.min(100, fluencyScore));
 
+      // 重音分數也稍微放寬，與發音分數連動
       let stressScore = Math.round(pronunciationScore * 0.7 + fluencyScore * 0.3);
-      if (pronunciationScore > 90) stressScore = Math.min(100, stressScore + 5);
+      if (pronunciationScore > 80) stressScore = Math.min(100, stressScore + 5);
 
       const totalScore = Math.round((pronunciationScore + fluencyScore + stressScore) / 3);
       return { pronunciation: pronunciationScore, fluency: fluencyScore, stress: stressScore, total: totalScore };
@@ -368,7 +380,8 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
       // No, strictly need text for pronunciation. But we don't punish errors too hard visually.
       setScores(finalScores);
       
-      if (finalScores.total >= 70) {
+      // 門檻調整：50 分以上就算通過
+      if (finalScores.total >= 50) {
         onUpdateVocab({ ...currentEntry, mastery: (currentEntry.mastery || 0) + finalScores.total });
       }
 
@@ -495,7 +508,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
     </div>
   );
 
-  const isPass = scores.total >= 70;
+  const isPass = scores.total >= 50; // 門檻從 70 降至 50
 
   return (
     <div className="flex flex-col h-full bg-slate-50 dark:bg-slate-950 relative overflow-y-auto pb-20">

@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Volume2, ChevronRight, Activity, LogOut, AlertTriangle, Mail, Lock, LogIn, UserPlus, Loader2, Moon, Sun, User, Database, Save, X, Github } from 'lucide-react';
+import { Settings, Volume2, ChevronRight, Activity, LogOut, AlertTriangle, Mail, Lock, LogIn, UserPlus, Loader2, Moon, Sun, User, Database, Save, X, Github, PlayCircle } from 'lucide-react';
 import { User as FirebaseUser, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword, signInAnonymously, updateProfile, signInWithPopup } from 'firebase/auth';
 import { auth, isFirebaseReady, githubProvider } from '../firebase';
-import { getVoices } from '../utils';
+import { getVoices, speakTextPromise } from '../utils';
 
 interface Props {
   user: FirebaseUser | null;
@@ -113,6 +113,14 @@ const PersonalMode: React.FC<Props> = ({ user, voicePrefs, setVoicePrefs, isDark
             window.location.reload();
         } catch (e) {
             setError('JSON 格式錯誤，請檢查');
+        }
+    };
+
+    const handleTestVoice = (lang: 'zh' | 'en') => {
+        if (lang === 'zh') {
+            speakTextPromise("你好，這是一個語音測試，聽起來如何？", 1.0, voicePrefs);
+        } else {
+            speakTextPromise("Hello, this is a voice test. How does it sound?", 1.0, voicePrefs);
         }
     };
 
@@ -294,22 +302,32 @@ const PersonalMode: React.FC<Props> = ({ user, voicePrefs, setVoicePrefs, isDark
                         <div className="flex items-center gap-2 mb-2 border-b border-slate-200 dark:border-slate-700 pb-2"><Volume2 size={16} className="text-indigo-500" /><h3 className="text-sm font-bold text-slate-700 dark:text-slate-200 uppercase tracking-wider">語音設定 (TTS)</h3></div>
                         <div>
                             <label className="text-xs font-bold text-slate-500 dark:text-slate-400 mb-1.5 block">中文語音</label>
-                            <div className="relative">
-                                <select value={voicePrefs.zh || ''} onChange={(e) => setVoicePrefs(prev => ({...prev, zh: e.target.value}))} className="w-full p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm appearance-none text-slate-700 dark:text-slate-200">
-                                    <option value="">✨ 自動選擇 (推薦)</option>
-                                    {zhVoices.map(v => (<option key={v.voiceURI} value={v.voiceURI}>{v.name}</option>))}
-                                </select>
-                                <ChevronRight className="absolute right-3 top-3.5 text-slate-400 rotate-90" size={16} />
+                            <div className="flex gap-2 items-center">
+                                <div className="relative flex-1">
+                                    <select value={voicePrefs.zh || ''} onChange={(e) => setVoicePrefs(prev => ({...prev, zh: e.target.value}))} className="w-full p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm appearance-none text-slate-700 dark:text-slate-200">
+                                        <option value="">✨ 自動選擇 (推薦)</option>
+                                        {zhVoices.map(v => (<option key={v.voiceURI} value={v.voiceURI}>{v.name}</option>))}
+                                    </select>
+                                    <ChevronRight className="absolute right-3 top-3.5 text-slate-400 rotate-90" size={16} />
+                                </div>
+                                <button onClick={() => handleTestVoice('zh')} className="p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-indigo-500 hover:text-indigo-600 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors" title="試聽語音">
+                                    <PlayCircle size={20} />
+                                </button>
                             </div>
                         </div>
                         <div>
                             <label className="text-xs font-bold text-slate-500 dark:text-slate-400 mb-1.5 block">英文語音</label>
-                            <div className="relative">
-                                <select value={voicePrefs.en || ''} onChange={(e) => setVoicePrefs(prev => ({...prev, en: e.target.value}))} className="w-full p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm appearance-none text-slate-700 dark:text-slate-200">
-                                    <option value="">✨ 自動選擇 (推薦)</option>
-                                    {enVoices.map(v => (<option key={v.voiceURI} value={v.voiceURI}>{v.name}</option>))}
-                                </select>
-                                <ChevronRight className="absolute right-3 top-3.5 text-slate-400 rotate-90" size={16} />
+                            <div className="flex gap-2 items-center">
+                                <div className="relative flex-1">
+                                    <select value={voicePrefs.en || ''} onChange={(e) => setVoicePrefs(prev => ({...prev, en: e.target.value}))} className="w-full p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm appearance-none text-slate-700 dark:text-slate-200">
+                                        <option value="">✨ 自動選擇 (推薦)</option>
+                                        {enVoices.map(v => (<option key={v.voiceURI} value={v.voiceURI}>{v.name}</option>))}
+                                    </select>
+                                    <ChevronRight className="absolute right-3 top-3.5 text-slate-400 rotate-90" size={16} />
+                                </div>
+                                <button onClick={() => handleTestVoice('en')} className="p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-indigo-500 hover:text-indigo-600 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors" title="試聽語音">
+                                    <PlayCircle size={20} />
+                                </button>
                             </div>
                         </div>
                         <div className="flex gap-2 items-start bg-indigo-50/50 dark:bg-indigo-900/20 p-2 rounded-lg"><AlertTriangle size={14} className="text-indigo-400 mt-0.5 shrink-0" /><p className="text-[10px] text-indigo-400/80 leading-relaxed">提示：手機與電腦內建的語音包不同。若覺得預設聲音不自然，請在此手動選擇。</p></div>
