@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
-  Ear, Play, SkipForward, SkipBack, RefreshCcw, Shuffle, ArrowLeft, Loader2, Keyboard, Activity, ChevronRight, StopCircle, PlayCircle
+  Ear, Play, SkipForward, SkipBack, RefreshCcw, Shuffle, ArrowLeft, Loader2, Keyboard, Activity, ChevronRight, StopCircle, PlayCircle, Trophy
 } from 'lucide-react';
-import { VocabItem, LISTENING_BADGE_LEVELS } from '../constants';
-import { speakTextPromise, getBadgeInfo } from '../utils';
+import { VocabItem, BADGE_LEVELS, LISTENING_BADGE_LEVELS } from '../constants';
+import { speakTextPromise, getBadgeInfo, calculateTierProgress } from '../utils';
 
 interface Props {
   vocabData: VocabItem[];
@@ -20,15 +20,25 @@ const ListeningCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab
     const [isCoaching, setIsCoaching] = useState(false);
     const [showResult, setShowResult] = useState(false);
     const [score, setScore] = useState(0);
+    const [resultMastery, setResultMastery] = useState<number | null>(null);
     const [isAutoLoop, setIsAutoLoop] = useState(false);
     const [isRandomLoop, setIsRandomLoop] = useState(false);
+    const [loopTrigger, setLoopTrigger] = useState(0); // Trigger for same-index looping
     const inputRef = useRef<HTMLTextAreaElement>(null);
+
+    // Smart Random Pool
+    const unplayedIndicesRef = useRef<number[]>([]);
 
     const filteredData = useMemo(() => {
         return listeningCourse ? vocabData.filter(v => v.course === listeningCourse && !v.isHidden) : [];
     }, [vocabData, listeningCourse]);
 
     const currentEntry = filteredData.length > 0 ? filteredData[currentIndex] : null;
+
+    // Reset Smart Random Pool when course changes
+    useEffect(() => {
+        unplayedIndicesRef.current = [];
+    }, [listeningCourse, filteredData.length]);
 
     useEffect(() => {
         return () => window.speechSynthesis.cancel();
@@ -41,7 +51,7 @@ const ListeningCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab
              const timer = setTimeout(() => { handlePlayAudio(); }, 800); 
              return () => clearTimeout(timer);
         }
-    }, [currentIndex]);
+    }, [currentIndex, loopTrigger]);
 
     useEffect(() => {
         if (isCoaching && showResult && (isAutoLoop || isRandomLoop)) {
@@ -58,6 +68,7 @@ const ListeningCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab
         setUserInput('');
         setShowResult(false);
         setScore(0);
+        setResultMastery(null);
         setIsPlaying(false);
         window.speechSynthesis.cancel();
         if (!showResult) {
@@ -100,18 +111,48 @@ const ListeningCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab
         const finalScore = Math.min(100, Math.round(accuracy));
         setScore(finalScore);
         
-        // 只有 70 分以上才計入熟練度
+        let newMastery = currentEntry.listeningMastery || 0;
         if (finalScore >= 70) {
-            const newMastery = (currentEntry.listeningMastery || 0) + finalScore;
+            newMastery += finalScore;
             onUpdateVocab({ ...currentEntry, listeningMastery: newMastery });
         }
-        
+        setResultMastery(newMastery);
         setShowResult(true);
     };
 
     const handleNext = () => { resetState(); setCurrentIndex(prev => (prev + 1) % filteredData.length); };
     const handlePrev = () => { resetState(); setCurrentIndex(prev => (prev - 1 + filteredData.length) % filteredData.length); };
-    const handleRandomNext = () => { resetState(); const randIndex = Math.floor(Math.random() * filteredData.length); setCurrentIndex(randIndex); };
+    
+    const getNextSmartRandomIndex = () => {
+        const len = filteredData.length;
+        if (len <= 0) return 0;
+        if (len === 1) return 0;
+
+        if (unplayedIndicesRef.current.length === 0) {
+            unplayedIndicesRef.current = Array.from({length: len}, (_, i) => i);
+        }
+
+        let poolIndex = Math.floor(Math.random() * unplayedIndicesRef.current.length);
+        let nextVocabIndex = unplayedIndicesRef.current[poolIndex];
+
+        if (nextVocabIndex === currentIndex && unplayedIndicesRef.current.length > 1) {
+             poolIndex = (poolIndex + 1) % unplayedIndicesRef.current.length;
+             nextVocabIndex = unplayedIndicesRef.current[poolIndex];
+        }
+
+        unplayedIndicesRef.current.splice(poolIndex, 1);
+        return nextVocabIndex;
+    };
+
+    const handleRandomNext = () => { 
+        resetState(); 
+        const nextIndex = getNextSmartRandomIndex();
+        if (nextIndex === currentIndex) {
+            setLoopTrigger(prev => prev + 1);
+        } else {
+            setCurrentIndex(nextIndex); 
+        }
+    };
     
     const handleExit = () => { setListeningCourse(null); setIsCoaching(false); window.speechSynthesis.cancel(); };
 
@@ -128,7 +169,15 @@ const ListeningCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab
         );
     }
 
-    const { currentBadge, nextBadge } = getBadgeInfo(currentEntry?.listeningMastery || 0, LISTENING_BADGE_LEVELS);
+    const currentListeningScore = resultMastery !== null ? resultMastery : (currentEntry?.listeningMastery || 0);
+    const currentSpeakingScore = currentEntry?.mastery || 0;
+
+    const speakInfo = getBadgeInfo(currentSpeakingScore, BADGE_LEVELS);
+    const listenInfo = getBadgeInfo(currentListeningScore, LISTENING_BADGE_LEVELS);
+
+    const speakProgress = calculateTierProgress(currentSpeakingScore, speakInfo.currentBadge.threshold, speakInfo.nextBadge?.threshold);
+    const listenProgress = calculateTierProgress(currentListeningScore, listenInfo.currentBadge.threshold, listenInfo.nextBadge?.threshold);
+
     const isPass = score >= 70;
 
     return (
@@ -195,11 +244,46 @@ const ListeningCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab
                                     <span className="text-2xl font-black">+{isPass ? score : 0}</span>
                                 </div>
                             </div>
-                             <div className={`relative overflow-hidden p-3 rounded-xl border ${currentBadge.border} flex items-center gap-3`}>
-                                <div className={`absolute inset-0 bg-gradient-to-br ${currentBadge.gradient} opacity-20`} />
-                                <div className={`w-10 h-10 rounded-full flex items-center justify-center shadow-sm ${currentBadge.bg} ${currentBadge.ring} ring-1 z-10`}><currentBadge.icon size={18} /></div>
-                                <div className="flex-1 z-10"><div className="flex justify-between items-center mb-1"><span className={`text-xs font-black ${currentBadge.color}`}>{currentBadge.name}</span><span className="text-[10px] font-mono font-bold text-slate-500 dark:text-slate-400">{currentEntry?.listeningMastery || 0} XP</span></div>{nextBadge && (<div className="w-full bg-white/50 dark:bg-slate-900/50 h-1.5 rounded-full overflow-hidden"><div className={`h-full ${currentBadge.barColor}`} style={{ width: `${Math.min(((currentEntry?.listeningMastery || 0) / nextBadge.threshold) * 100, 100)}%` }} /></div>)}</div>
-                            </div>
+                             
+                             {/* Dual Progress Bars */}
+                             <div className="bg-slate-50 dark:bg-slate-800 p-5 rounded-2xl border border-slate-100 dark:border-slate-700 mb-6 text-left">
+                                <div className="flex items-center gap-2 mb-4">
+                                    <Trophy size={16} className="text-orange-500" />
+                                    <span className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider">各項熟練度進度</span>
+                                </div>
+                                
+                                <div className="space-y-4">
+                                    {/* Speaking Bar (Passive) */}
+                                    <div>
+                                        <div className="flex justify-between items-end mb-1.5">
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-xs font-bold text-slate-700 dark:text-slate-200">口說</span>
+                                                <span className="text-[10px] font-mono text-slate-400 dark:text-slate-500">{currentSpeakingScore} XP</span>
+                                            </div>
+                                            <span className={`text-[10px] font-bold ${speakInfo.currentBadge.color}`}>{speakInfo.currentBadge.name}</span>
+                                        </div>
+                                        <div className="h-2 w-full bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                                            <div className="h-full bg-emerald-500 rounded-full transition-all duration-1000 ease-out" style={{width: `${speakProgress}%`}}></div>
+                                        </div>
+                                    </div>
+
+                                    {/* Listening Bar (Active) */}
+                                    <div>
+                                        <div className="flex justify-between items-end mb-1.5">
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-xs font-bold text-slate-700 dark:text-slate-200">聽力</span>
+                                                <span className="text-[10px] font-mono text-slate-400 dark:text-slate-500">{currentListeningScore} XP</span>
+                                                {isPass && <span className="text-[10px] font-bold text-orange-500 bg-orange-50 dark:bg-orange-900/30 px-1.5 rounded animate-pulse">+{score}</span>}
+                                            </div>
+                                            <span className={`text-[10px] font-bold ${listenInfo.currentBadge.color}`}>{listenInfo.currentBadge.name}</span>
+                                        </div>
+                                        <div className="h-2 w-full bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                                            <div className="h-full bg-orange-500 rounded-full transition-all duration-500 ease-out" style={{width: `${listenProgress}%`}}></div>
+                                        </div>
+                                    </div>
+                                </div>
+                             </div>
+
                             {!isAutoLoop && !isRandomLoop && <button onClick={handleNext} className="w-full py-3 bg-orange-500 text-white font-bold rounded-xl shadow-lg hover:bg-orange-600 flex items-center justify-center gap-2">下一題 <ArrowLeft className="rotate-180" size={18} /></button>}
                         </div>
                      )}

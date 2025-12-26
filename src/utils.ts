@@ -150,3 +150,10 @@ export const getBadgeInfo = (mastery: number, levels: BadgeLevel[] = BADGE_LEVEL
     }
     return { currentBadge, nextBadge };
 };
+
+export const calculateTierProgress = (score: number, currentThreshold: number, nextThreshold: number | undefined) => {
+    if (!nextThreshold) return 100;
+    const range = nextThreshold - currentThreshold;
+    const progress = score - currentThreshold;
+    return Math.max(0, Math.min(100, (progress / range) * 100));
+};

@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
-  Mic, Mic2, StopCircle, PlayCircle, SkipForward, SkipBack, RefreshCcw, Shuffle, ArrowLeft, Volume2, BarChart2, Headphones, ChevronRight, Activity, Loader2, Zap, AlertCircle
+  Mic, Mic2, StopCircle, PlayCircle, SkipForward, SkipBack, RefreshCcw, Shuffle, ArrowLeft, Volume2, BarChart2, Headphones, ChevronRight, Activity, Loader2, Zap, AlertCircle, Trophy
 } from 'lucide-react';
-import { VocabItem } from '../constants';
-import { speakTextPromise, calculateSimilarity, getBadgeInfo } from '../utils';
+import { VocabItem, BADGE_LEVELS, LISTENING_BADGE_LEVELS } from '../constants';
+import { speakTextPromise, calculateSimilarity, getBadgeInfo, calculateTierProgress } from '../utils';
 
 // 無聲 MP3 Base64，用於欺騙 iOS 保持 Audio Session 活躍
 const SILENT_AUDIO = "data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4LjI5LjEwMAAAAAAAAAAAAAAA//OEAAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAAEAAABIADAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMD//////////////////////////////////////////////////////////////////wAAAAAATGF2YzU4LjU0AAAAAAAAAAAAAAAAJAAAAAAAAAAAASAA82oskAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
@@ -24,28 +24,42 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
   const [phase, setPhase] = useState('idle'); 
   const [scores, setScores] = useState({ pronunciation: 0, fluency: 0, stress: 0, total: 0 });
   const [showResult, setShowResult] = useState(false);
+  const [resultMastery, setResultMastery] = useState<number | null>(null); 
   const [audioURL, setAudioURL] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
-  const [isMicReady, setIsMicReady] = useState(false); // UI status for mic
+  const [isMicReady, setIsMicReady] = useState(false); 
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [loopTrigger, setLoopTrigger] = useState(0); // Trigger for same-index looping
   
   // Resources
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const streamRef = useRef<MediaStream | null>(null); // Persistent Microphone Stream
+  const streamRef = useRef<MediaStream | null>(null); 
   const audioChunksRef = useRef<Blob[]>([]);
   const transcriptRef = useRef<string>(''); 
   const recognitionRef = useRef<any>(null);
   const flowRef = useRef({ active: false });
   const audioRef = useRef<HTMLAudioElement>(null);
   const silentAudioRef = useRef<HTMLAudioElement>(null);
-  const audioContextRef = useRef<AudioContext | null>(null); // Hack for iOS
+  const audioContextRef = useRef<AudioContext | null>(null); 
   
   // Smart Detection Refs
   const recordingResolverRef = useRef<(() => void) | null>(null); 
   const speechEndTimerRef = useRef<any>(null);
 
+  // Smart Random Pool
+  const unplayedIndicesRef = useRef<number[]>([]);
+
   const filteredData = useMemo(() => { return coachCourse ? vocabData.filter(v => v.course === coachCourse && !v.isHidden) : []; }, [vocabData, coachCourse]);
   const currentEntry = filteredData.length > 0 ? filteredData[currentIndex] : null;
+
+  // Reset Smart Random Pool when course changes
+  useEffect(() => {
+      unplayedIndicesRef.current = [];
+  }, [coachCourse, filteredData.length]);
+
+  useEffect(() => {
+      setResultMastery(null);
+  }, [currentIndex, loopTrigger]);
 
   // Initialize Speech Recognition
   useEffect(() => {
@@ -79,7 +93,6 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
                 // Smart Loop Logic
                 if (hasFinal && flowRef.current.active) {
                     if (speechEndTimerRef.current) clearTimeout(speechEndTimerRef.current);
-                    // Wait a bit to ensure sentence is fully done
                     speechEndTimerRef.current = setTimeout(() => {
                         if (recordingResolverRef.current) {
                             console.log("Smart Detect: Speech finished, advancing...");
@@ -90,7 +103,6 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
             };
             
             recognitionRef.current.onerror = (event: any) => {
-                // Ignore errors gracefully
                 console.warn("Speech Recognition Error (Ignored):", event.error);
             };
 
@@ -100,7 +112,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
     }
     
     return () => {
-        stopFlow(true); // cleanup: force release on unmount
+        stopFlow(true); 
     };
   }, []);
 
@@ -108,14 +120,13 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
   useEffect(() => {
     if ((isAutoLoop || isRandomLoop) && isPlayingFlow && flowRef.current.active && filteredData.length > 0) {
       const timer = setTimeout(() => {
-        startFlow(false); // isUserGesture = false (Auto loop)
+        startFlow(false); 
       }, 800); 
       return () => clearTimeout(timer);
     }
-  }, [currentIndex]);
+  }, [currentIndex, loopTrigger]);
 
   // --- AUDIO CONTEXT HACK FOR iOS ---
-  // This creates a silent oscillator to force the browser to keep the audio session "Active/PlayAndRecord"
   const enableBackgroundAudioHack = () => {
       try {
           if (!audioContextRef.current) {
@@ -128,7 +139,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
                   osc.connect(gain);
                   gain.connect(ctx.destination);
                   osc.frequency.value = 20; 
-                  gain.gain.value = 0.001; // barely audible
+                  gain.gain.value = 0.001; 
                   osc.start();
                   console.log("AudioContext Hack Enabled");
               }
@@ -148,11 +159,6 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
       
       const rawSimilarity = calculateSimilarity(userText, targetText);
       
-      // --- 發音評分調整：信心加成模式 (Confidence Boost) ---
-      // 為了給予使用者更多正面回饋，將原始相似度進行曲線提升。
-      // 算法：填補原始分數與 100 分之間 50% 的差距。
-      // 例如：原始 60 分 -> 60 + (40 * 0.5) = 80 分
-      // 例如：原始 80 分 -> 80 + (20 * 0.5) = 90 分
       let pronunciationScore = rawSimilarity;
       if (rawSimilarity > 0) {
           pronunciationScore = Math.min(100, Math.round(rawSimilarity + (100 - rawSimilarity) * 0.5));
@@ -173,7 +179,6 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
       }
       fluencyScore = Math.max(0, Math.min(100, fluencyScore));
 
-      // 重音分數也稍微放寬，與發音分數連動
       let stressScore = Math.round(pronunciationScore * 0.7 + fluencyScore * 0.3);
       if (pronunciationScore > 80) stressScore = Math.min(100, stressScore + 5);
 
@@ -189,9 +194,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
     return '';
   };
 
-  // --- Thread B: Robust Stream Management ---
   const ensureMicrophoneStream = async () => {
-      // 1. HOT MIC CHECK
       if (streamRef.current && streamRef.current.active) {
           const audioTracks = streamRef.current.getAudioTracks();
           if (audioTracks.length > 0 && audioTracks[0].readyState === 'live' && !audioTracks[0].muted) {
@@ -201,7 +204,6 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
           }
       }
 
-      // 2. Request New Stream
       try {
           const stream = await navigator.mediaDevices.getUserMedia({ 
             audio: {
@@ -226,7 +228,6 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
         streamRef.current = null;
         setIsMicReady(false);
     }
-    // Also cleanup AudioContext hack
     if (audioContextRef.current) {
         audioContextRef.current.close().catch(() => {});
         audioContextRef.current = null;
@@ -236,7 +237,6 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
   const startFlow = async (isUserGesture = true) => {
     if (!currentEntry || isRecording) return;
     
-    // 0. Environment Prep (iOS Hack)
     if (isUserGesture) {
         if (silentAudioRef.current && silentAudioRef.current.paused) {
             silentAudioRef.current.play().catch(() => {});
@@ -249,19 +249,17 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
     setShowResult(false); 
     setAudioURL(null);
     setErrorMsg(null);
+    setResultMastery(null);
     transcriptRef.current = ''; 
     audioChunksRef.current = []; 
     recordingResolverRef.current = null;
     if (speechEndTimerRef.current) clearTimeout(speechEndTimerRef.current);
     
     try {
-      // 1. Phase: Read Question
       setPhase('reading_question'); 
-      // Ensure we don't kill the stream while speaking
       await speakTextPromise(currentEntry.question, 1.0, voicePrefs); 
       if (!flowRef.current.active) return;
 
-      // 2. Phase: Recording Setup
       setPhase('recording');
       
       const wordCount = currentEntry.answer.split(' ').length;
@@ -270,12 +268,9 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
       let stream;
       let isErrorState = false;
 
-      // --- CRITICAL: Stream Acquisition with Fallback ---
       try {
         stream = await ensureMicrophoneStream();
       } catch (err) {
-        // If mic fails in loop (common on iOS), we DON'T stop the app.
-        // We set an error flag and simulate the recording duration so the user sees it skipped.
         console.warn("Loop Mic Fail (Recovering...):", err);
         setErrorMsg("麥克風無法存取 (iOS限制)，跳過本題...");
         isErrorState = true;
@@ -284,7 +279,6 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
       const startTime = Date.now();
 
       if (!isErrorState && stream) {
-          // --- Thread A: Scoring ---
           const startRecognition = () => {
               if (!recognitionRef.current) return;
               try { recognitionRef.current.abort(); } catch(e) {}
@@ -294,12 +288,10 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
                  try {
                      recognitionRef.current.start();
                  } catch(e) {
-                     // Silently fail on loop
                  }
               }, 50);
           };
 
-          // --- Thread B: Recording ---
           const startRecorder = () => {
               const mimeType = getSupportedMimeType();
               const options = mimeType ? { mimeType } : undefined;
@@ -312,7 +304,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
                   mediaRecorderRef.current.start(200); 
               } catch (e) {
                   console.error("MediaRecorder start failed:", e);
-                  isErrorState = true; // Mark as error if recorder crashes
+                  isErrorState = true; 
               }
           };
 
@@ -321,12 +313,9 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
           setIsRecording(true);
       }
 
-      // 3. Wait Phase (Race or Fallback)
       if (isErrorState) {
-          // Just wait 2 seconds then move on
           await new Promise(r => setTimeout(r, 2000));
       } else {
-          // Normal Race
           const maxTimePromise = new Promise<void>(resolve => setTimeout(resolve, recordDuration));
           const smartDetectPromise = new Promise<void>(resolve => {
               recordingResolverRef.current = resolve;
@@ -334,7 +323,6 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
           await Promise.race([maxTimePromise, smartDetectPromise]);
       }
       
-      // --- STOP RECORDING ---
       setIsRecording(false);
       recordingResolverRef.current = null; 
       
@@ -363,38 +351,32 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
           });
       }
 
-      // DO NOT RELEASE MIC HERE
-
       if (!flowRef.current.active) return;
 
-      // 4. Scoring Phase
       setPhase('scoring');
       
-      // If error state, scores are 0.
       const durationSec = (Date.now() - startTime) / 1000;
       await new Promise(r => setTimeout(r, 600));
       
       const finalScores = calculateFinalScores(transcriptRef.current, currentEntry.answer, durationSec);
-      
-      // Special check: If transcript is empty but we have audio, give partial credit?
-      // No, strictly need text for pronunciation. But we don't punish errors too hard visually.
       setScores(finalScores);
       
-      // 門檻調整：50 分以上就算通過
+      const currentMastery = currentEntry.mastery || 0;
+      let newMastery = currentMastery;
+
       if (finalScores.total >= 50) {
-        onUpdateVocab({ ...currentEntry, mastery: (currentEntry.mastery || 0) + finalScores.total });
+        newMastery = currentMastery + finalScores.total;
+        onUpdateVocab({ ...currentEntry, mastery: newMastery });
       }
+      setResultMastery(newMastery);
 
       setShowResult(true);
 
-      // 5. Review Phase
       setPhase('reviewing'); 
       
-      // Play Target
       await speakTextPromise(currentEntry.answer, 1.0, voicePrefs);
       if (!flowRef.current.active) return;
 
-      // Play User Recording (Only if valid)
       if (audioRef.current && blobUrl) {
           try {
               audioRef.current.volume = 1.0;
@@ -414,7 +396,6 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
 
       if (!flowRef.current.active) return;
 
-      // 6. Next Step Logic
       if (isAutoLoop || isRandomLoop) {
           setPhase('idle');
           await new Promise(r => setTimeout(r, 800)); 
@@ -427,7 +408,6 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
 
     } catch(e) { 
       console.error("Flow Error:", e);
-      // Even if major error, don't kill loop if possible, just reset
       stopFlow(true); 
     }
   };
@@ -452,8 +432,6 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
           audioRef.current.currentTime = 0;
       }
 
-      // ONLY Release microphone if explicitly requested (User pressed STOP)
-      // Otherwise keep it hot for loops
       if (fullyRelease) {
           releaseMicrophone();
           if (silentAudioRef.current) {
@@ -485,6 +463,27 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
     setCurrentIndex(prev => (prev - 1 + filteredData.length) % filteredData.length);
   };
 
+  const getNextSmartRandomIndex = () => {
+      const len = filteredData.length;
+      if (len <= 0) return 0;
+      if (len === 1) return 0;
+
+      if (unplayedIndicesRef.current.length === 0) {
+          unplayedIndicesRef.current = Array.from({length: len}, (_, i) => i);
+      }
+
+      let poolIndex = Math.floor(Math.random() * unplayedIndicesRef.current.length);
+      let nextVocabIndex = unplayedIndicesRef.current[poolIndex];
+
+      if (nextVocabIndex === currentIndex && unplayedIndicesRef.current.length > 1) {
+           poolIndex = (poolIndex + 1) % unplayedIndicesRef.current.length;
+           nextVocabIndex = unplayedIndicesRef.current[poolIndex];
+      }
+
+      unplayedIndicesRef.current.splice(poolIndex, 1);
+      return nextVocabIndex;
+  };
+
   const handleRandomNext = (retainStream = false) => {
     if (!retainStream) stopFlow(true);
     else {
@@ -495,8 +494,13 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
         setErrorMsg(null);
     }
     window.speechSynthesis.cancel();
-    const randIndex = Math.floor(Math.random() * filteredData.length);
-    setCurrentIndex(randIndex);
+    
+    const nextIndex = getNextSmartRandomIndex();
+    if (nextIndex === currentIndex) {
+        setLoopTrigger(prev => prev + 1);
+    } else {
+        setCurrentIndex(nextIndex);
+    }
   };
 
   if (!coachCourse) return (
@@ -508,7 +512,17 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
     </div>
   );
 
-  const isPass = scores.total >= 50; // 門檻從 70 降至 50
+  const isPass = scores.total >= 50; 
+  // Get Current Scores
+  const currentSpeakingScore = resultMastery !== null ? resultMastery : (currentEntry?.mastery || 0);
+  const currentListeningScore = currentEntry?.listeningMastery || 0;
+  
+  const speakInfo = getBadgeInfo(currentSpeakingScore, BADGE_LEVELS);
+  const listenInfo = getBadgeInfo(currentListeningScore, LISTENING_BADGE_LEVELS);
+  
+  const speakProgress = calculateTierProgress(currentSpeakingScore, speakInfo.currentBadge.threshold, speakInfo.nextBadge?.threshold);
+  const listenProgress = calculateTierProgress(currentListeningScore, listenInfo.currentBadge.threshold, listenInfo.nextBadge?.threshold);
+
 
   return (
     <div className="flex flex-col h-full bg-slate-50 dark:bg-slate-950 relative overflow-y-auto pb-20">
@@ -580,9 +594,48 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
                  </div>
                </div>
 
-               <div className={`${isPass ? 'bg-indigo-600 dark:bg-indigo-700' : 'bg-slate-500 dark:bg-slate-600'} p-4 rounded-2xl flex items-center justify-between px-6 shadow-lg shadow-indigo-100 dark:shadow-none mb-6 transition-colors`}>
+               <div className={`${isPass ? 'bg-indigo-600 dark:bg-indigo-700' : 'bg-slate-500 dark:bg-slate-600'} p-4 rounded-2xl flex items-center justify-between px-6 shadow-lg shadow-indigo-100 dark:shadow-none mb-4 transition-colors`}>
                  <span className="text-white font-bold">{isPass ? '綜合評分' : '未達標準'}</span>
                  <div className="flex items-center gap-2"><BarChart2 className="text-white/70 w-5 h-5" /><span className="text-3xl font-black text-white">{scores.total}</span></div>
+               </div>
+               
+               {/* Dual Progress Bars */}
+               <div className="bg-slate-50 dark:bg-slate-800 p-5 rounded-2xl border border-slate-100 dark:border-slate-700 mb-6">
+                    <div className="flex items-center gap-2 mb-4">
+                        <Trophy size={16} className="text-orange-500" />
+                        <span className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider">各項熟練度進度</span>
+                    </div>
+                    
+                    <div className="space-y-4">
+                        {/* Speaking Bar (Active) */}
+                        <div>
+                            <div className="flex justify-between items-end mb-1.5">
+                                <div className="flex items-center gap-2">
+                                    <span className="text-xs font-bold text-slate-700 dark:text-slate-200">口說</span>
+                                    <span className="text-[10px] font-mono text-slate-400 dark:text-slate-500">{currentSpeakingScore} XP</span>
+                                    {isPass && <span className="text-[10px] font-bold text-emerald-500 bg-emerald-50 dark:bg-emerald-900/30 px-1.5 rounded animate-pulse">+{scores.total}</span>}
+                                </div>
+                                <span className={`text-[10px] font-bold ${speakInfo.currentBadge.color}`}>{speakInfo.currentBadge.name}</span>
+                            </div>
+                            <div className="h-2 w-full bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                                <div className="h-full bg-emerald-500 rounded-full transition-all duration-1000 ease-out" style={{width: `${speakProgress}%`}}></div>
+                            </div>
+                        </div>
+
+                        {/* Listening Bar (Passive) */}
+                        <div>
+                            <div className="flex justify-between items-end mb-1.5">
+                                <div className="flex items-center gap-2">
+                                    <span className="text-xs font-bold text-slate-700 dark:text-slate-200">聽力</span>
+                                    <span className="text-[10px] font-mono text-slate-400 dark:text-slate-500">{currentListeningScore} XP</span>
+                                </div>
+                                <span className={`text-[10px] font-bold ${listenInfo.currentBadge.color}`}>{listenInfo.currentBadge.name}</span>
+                            </div>
+                            <div className="h-2 w-full bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                                <div className="h-full bg-orange-500 rounded-full transition-all duration-500 ease-out" style={{width: `${listenProgress}%`}}></div>
+                            </div>
+                        </div>
+                    </div>
                </div>
 
                <div className="bg-slate-50 dark:bg-slate-800 p-4 rounded-2xl border border-slate-100 dark:border-slate-700 relative">
