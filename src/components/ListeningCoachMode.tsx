@@ -226,7 +226,20 @@ const ListeningCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab
                      {!showResult ? (
                         <div className="w-full space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
                              <div className="relative">
-                                <textarea ref={inputRef} disabled={!isCoaching} value={userInput} onChange={(e) => setUserInput(e.target.value)} className="w-full p-4 bg-slate-50 dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 rounded-xl focus:border-orange-500 dark:focus:border-orange-500 focus:ring-4 focus:ring-orange-50 dark:focus:ring-orange-900/30 outline-none transition-all resize-none text-lg font-medium text-slate-700 dark:text-slate-200 placeholder:text-slate-300 dark:placeholder:text-slate-600 disabled:opacity-50" rows={3} placeholder={isCoaching ? "請輸入您聽到的英文句子..." : "點擊下方「開始練習」..."} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleCheckAnswer(); } }} />
+                                <textarea 
+                                    ref={inputRef} 
+                                    disabled={!isCoaching} 
+                                    value={userInput} 
+                                    onChange={(e) => setUserInput(e.target.value)} 
+                                    autoComplete="off"
+                                    autoCorrect="off"
+                                    autoCapitalize="off"
+                                    spellCheck={false}
+                                    className="w-full p-4 bg-slate-50 dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 rounded-xl focus:border-orange-500 dark:focus:border-orange-500 focus:ring-4 focus:ring-orange-50 dark:focus:ring-orange-900/30 outline-none transition-all resize-none text-lg font-medium text-slate-700 dark:text-slate-200 placeholder:text-slate-300 dark:placeholder:text-slate-600 disabled:opacity-50" 
+                                    rows={3} 
+                                    placeholder={isCoaching ? "請輸入您聽到的英文句子..." : "點擊下方「開始練習」..."} 
+                                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleCheckAnswer(); } }} 
+                                />
                                 <Keyboard className="absolute right-3 bottom-3 text-slate-300 dark:text-slate-600" size={18} />
                              </div>
                              <button onClick={handleCheckAnswer} disabled={!userInput.trim() || !isCoaching} className="w-full py-3 bg-slate-800 dark:bg-slate-700 text-white font-bold rounded-xl shadow-lg hover:bg-slate-900 dark:hover:bg-slate-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed">提交答案</button>
