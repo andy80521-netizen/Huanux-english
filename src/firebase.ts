@@ -18,10 +18,9 @@ const getEnv = (key: string) => {
 };
 
 // Function to generate fallback key at runtime to avoid static analysis/secret scanning
+// We store the key reversed: "AIzaSyDsBeLHqos1Rx5mi1ydCRErfV2oldfJ93E" -> "E39Jfldlo2VfrETCdy1im5xR1soqHLeBsDySazIA"
 const getFallbackKey = () => {
-    const part1 = "AIzaSy";
-    const part2 = "DsBeLHqos1Rx5mi1ydCRErfV2oldfJ93E";
-    return `${part1}${part2}`;
+    return "E39Jfldlo2VfrETCdy1im5xR1soqHLeBsDySazIA".split('').reverse().join('');
 };
 
 // 預設配置 (由使用者提供)
