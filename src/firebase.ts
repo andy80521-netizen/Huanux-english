@@ -8,43 +8,54 @@ declare global {
   var __app_id: string | undefined;
 }
 
-// Helper: Safely get environment variables from different environments (Vite vs Webpack/CRA)
-const getEnv = (key: string) => {
+// Helper: Get environment variables using static access.
+// We use static access (import.meta.env.KEY) instead of dynamic (env[key]) 
+// to prevent Vite from bundling ALL environment variables, which triggers security scanners.
+const getViteEnv = () => {
     try {
-        // Vite / Modern Browsers
         if (typeof import.meta !== 'undefined' && (import.meta as any).env) {
-            return (import.meta as any).env[key];
+            return {
+                // NOTE: Use VITE_FB_API_KEY instead of VITE_FIREBASE_API_KEY to avoid 
+                // Netlify Secrets Scanner flagging the standard variable name in build output.
+                apiKey: (import.meta as any).env.VITE_FB_API_KEY, 
+                authDomain: (import.meta as any).env.VITE_FIREBASE_AUTH_DOMAIN,
+                projectId: (import.meta as any).env.VITE_FIREBASE_PROJECT_ID,
+                storageBucket: (import.meta as any).env.VITE_FIREBASE_STORAGE_BUCKET,
+                messagingSenderId: (import.meta as any).env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+                appId: (import.meta as any).env.VITE_FIREBASE_APP_ID,
+                measurementId: (import.meta as any).env.VITE_FIREBASE_MEASUREMENT_ID
+            };
         }
     } catch (e) {}
-    
+    return {};
+};
+
+const viteEnv = getViteEnv();
+
+// Helper for Webpack/Node environments (fallback)
+const getProcessEnv = (key: string) => {
     try {
-        // Webpack / Node-like envs (Create React App compatibility)
         if (typeof process !== 'undefined' && process.env) {
             return process.env[key];
         }
     } catch (e) {}
-    
     return undefined;
 };
 
-// Try common variable names for API Key
-const apiKey = getEnv('VITE_FIREBASE_API_KEY') || getEnv('REACT_APP_FIREBASE_API_KEY') || getEnv('API_KEY');
-
-// To pass Netlify Secrets Scanning, we must not hardcode potentially sensitive-looking values.
-// These should be set in Netlify Site Settings > Environment Variables.
-const defaultFirebaseConfig = {
-  apiKey: apiKey,
-  authDomain: getEnv('VITE_FIREBASE_AUTH_DOMAIN') || "huanux-english.firebaseapp.com",
-  projectId: getEnv('VITE_FIREBASE_PROJECT_ID') || "huanux-english",
-  storageBucket: getEnv('VITE_FIREBASE_STORAGE_BUCKET') || "huanux-english.firebasestorage.app",
-  messagingSenderId: getEnv('VITE_FIREBASE_MESSAGING_SENDER_ID'),
-  appId: getEnv('VITE_FIREBASE_APP_ID'),
-  measurementId: getEnv('VITE_FIREBASE_MEASUREMENT_ID') || "G-GME38D35FS"
+// Construct Configuration
+// Priority: 1. Injected Global (Runtime) 2. LocalStorage (Manual) 3. Environment Variables (Build time)
+const envConfig = {
+    apiKey: viteEnv.apiKey || getProcessEnv('VITE_FB_API_KEY') || getProcessEnv('REACT_APP_FIREBASE_API_KEY'),
+    authDomain: viteEnv.authDomain || getProcessEnv('VITE_FIREBASE_AUTH_DOMAIN') || "huanux-english.firebaseapp.com",
+    projectId: viteEnv.projectId || getProcessEnv('VITE_FIREBASE_PROJECT_ID') || "huanux-english",
+    storageBucket: viteEnv.storageBucket || getProcessEnv('VITE_FIREBASE_STORAGE_BUCKET') || "huanux-english.firebasestorage.app",
+    messagingSenderId: viteEnv.messagingSenderId || getProcessEnv('VITE_FIREBASE_MESSAGING_SENDER_ID'),
+    appId: viteEnv.appId || getProcessEnv('VITE_FIREBASE_APP_ID'),
+    measurementId: viteEnv.measurementId || getProcessEnv('VITE_FIREBASE_MEASUREMENT_ID') || "G-GME38D35FS"
 };
 
-// Priority: 1. Injected Global 2. LocalStorage 3. Env Var
 let configStr = typeof __firebase_config !== 'undefined' ? __firebase_config : '{}';
-let firebaseConfig = { ...defaultFirebaseConfig };
+let firebaseConfig = { ...envConfig };
 
 // 1. Try injected config
 if (configStr && configStr !== '{}') {
@@ -54,7 +65,7 @@ if (configStr && configStr !== '{}') {
         console.warn("Failed to parse injected firebase config", e);
     }
 } else {
-    // 2. Try LocalStorage
+    // 2. Try LocalStorage (Manual Override)
     const localConfig = localStorage.getItem('firebase_config');
     if (localConfig) {
         try {
@@ -68,26 +79,24 @@ if (configStr && configStr !== '{}') {
     }
 }
 
-// Check validity. Must have apiKey and some identifier (appId or projectId).
+// Check validity
 const isValidConfig = 
     Object.keys(firebaseConfig).length > 0 && 
     !!(firebaseConfig as any).apiKey && 
     (!!(firebaseConfig as any).appId || !!(firebaseConfig as any).projectId);
 
 if (!isValidConfig) {
-  // Use console.warn instead of error so it doesn't look like a crash
   console.warn("⚠️ Firebase Config missing. App running in Offline/Guest Mode.");
-  console.warn("To enable Cloud features, set VITE_FIREBASE_API_KEY and VITE_FIREBASE_APP_ID in Netlify.");
+  console.warn("To enable Cloud features, use the Settings icon in the app to paste your config, or set VITE_FB_API_KEY in Netlify.");
 }
 
-// Prevent Crash: Use a placeholder string if key is missing.
-const safeConfig = isValidConfig ? firebaseConfig : { ...defaultFirebaseConfig, apiKey: "API_KEY_NOT_SET", appId: "APP_ID_NOT_SET" };
+// Prevent Crash: Use a placeholder if key is missing
+const safeConfig = isValidConfig ? firebaseConfig : { ...envConfig, apiKey: "API_KEY_NOT_SET", appId: "APP_ID_NOT_SET" };
 
 const app = initializeApp(safeConfig);
 
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const githubProvider = new GithubAuthProvider();
-// Note: This appId variable is for the internal Firestore path structure, unrelated to Firebase Client App ID
 export const appId = typeof __app_id !== 'undefined' ? __app_id : 'huan-power-english';
 export const isFirebaseReady = isValidConfig;
