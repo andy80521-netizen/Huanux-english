@@ -27,17 +27,19 @@ const getEnv = (key: string) => {
     return undefined;
 };
 
-// Try common variable names
+// Try common variable names for API Key
 const apiKey = getEnv('VITE_FIREBASE_API_KEY') || getEnv('REACT_APP_FIREBASE_API_KEY') || getEnv('API_KEY');
 
+// To pass Netlify Secrets Scanning, we must not hardcode potentially sensitive-looking values.
+// These should be set in Netlify Site Settings > Environment Variables.
 const defaultFirebaseConfig = {
   apiKey: apiKey,
-  authDomain: "huanux-english.firebaseapp.com",
-  projectId: "huanux-english",
-  storageBucket: "huanux-english.firebasestorage.app",
-  messagingSenderId: "389474252282",
-  appId: "1:389474252282:web:6dbc2d1e350d043740e043",
-  measurementId: "G-GME38D35FS"
+  authDomain: getEnv('VITE_FIREBASE_AUTH_DOMAIN') || "huanux-english.firebaseapp.com",
+  projectId: getEnv('VITE_FIREBASE_PROJECT_ID') || "huanux-english",
+  storageBucket: getEnv('VITE_FIREBASE_STORAGE_BUCKET') || "huanux-english.firebasestorage.app",
+  messagingSenderId: getEnv('VITE_FIREBASE_MESSAGING_SENDER_ID'), // e.g. 389474252282
+  appId: getEnv('VITE_FIREBASE_APP_ID'), // e.g. 1:389474252282:web:...
+  measurementId: getEnv('VITE_FIREBASE_MEASUREMENT_ID') || "G-GME38D35FS"
 };
 
 // Priority: 1. Injected Global 2. LocalStorage 3. Env Var
@@ -66,17 +68,20 @@ if (configStr && configStr !== '{}') {
     }
 }
 
-// Check validity. Must have apiKey and it shouldn't be undefined/empty.
-const isValidConfig = Object.keys(firebaseConfig).length > 0 && !!(firebaseConfig as any).apiKey;
+// Check validity. Must have apiKey and some identifier (appId or projectId).
+const isValidConfig = 
+    Object.keys(firebaseConfig).length > 0 && 
+    !!(firebaseConfig as any).apiKey && 
+    (!!(firebaseConfig as any).appId || !!(firebaseConfig as any).projectId);
 
 if (!isValidConfig) {
   // Use console.warn instead of error so it doesn't look like a crash
-  console.warn("⚠️ Firebase API Key not found. App running in Offline/Guest Mode.");
+  console.warn("⚠️ Firebase Config missing. App running in Offline/Guest Mode.");
+  console.warn("To enable Cloud features, set VITE_FIREBASE_API_KEY and VITE_FIREBASE_APP_ID in Netlify.");
 }
 
 // Prevent Crash: Use a placeholder string if key is missing.
-// This allows the app to load (Guest Mode) without throwing "auth/invalid-api-key" immediately.
-const safeConfig = isValidConfig ? firebaseConfig : { ...defaultFirebaseConfig, apiKey: "API_KEY_NOT_SET" };
+const safeConfig = isValidConfig ? firebaseConfig : { ...defaultFirebaseConfig, apiKey: "API_KEY_NOT_SET", appId: "APP_ID_NOT_SET" };
 
 const app = initializeApp(safeConfig);
 
