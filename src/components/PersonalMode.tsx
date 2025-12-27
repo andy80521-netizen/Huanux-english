@@ -191,7 +191,7 @@ const PersonalMode: React.FC<Props> = ({ user, voicePrefs, setVoicePrefs, isDark
                             value={configJson}
                             onChange={(e) => setConfigJson(e.target.value)}
                             className="w-full h-32 p-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-mono focus:ring-2 focus:ring-indigo-500 outline-none text-slate-900 dark:text-white resize-none mb-4"
-                            placeholder={`const firebaseConfig = {\n  apiKey: "your-api-key",\n  authDomain: "..."\n};`}
+                            placeholder={`const firebaseConfig = {\n  apiKey: "AIza...",\n  authDomain: "..."\n};`}
                         />
                         <div className="flex gap-3">
                             <button 
