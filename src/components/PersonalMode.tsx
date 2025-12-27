@@ -47,6 +47,7 @@ const PersonalMode: React.FC<Props> = ({ user, voicePrefs, setVoicePrefs, isDark
         if (!isFirebaseReady) {
             setError('系統未連線：請點擊右上角資料庫圖示設定 Firebase');
             setLoading(false);
+            setShowConfig(true);
             return;
         }
 
@@ -63,7 +64,10 @@ const PersonalMode: React.FC<Props> = ({ user, voicePrefs, setVoicePrefs, isDark
             if (msg.includes('auth/invalid-credential') || msg.includes('auth/wrong-password') || msg.includes('auth/user-not-found')) msg = '帳號或密碼錯誤';
             else if (msg.includes('auth/email-already-in-use')) msg = '此 Email 已被註冊';
             else if (msg.includes('auth/weak-password')) msg = '密碼強度不足 (至少 6 位)';
-            else if (msg.includes('api-key-not-valid')) msg = 'API Key 無效 (請點擊上方資料庫圖示設定)';
+            else if (msg.includes('api-key-not-valid')) {
+                msg = 'API Key 無效 (請點擊設定按鈕檢查)';
+                setShowConfig(true);
+            }
             setError(msg || '認證失敗，請檢查資料');
         } finally {
             setLoading(false);
@@ -76,6 +80,7 @@ const PersonalMode: React.FC<Props> = ({ user, voicePrefs, setVoicePrefs, isDark
         if (!isFirebaseReady) {
             setError('系統未連線：請先設定 Firebase');
             setLoading(false);
+            setShowConfig(true);
             return;
         }
         try {
@@ -86,6 +91,10 @@ const PersonalMode: React.FC<Props> = ({ user, voicePrefs, setVoicePrefs, isDark
             if (msg.includes('account-exists-with-different-credential')) msg = '此 Email 已使用其他方式登入';
             else if (msg.includes('popup-closed-by-user')) msg = '登入視窗已關閉';
             else if (msg.includes('configuration-not-found')) msg = 'Firebase 尚未啟用 GitHub 登入';
+            else if (msg.includes('api-key-not-valid')) {
+                 msg = 'API Key 無效';
+                 setShowConfig(true);
+            }
             setError(msg || 'GitHub 登入失敗');
         } finally {
             setLoading(false);
@@ -139,7 +148,8 @@ const PersonalMode: React.FC<Props> = ({ user, voicePrefs, setVoicePrefs, isDark
                             </button>
                         </div>
                         <p className="text-xs text-slate-500 dark:text-slate-400 mb-4 leading-relaxed">
-                            請貼上您的 Firebase Config JSON 以啟用註冊與同步功能。
+                            請貼上您的 Firebase Config JSON 以啟用註冊與同步功能。<br/>
+                            <span className="opacity-70 font-mono text-[10px]">(Dev: 設定 Netlify 環境變數 <code>VITE_FB_API_KEY</code>)</span>
                         </p>
                         <textarea 
                             value={configJson}
@@ -201,7 +211,7 @@ const PersonalMode: React.FC<Props> = ({ user, voicePrefs, setVoicePrefs, isDark
                                 {/* Config Button - Hidden in plain sight for setup */}
                                 <button 
                                     onClick={() => setShowConfig(true)}
-                                    className="absolute right-0 top-0 p-1 text-slate-300 hover:text-indigo-500 dark:text-slate-700 dark:hover:text-indigo-400 transition-colors"
+                                    className={`absolute right-0 top-0 p-1 transition-colors ${!isFirebaseReady ? 'text-orange-500 animate-pulse' : 'text-slate-300 hover:text-indigo-500 dark:text-slate-700'}`}
                                     title="設定資料庫連線"
                                 >
                                     <Database size={16} />
