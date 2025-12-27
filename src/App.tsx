@@ -181,7 +181,7 @@ const App: React.FC = () => {
               {activeTab === 'coach' && <SpeakingCoachMode vocabData={vocabData} courses={courses} onUpdateVocab={handleSaveItem} voicePrefs={voicePrefs} />}
               {activeTab === 'listen' && <ListeningCoachMode vocabData={vocabData} courses={courses} onUpdateVocab={handleSaveItem} voicePrefs={voicePrefs} />}
               {activeTab === 'badges' && <BadgeMode vocabData={vocabData} />}
-              {activeTab === 'library' && <LibraryMode vocabData={vocabData} setVocabData={setVocabData} courses={courses} setCourses={setCourses} onSaveItem={handleSaveItem} onDeleteItem={handleDeleteItem} onSaveCourse={handleSaveCourse} onDeleteCourse={handleDeleteCourse} />}
+              {activeTab === 'library' && <LibraryMode vocabData={vocabData} setVocabData={setVocabData} courses={courses} setCourses={setCourses} onSaveItem={handleSaveItem} onDeleteItem={handleDeleteItem} onSaveCourse={handleSaveCourse} onDeleteCourse={handleDeleteCourse} voicePrefs={voicePrefs} />}
               {activeTab === 'personal' && <PersonalMode user={user} voicePrefs={voicePrefs} setVoicePrefs={setVoicePrefs} isDarkMode={isDarkMode} setIsDarkMode={setIsDarkMode} />}
             </div>
             <div className="bg-white dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800 px-2 py-2 flex justify-around items-center z-20 pb-safe shadow-[0_-5px_20px_rgba(0,0,0,0.02)] dark:shadow-none transition-colors duration-300">

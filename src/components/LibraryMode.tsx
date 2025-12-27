@@ -1,9 +1,9 @@
 import React, { useState, useMemo } from 'react';
 import { 
-  Folder, Plus, Trash2, Search, Edit, ArrowLeft, FolderPlus, Layers, Loader2, Eye, EyeOff, Check, AlertTriangle, Save, ChevronRight, Mic, Ear, X, Link as LinkIcon, Download
+  Folder, Plus, Trash2, Search, Edit, ArrowLeft, FolderPlus, Layers, Loader2, Eye, EyeOff, Check, AlertTriangle, Save, ChevronRight, Mic, Ear, X, Link as LinkIcon, Download, Volume2
 } from 'lucide-react';
 import { VocabItem, BADGE_LEVELS, LISTENING_BADGE_LEVELS } from '../constants';
-import { fetchIPA, getBadgeInfo } from '../utils';
+import { fetchIPA, getBadgeInfo, speakTextPromise } from '../utils';
 
 // 自定義確認對話框組件
 const ConfirmDialog: React.FC<{
@@ -52,9 +52,10 @@ interface Props {
   onDeleteItem: (id: number | number[]) => void;
   onSaveCourse: (newName: string, oldName: string | null) => void;
   onDeleteCourse: (name: string) => void;
+  voicePrefs: { zh?: string, en?: string };
 }
 
-const LibraryMode: React.FC<Props> = ({ vocabData, courses, onSaveItem, onDeleteItem, onSaveCourse, onDeleteCourse }) => {
+const LibraryMode: React.FC<Props> = ({ vocabData, courses, onSaveItem, onDeleteItem, onSaveCourse, onDeleteCourse, voicePrefs }) => {
   const [currentLevel, setCurrentLevel] = useState<'courses' | 'questions'>('courses'); 
   const [activeCourse, setActiveCourse] = useState<string | null>(null);
   const [isEditingCourse, setIsEditingCourse] = useState(false);
@@ -414,17 +415,39 @@ const LibraryMode: React.FC<Props> = ({ vocabData, courses, onSaveItem, onDelete
                                              <div onClick={() => toggleSelect(item.id)} className={`w-6 h-6 mt-1 rounded-lg border-2 flex items-center justify-center cursor-pointer transition-all flex-shrink-0 ${isSelected ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-slate-200 dark:border-slate-700 hover:border-indigo-400'}`}>
                                                 {isSelected && <Check size={14} strokeWidth={3} />}
                                             </div>
-                                            <div className="flex-1 min-w-0 cursor-pointer" onClick={() => { setEditingQuestionId(item.id); setQuestionFormData({ question: item.question, answer: item.answer, phonetic: item.phonetic }); setIsEditingQuestion(true); }}>
-                                                <h4 className={`text-base font-bold text-slate-800 dark:text-slate-100 leading-snug mb-1.5 ${item.isHidden ? 'line-through opacity-50 decoration-2 decoration-slate-300' : ''}`}>
-                                                    <span className="text-slate-300 dark:text-slate-600 font-mono text-sm mr-2 select-none">{index + 1}.</span>
-                                                    {item.question}
-                                                </h4>
-                                                <p className="text-sm font-medium text-indigo-600 dark:text-indigo-400 font-mono leading-relaxed break-words">
-                                                    {item.answer}
-                                                </p>
+                                            <div className="flex-1 min-w-0">
+                                                {/* Question Row */}
+                                                <div className="flex items-start gap-3 mb-2">
+                                                    <span className="text-slate-300 dark:text-slate-600 font-mono text-sm mt-1 select-none shrink-0 w-8 text-right">{index + 1}.</span>
+                                                    <button 
+                                                        onClick={(e) => { e.stopPropagation(); speakTextPromise(item.question, 1, voicePrefs); }} 
+                                                        className="p-1 text-slate-300 hover:text-indigo-500 dark:hover:text-indigo-400 transition-colors shrink-0 mt-0.5 bg-slate-50 dark:bg-slate-800 rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-900/30"
+                                                    >
+                                                        <Volume2 size={15} />
+                                                    </button>
+                                                    <h4 className={`text-base font-bold text-slate-800 dark:text-slate-100 leading-snug break-words pt-0.5 ${item.isHidden ? 'line-through opacity-50 decoration-2 decoration-slate-300' : ''}`}>
+                                                        {item.question}
+                                                    </h4>
+                                                </div>
+
+                                                {/* Answer Row */}
+                                                <div className="flex items-start gap-3">
+                                                    <span className="shrink-0 w-8"></span> {/* Spacer aligning with index */}
+                                                    <button 
+                                                        onClick={(e) => { e.stopPropagation(); speakTextPromise(item.answer, 1, voicePrefs); }} 
+                                                        className="p-1 text-slate-300 hover:text-indigo-500 dark:hover:text-indigo-400 transition-colors shrink-0 mt-0.5 bg-slate-50 dark:bg-slate-800 rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-900/30"
+                                                    >
+                                                        <Volume2 size={15} />
+                                                    </button>
+                                                    <p className="text-sm font-medium text-indigo-600 dark:text-indigo-400 font-mono leading-relaxed break-words pt-0.5">
+                                                        {item.answer}
+                                                    </p>
+                                                </div>
                                             </div>
                                          </div>
-                                         <div className="flex items-center gap-1 shrink-0 ml-0">
+                                         
+                                         {/* Vertical Action Buttons */}
+                                         <div className="flex flex-col gap-2 shrink-0 ml-2 pl-2 border-l border-slate-100 dark:border-slate-800 justify-center">
                                              <button onClick={() => { setEditingQuestionId(item.id); setQuestionFormData({ question: item.question, answer: item.answer, phonetic: item.phonetic }); setIsEditingQuestion(true); }} className="p-2 text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">
                                                 <Edit size={18} />
                                             </button>
@@ -459,7 +482,7 @@ const LibraryMode: React.FC<Props> = ({ vocabData, courses, onSaveItem, onDelete
                                     </div>
                                     
                                      {item.isHidden && (
-                                        <div className="absolute top-4 right-10 flex items-center gap-1 text-[10px] font-black uppercase text-slate-400 dark:text-slate-600 bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-md">
+                                        <div className="absolute top-4 right-14 flex items-center gap-1 text-[10px] font-black uppercase text-slate-400 dark:text-slate-600 bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-md">
                                             <EyeOff size={12} /> Hidden
                                         </div>
                                     )}

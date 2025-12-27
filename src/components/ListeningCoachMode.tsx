@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
-  Ear, Play, SkipForward, SkipBack, RefreshCcw, Shuffle, ArrowLeft, Loader2, Keyboard, Activity, ChevronRight, StopCircle, PlayCircle, Trophy
+  Ear, Play, SkipForward, SkipBack, RefreshCcw, Shuffle, ArrowLeft, Loader2, Keyboard, Activity, ChevronRight, StopCircle, PlayCircle, Trophy, CheckCircle2, XCircle
 } from 'lucide-react';
 import { VocabItem, BADGE_LEVELS, LISTENING_BADGE_LEVELS } from '../constants';
 import { speakTextPromise, getBadgeInfo, calculateTierProgress } from '../utils';
@@ -185,6 +185,44 @@ const ListeningCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab
         stopPractice();
     };
 
+    // Render User Input Feedback (Green for correct, Red for wrong)
+    const renderUserFeedback = () => {
+        if (!userInput.trim()) return <span className="text-slate-400 italic">未輸入內容</span>;
+        if (!currentEntry) return null;
+
+        const inputWords = userInput.trim().split(/\s+/);
+        // Normalize answer words for comparison
+        const normalizedAnswerWords = currentEntry.answer.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/);
+        
+        let searchIndex = 0;
+
+        return (
+            <div className="flex flex-wrap gap-1.5 justify-center text-lg leading-relaxed">
+                {inputWords.map((word, idx) => {
+                    const cleanWord = word.toLowerCase().replace(/[^a-z0-9]/g, '');
+                    // Try to find this word in the answer starting from the last found position
+                    // This ensures we check for correct order
+                    const foundIndex = normalizedAnswerWords.indexOf(cleanWord, searchIndex);
+                    
+                    let isMatch = false;
+                    if (foundIndex !== -1) {
+                        isMatch = true;
+                        searchIndex = foundIndex + 1; // Advance the search cursor
+                    }
+
+                    return (
+                        <span 
+                            key={idx} 
+                            className={`px-1 rounded-md ${isMatch ? "text-emerald-600 dark:text-emerald-400 font-bold bg-emerald-50 dark:bg-emerald-900/20" : "text-red-500 dark:text-red-400 font-bold decoration-wavy underline decoration-red-300 bg-red-50 dark:bg-red-900/20"}`}
+                        >
+                            {word}
+                        </span>
+                    );
+                })}
+            </div>
+        );
+    };
+
     if (!listeningCourse) {
         return (
             <div className="h-full flex flex-col bg-slate-50 dark:bg-slate-950 p-6 overflow-y-auto">
@@ -224,7 +262,7 @@ const ListeningCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab
                    <div className="relative shrink-0 max-w-[50%]">
                        <div className="flex items-center justify-center gap-1 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-lg text-sm font-mono font-bold text-slate-600 dark:text-slate-300 overflow-hidden">
                            <span className="truncate">
-                               #{currentIndex + 1} {currentEntry?.question.slice(0, 5)}...
+                               題目 #{currentIndex + 1}
                            </span>
                            <ChevronRight className="rotate-90 text-slate-400 dark:text-slate-500 shrink-0" size={12} />
                        </div>
@@ -233,7 +271,7 @@ const ListeningCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab
                         onChange={(e) => { stopPractice(); setCurrentIndex(Number(e.target.value)); }} 
                         className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                        >
-                           {filteredData.map((item, index) => (<option key={index} value={index}>#{index + 1} {item.question.slice(0, 5)}...</option>))}
+                           {filteredData.map((item, index) => (<option key={index} value={index}>題目 #{index + 1}</option>))}
                        </select>
                    </div>
                 </div>
@@ -278,7 +316,21 @@ const ListeningCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab
                         </div>
                      ) : (
                         <div className="w-full space-y-4 animate-in fade-in zoom-in duration-300">
-                            <div className="text-left bg-slate-50 dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700"><p className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase mb-1">正確答案</p><p className="text-lg font-bold text-indigo-600 dark:text-indigo-400 leading-snug">{currentEntry?.answer}</p></div>
+                            
+                            {/* User Feedback Display */}
+                            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-100 dark:border-slate-800 shadow-sm mb-2">
+                                <div className="flex items-center gap-2 mb-2 text-slate-400 dark:text-slate-500">
+                                    {isPass ? <CheckCircle2 size={16} className="text-emerald-500" /> : <XCircle size={16} className="text-red-500" />}
+                                    <span className="text-xs font-bold uppercase tracking-wider">您的回答</span>
+                                </div>
+                                {renderUserFeedback()}
+                            </div>
+
+                            <div className="text-left bg-slate-50 dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700">
+                                <p className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase mb-1">正確答案</p>
+                                <p className="text-lg font-bold text-indigo-600 dark:text-indigo-400 leading-snug">{currentEntry?.answer}</p>
+                            </div>
+
                             <div className="flex items-center gap-2">
                                 <div className={`flex-1 p-3 rounded-xl border flex flex-col items-center justify-center ${score === 100 ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800 text-green-600 dark:text-green-400' : isPass ? 'bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800 text-orange-600 dark:text-orange-400' : 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400'}`}>
                                     <span className="text-xs font-bold uppercase opacity-70">準確度</span>
