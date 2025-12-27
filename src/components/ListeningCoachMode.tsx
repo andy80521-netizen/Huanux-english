@@ -5,6 +5,9 @@ import {
 import { VocabItem, BADGE_LEVELS, LISTENING_BADGE_LEVELS } from '../constants';
 import { speakTextPromise, getBadgeInfo, calculateTierProgress } from '../utils';
 
+// 無聲 MP3 Base64，用於欺騙 iOS 保持 Audio Session 活躍
+const SILENT_AUDIO = "data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4LjI5LjEwMAAAAAAAAAAAAAAA//OEAAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAAEAAABIADAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMD//////////////////////////////////////////////////////////////////wAAAAAATGF2YzU4LjU0AAAAAAAAAAAAAAAAJAAAAAAAAAAAASAA82oskAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
 interface Props {
   vocabData: VocabItem[];
   courses: string[];
@@ -25,6 +28,7 @@ const ListeningCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab
     const [isRandomLoop, setIsRandomLoop] = useState(false);
     const [loopTrigger, setLoopTrigger] = useState(0); // Trigger for same-index looping
     const inputRef = useRef<HTMLTextAreaElement>(null);
+    const silentAudioRef = useRef<HTMLAudioElement>(null);
 
     // Smart Random Pool
     const unplayedIndicesRef = useRef<number[]>([]);
@@ -41,7 +45,10 @@ const ListeningCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab
     }, [listeningCourse, filteredData.length]);
 
     useEffect(() => {
-        return () => window.speechSynthesis.cancel();
+        return () => {
+            window.speechSynthesis.cancel();
+            if (silentAudioRef.current) silentAudioRef.current.pause();
+        };
     }, []);
 
     useEffect(() => {
@@ -64,6 +71,17 @@ const ListeningCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab
         }
     }, [showResult, isCoaching]);
 
+    // iOS Audio Session Keep-Alive
+    const activateAudioSession = () => {
+        if (silentAudioRef.current) {
+            silentAudioRef.current.play().catch(e => console.warn("Silent audio play failed", e));
+        }
+        // Force resume SpeechSynthesis (Fix for iOS pausing randomly)
+        if (window.speechSynthesis.paused) {
+            window.speechSynthesis.resume();
+        }
+    };
+
     const resetState = () => {
         setUserInput('');
         setShowResult(false);
@@ -80,11 +98,18 @@ const ListeningCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab
         if (isPlaying || !currentEntry) return;
         setIsPlaying(true);
         if (inputRef.current) inputRef.current.focus();
+        
+        // Ensure audio session is active before speaking
+        if (isCoaching) activateAudioSession();
+
         await speakTextPromise(currentEntry.answer, 1.0, voicePrefs);
         setIsPlaying(false);
     };
 
     const startPractice = () => {
+        // Critical: Unlock audio on user gesture
+        activateAudioSession();
+        
         setIsCoaching(true);
         handlePlayAudio();
     };
@@ -92,6 +117,7 @@ const ListeningCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab
     const stopPractice = () => {
         setIsCoaching(false);
         window.speechSynthesis.cancel();
+        if (silentAudioRef.current) silentAudioRef.current.pause();
         resetState();
     };
 
@@ -154,7 +180,10 @@ const ListeningCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab
         }
     };
     
-    const handleExit = () => { setListeningCourse(null); setIsCoaching(false); window.speechSynthesis.cancel(); };
+    const handleExit = () => { 
+        setListeningCourse(null); 
+        stopPractice();
+    };
 
     if (!listeningCourse) {
         return (
@@ -182,6 +211,9 @@ const ListeningCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab
 
     return (
         <div className="flex flex-col h-full bg-slate-50 dark:bg-slate-950 relative overflow-y-auto pb-20">
+            {/* Hidden Silent Audio for Mobile Keep-Alive */}
+            <audio ref={silentAudioRef} src={SILENT_AUDIO} loop playsInline className="hidden" />
+
             <div className="bg-white dark:bg-slate-900 p-4 shadow-sm sticky top-0 z-10">
                 <div className="flex justify-between items-center mb-4">
                    <div className="flex items-center gap-2 flex-1 min-w-0">
@@ -207,8 +239,8 @@ const ListeningCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab
                 </div>
                 <div className="flex items-center justify-between gap-2">
                     {!isAutoLoop && !isRandomLoop && <button onClick={() => { stopPractice(); handlePrev(); }} className="px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700"><SkipBack size={20} /></button>}
-                    <button onClick={() => { setIsAutoLoop(!isAutoLoop); setIsRandomLoop(false); if(isCoaching) stopPractice(); }} className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold transition-all ${isAutoLoop ? 'bg-orange-500 text-white shadow-lg shadow-orange-200 dark:shadow-none' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'}`}><RefreshCcw size={18} className={isAutoLoop ? 'animate-spin-slow' : ''} />自動</button>
-                    <button onClick={() => { setIsRandomLoop(!isRandomLoop); setIsAutoLoop(false); if(isCoaching) stopPractice(); }} className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold transition-all ${isRandomLoop ? 'bg-purple-600 text-white shadow-lg shadow-purple-200 dark:shadow-none' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'}`}><Shuffle size={18} />隨機</button>
+                    <button onClick={() => { activateAudioSession(); setIsAutoLoop(!isAutoLoop); setIsRandomLoop(false); if(isCoaching) stopPractice(); }} className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold transition-all ${isAutoLoop ? 'bg-orange-500 text-white shadow-lg shadow-orange-200 dark:shadow-none' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'}`}><RefreshCcw size={18} className={isAutoLoop ? 'animate-spin-slow' : ''} />自動</button>
+                    <button onClick={() => { activateAudioSession(); setIsRandomLoop(!isRandomLoop); setIsAutoLoop(false); if(isCoaching) stopPractice(); }} className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold transition-all ${isRandomLoop ? 'bg-purple-600 text-white shadow-lg shadow-purple-200 dark:shadow-none' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'}`}><Shuffle size={18} />隨機</button>
                     {!isAutoLoop && !isRandomLoop && <button onClick={() => { stopPractice(); handleNext(); }} className="px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700"><SkipForward size={20} /></button>}
                 </div>
             </div>
@@ -219,7 +251,7 @@ const ListeningCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab
                      <div className="w-20 h-20 bg-orange-50 dark:bg-orange-900/20 rounded-full flex items-center justify-center mb-6 text-orange-500 dark:text-orange-400 shadow-inner"><Ear size={40} /></div>
                      
                      <div className="flex items-center justify-center gap-4 mb-8 w-full">
-                        <button onClick={handlePlayAudio} disabled={isPlaying} className={`p-4 rounded-full transition-all transform active:scale-95 shadow-lg flex items-center justify-center ${isPlaying ? 'bg-slate-100 dark:bg-slate-800 text-slate-300 dark:text-slate-600' : 'bg-orange-500 text-white hover:bg-orange-600 shadow-orange-200 dark:shadow-none'}`}>{isPlaying ? <Loader2 size={32} className="animate-spin" /> : <Play size={32} fill="currentColor" className="ml-1"/>}</button>
+                        <button onClick={() => { activateAudioSession(); handlePlayAudio(); }} disabled={isPlaying} className={`p-4 rounded-full transition-all transform active:scale-95 shadow-lg flex items-center justify-center ${isPlaying ? 'bg-slate-100 dark:bg-slate-800 text-slate-300 dark:text-slate-600' : 'bg-orange-500 text-white hover:bg-orange-600 shadow-orange-200 dark:shadow-none'}`}>{isPlaying ? <Loader2 size={32} className="animate-spin" /> : <Play size={32} fill="currentColor" className="ml-1"/>}</button>
                         <div className="text-left"><p className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase">Listen</p><p className="text-sm font-bold text-slate-600 dark:text-slate-300">播放音檔</p></div>
                      </div>
 

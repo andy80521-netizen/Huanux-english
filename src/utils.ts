@@ -4,14 +4,29 @@ export const getVoices = (): Promise<SpeechSynthesisVoice[]> => {
   return new Promise((resolve) => {
     let voices = window.speechSynthesis.getVoices();
     if (voices.length > 0) { resolve(voices); return; }
-    window.speechSynthesis.onvoiceschanged = () => { voices = window.speechSynthesis.getVoices(); resolve(voices); };
-    setTimeout(() => resolve(window.speechSynthesis.getVoices()), 1000);
+    
+    // iOS Safari sometimes doesn't fire onvoiceschanged immediately, so we poll
+    const id = setInterval(() => {
+        voices = window.speechSynthesis.getVoices();
+        if (voices.length > 0) {
+            clearInterval(id);
+            resolve(voices);
+        }
+    }, 100);
+
+    // Fallback if voices never load (rare but possible on some Android webviews)
+    setTimeout(() => {
+        clearInterval(id);
+        resolve(window.speechSynthesis.getVoices());
+    }, 2000);
   });
 };
 
 export const speakTextPromise = async (text: string, rate = 1.0, voicePrefs: { zh?: string, en?: string } = {}) => {
   if (!('speechSynthesis' in window)) return;
   
+  // Critical Fix for Mobile: Cancel any pending speech and force resume
+  window.speechSynthesis.cancel();
   if (window.speechSynthesis.paused) {
       window.speechSynthesis.resume();
   }
@@ -19,10 +34,12 @@ export const speakTextPromise = async (text: string, rate = 1.0, voicePrefs: { z
   const voices = await getVoices();
   
   return new Promise<void>((resolve) => {
+    // Double check cancellation to be sure
     window.speechSynthesis.cancel();
     
     if (!text) { resolve(); return; }
     
+    // Slight delay to allow cancel to process
     setTimeout(() => {
         const utterance = new SpeechSynthesisUtterance(text);
         utterance.rate = rate;
@@ -54,13 +71,22 @@ export const speakTextPromise = async (text: string, rate = 1.0, voicePrefs: { z
             }
         }
         
-        utterance.onend = () => resolve();
+        // Mobile timeout safety: If onend doesn't fire (common iOS bug), resolve anyway
+        const safetyTimeout = setTimeout(() => {
+            resolve();
+        }, (text.length * 200) + 3000);
+
+        utterance.onend = () => {
+            clearTimeout(safetyTimeout);
+            resolve();
+        };
+        
         utterance.onerror = (e) => {
+            clearTimeout(safetyTimeout);
             console.warn("Speech synthesis error:", e); 
             resolve();
         };
         
-        setTimeout(resolve, (text.length * 500) + 2000);
         window.speechSynthesis.speak(utterance);
     }, 50);
   });
