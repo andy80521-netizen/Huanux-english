@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Volume2, ChevronRight, Activity, LogOut, AlertTriangle, Mail, Lock, LogIn, UserPlus, Loader2, Moon, Sun, User, Database, Save, X, Github, PlayCircle } from 'lucide-react';
+import { Settings, Volume2, ChevronRight, Activity, LogOut, AlertTriangle, Mail, Lock, LogIn, UserPlus, Loader2, Moon, Sun, User, Database, Save, X, Github, PlayCircle, RefreshCw } from 'lucide-react';
 import { User as FirebaseUser, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword, signInAnonymously, updateProfile, signInWithPopup } from 'firebase/auth';
 import { auth, isFirebaseReady, githubProvider } from '../firebase';
 import { getVoices, speakTextPromise } from '../utils';
@@ -119,20 +119,46 @@ const PersonalMode: React.FC<Props> = ({ user, voicePrefs, setVoicePrefs, isDark
         }
     };
 
+    const parseLooseJson = (str: string) => {
+        try {
+            return JSON.parse(str);
+        } catch (e) {
+            // Support parsing JS Object literal format (e.g. copied from Firebase console)
+            // 1. Wrap unquoted keys in quotes
+            let jsonStr = str.replace(/(\w+)\s*:/g, '"$1":');
+            // 2. Convert single quotes to double quotes
+            jsonStr = jsonStr.replace(/'/g, '"');
+            // 3. Remove trailing commas
+            jsonStr = jsonStr.replace(/,\s*}/g, '}');
+            return JSON.parse(jsonStr);
+        }
+    };
+
     const handleSaveConfig = () => {
         try {
-            if (!configJson.trim()) {
+            const trimmed = configJson.trim();
+            if (!trimmed) {
                 localStorage.removeItem('firebase_config');
                 window.location.reload();
                 return;
             }
-            const parsed = JSON.parse(configJson);
+            
+            const parsed = parseLooseJson(trimmed);
+            
             if (!parsed.apiKey) throw new Error('缺少 apiKey');
+            if (!parsed.authDomain) throw new Error('缺少 authDomain');
+            if (!parsed.projectId) throw new Error('缺少 projectId');
+
             localStorage.setItem('firebase_config', JSON.stringify(parsed));
             window.location.reload();
-        } catch (e) {
-            setError('JSON 格式錯誤，請檢查');
+        } catch (e: any) {
+            setError('格式錯誤: ' + e.message + '。請貼上完整的 Firebase Config Object。');
         }
+    };
+
+    const handleResetConfig = () => {
+        localStorage.removeItem('firebase_config');
+        window.location.reload();
     };
 
     const handleTestVoice = (lang: 'zh' | 'en') => {
@@ -158,21 +184,30 @@ const PersonalMode: React.FC<Props> = ({ user, voicePrefs, setVoicePrefs, isDark
                             </button>
                         </div>
                         <p className="text-xs text-slate-500 dark:text-slate-400 mb-4 leading-relaxed">
-                            請貼上您的 Firebase Config JSON 以啟用註冊與同步功能。<br/>
-                            <span className="opacity-70 font-mono text-[10px]">(Dev: 設定 Netlify 環境變數 <code>VITE_FB_API_KEY</code>)</span>
+                            請貼上您的 Firebase Config Object 以啟用功能。<br/>
+                            <span className="opacity-70 font-mono text-[10px]">(支援直接貼上 JavaScript 物件格式)</span>
                         </p>
                         <textarea 
                             value={configJson}
                             onChange={(e) => setConfigJson(e.target.value)}
                             className="w-full h-32 p-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-mono focus:ring-2 focus:ring-indigo-500 outline-none text-slate-900 dark:text-white resize-none mb-4"
-                            placeholder={`{ "apiKey": "...", "authDomain": "...", ... }`}
+                            placeholder={`const firebaseConfig = {\n  apiKey: "AIza...",\n  authDomain: "..."\n};`}
                         />
-                        <button 
-                            onClick={handleSaveConfig} 
-                            className="w-full py-3 bg-indigo-600 text-white font-bold rounded-xl shadow-lg hover:bg-indigo-700 transition-all flex items-center justify-center gap-2"
-                        >
-                            <Save size={18} /> 儲存並重新載入
-                        </button>
+                        <div className="flex gap-3">
+                            <button 
+                                onClick={handleResetConfig} 
+                                className="flex-1 py-3 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-bold rounded-xl hover:bg-slate-200 dark:hover:bg-slate-700 transition-all flex items-center justify-center gap-2"
+                                title="重設為預設值"
+                            >
+                                <RefreshCw size={18} /> 重設
+                            </button>
+                            <button 
+                                onClick={handleSaveConfig} 
+                                className="flex-[2] py-3 bg-indigo-600 text-white font-bold rounded-xl shadow-lg hover:bg-indigo-700 transition-all flex items-center justify-center gap-2"
+                            >
+                                <Save size={18} /> 儲存並套用
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}
@@ -353,7 +388,7 @@ const PersonalMode: React.FC<Props> = ({ user, voicePrefs, setVoicePrefs, isDark
                         <div className="flex gap-2 items-start bg-indigo-50/50 dark:bg-indigo-900/20 p-2 rounded-lg"><AlertTriangle size={14} className="text-indigo-400 mt-0.5 shrink-0" /><p className="text-[10px] text-indigo-400/80 leading-relaxed">提示：手機與電腦內建的語音包不同。若覺得預設聲音不自然，請在此手動選擇。</p></div>
                     </div>
                     {user && (<button onClick={() => signOut(auth)} className="w-full py-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 font-bold rounded-xl transition-all flex items-center justify-center gap-2 mb-4 hover:bg-slate-50 dark:hover:bg-slate-700"><LogOut size={18} /> 登出帳號</button>)}
-                    <p className="mt-4 text-[10px] text-slate-300 dark:text-slate-600 font-mono">Huanux ENGLISH v1.8.0</p>
+                    <p className="mt-4 text-[10px] text-slate-300 dark:text-slate-600 font-mono">Huanux ENGLISH v1.8.1</p>
                 </div>
             </div>
         </div>

@@ -11,59 +11,43 @@ declare global {
 // Helper to safely get environment variables
 const getEnv = (key: string) => {
   try {
-    return (import.meta as any).env && (import.meta as any).env[key];
+    const val = (import.meta as any).env && (import.meta as any).env[key];
+    if (val && typeof val === 'string') {
+        // Strict filter for placeholders
+        if (val.includes('placeholder') || val === 'undefined' || val.trim() === '') {
+            return undefined;
+        }
+        return val;
+    }
+    return undefined;
   } catch {
     return undefined;
   }
 };
 
-// Helper: Reverse string to hide sensitive patterns from static scanners
-const rev = (str: string) => str.split('').reverse().join('');
-
-// Obfuscated Fallback Key (Reversed)
-// Original: AIzaSyDsBeLHqos1Rx5mi1ydCRErfV2oldfJ93E
-const FALLBACK_KEY_REV = "E39Jfldlo2VfrETCdy1im5xR1soqHLeBsDySazIA";
-
-const getFallbackKey = () => {
-    try {
-        // Simple runtime reversal prevents build tools from seeing the key
-        if (typeof window !== 'undefined') {
-            return rev(FALLBACK_KEY_REV);
-        }
-        return "";
-    } catch {
-        return "";
-    }
+// Hardcoded defaults from user provision
+// These are used if Environment Variables are missing or invalid
+const PROVIDED_CONFIG = {
+  apiKey: "AIzaSyDsBeLHqos1Rx5mi1ydCRErfV2oldfJ93E",
+  authDomain: "huanux-english.firebaseapp.com",
+  projectId: "huanux-english",
+  storageBucket: "huanux-english.firebasestorage.app",
+  messagingSenderId: "389474252282",
+  appId: "1:389474252282:web:6dbc2d1e350d043740e043",
+  measurementId: "G-GME38D35FS"
 };
 
-// Obfuscated App ID (Reversed)
-// Original: 1:389474252282:web:6dbc2d1e350d043740e043
-const FALLBACK_APP_ID_REV = "340e047340d053e1d2cbd6:bew:282252474983:1";
-
-const getFallbackAppId = () => {
-    try {
-        if (typeof window !== 'undefined') {
-            return rev(FALLBACK_APP_ID_REV);
-        }
-        return "";
-    } catch {
-        return "";
-    }
-};
-
-// Configuration
-// We use 'VITE_FB_API_KEY' instead of standard names to avoid Netlify's default pattern matching.
 const defaultFirebaseConfig = {
-  apiKey: getEnv("VITE_FB_API_KEY") || getFallbackKey(),
-  authDomain: getEnv("VITE_FB_AUTH_DOMAIN") || "huanux-english.firebaseapp.com",
-  projectId: getEnv("VITE_FB_PROJECT_ID") || "huanux-english",
-  storageBucket: getEnv("VITE_FB_STORAGE_BUCKET") || "huanux-english.firebasestorage.app",
-  messagingSenderId: getEnv("VITE_FB_MSG_ID") || "389474252282",
-  appId: getEnv("VITE_FB_APP_ID") || getFallbackAppId(),
-  measurementId: getEnv("VITE_FB_MEASURE_ID") || "G-GME38D35FS"
+  apiKey: getEnv("VITE_FB_API_KEY") || PROVIDED_CONFIG.apiKey,
+  authDomain: getEnv("VITE_FB_AUTH_DOMAIN") || PROVIDED_CONFIG.authDomain,
+  projectId: getEnv("VITE_FB_PROJECT_ID") || PROVIDED_CONFIG.projectId,
+  storageBucket: getEnv("VITE_FB_STORAGE_BUCKET") || PROVIDED_CONFIG.storageBucket,
+  messagingSenderId: getEnv("VITE_FB_MSG_ID") || PROVIDED_CONFIG.messagingSenderId,
+  appId: getEnv("VITE_FB_APP_ID") || PROVIDED_CONFIG.appId,
+  measurementId: getEnv("VITE_FB_MEASURE_ID") || PROVIDED_CONFIG.measurementId
 };
 
-// Priority: 1. Runtime Injection 2. LocalStorage 3. Default (Env Var or Obfuscated Fallback)
+// Priority: 1. Runtime Injection 2. LocalStorage 3. Default
 let configStr = typeof __firebase_config !== 'undefined' ? __firebase_config : '{}';
 let firebaseConfig = { ...defaultFirebaseConfig };
 
@@ -80,7 +64,8 @@ if (configStr && configStr !== '{}') {
     if (localConfig) {
         try {
             const parsedLocal = JSON.parse(localConfig);
-            if (parsedLocal && parsedLocal.apiKey) {
+            // Basic structural validation
+            if (parsedLocal && parsedLocal.apiKey && parsedLocal.apiKey.startsWith('AIza')) {
                 firebaseConfig = parsedLocal;
             }
         } catch(e) {
@@ -89,16 +74,16 @@ if (configStr && configStr !== '{}') {
     }
 }
 
-// Basic validation
-const isValidConfig = Object.keys(firebaseConfig).length > 0 && 
-                      (firebaseConfig as any).apiKey && 
-                      !(firebaseConfig as any).apiKey.includes('dummy') &&
-                      (firebaseConfig as any).apiKey.length > 20;
+// Final check: if apiKey doesn't start with AIza, revert to provided default
+if (!firebaseConfig.apiKey || !firebaseConfig.apiKey.startsWith('AIza')) {
+    console.warn("Invalid API Key detected, reverting to default provided config.");
+    firebaseConfig = { ...defaultFirebaseConfig };
+}
 
-const app = initializeApp(isValidConfig ? firebaseConfig : defaultFirebaseConfig);
+const app = initializeApp(firebaseConfig);
 
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const githubProvider = new GithubAuthProvider();
 export const appId = typeof __app_id !== 'undefined' ? __app_id : 'huan-power-english';
-export const isFirebaseReady = isValidConfig;
+export const isFirebaseReady = !!firebaseConfig.apiKey;
