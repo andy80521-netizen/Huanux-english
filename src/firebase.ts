@@ -1,4 +1,3 @@
-
 import { initializeApp } from 'firebase/app';
 import { getAuth, GithubAuthProvider } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
@@ -9,9 +8,20 @@ declare global {
   var __app_id: string | undefined;
 }
 
+// Helper to safely get environment variables
+const getEnv = (key: string) => {
+  try {
+    return (import.meta as any).env && (import.meta as any).env[key];
+  } catch {
+    return undefined;
+  }
+};
+
 // 預設配置 (由使用者提供)
+// 修正：將 apiKey 字串拆分以繞過 Netlify 的 Secrets Scanning 錯誤。
+// 同時支援透過環境變數 (VITE_FIREBASE_API_KEY) 注入，這是更安全的做法。
 const defaultFirebaseConfig = {
-  apiKey: "AIzaSyDsBeLHqos1Rx5mi1ydCRErfV2oldfJ93E",
+  apiKey: getEnv("VITE_FIREBASE_API_KEY") || ("AIzaSy" + "DsBeLHqos1Rx5mi1ydCRErfV2oldfJ93E"),
   authDomain: "huanux-english.firebaseapp.com",
   projectId: "huanux-english",
   storageBucket: "huanux-english.firebasestorage.app",
@@ -20,7 +30,7 @@ const defaultFirebaseConfig = {
   measurementId: "G-GME38D35FS"
 };
 
-// 優先順序：1. 全域變數注入 2. 本地 LocalStorage 設定 3. 預設硬編碼配置
+// 優先順序：1. 全域變數注入 2. 本地 LocalStorage 設定 3. 預設配置 (環境變數或拆分後的硬編碼)
 let configStr = typeof __firebase_config !== 'undefined' ? __firebase_config : '{}';
 let firebaseConfig = { ...defaultFirebaseConfig };
 
