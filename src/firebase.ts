@@ -37,8 +37,8 @@ const defaultFirebaseConfig = {
   authDomain: getEnv('VITE_FIREBASE_AUTH_DOMAIN') || "huanux-english.firebaseapp.com",
   projectId: getEnv('VITE_FIREBASE_PROJECT_ID') || "huanux-english",
   storageBucket: getEnv('VITE_FIREBASE_STORAGE_BUCKET') || "huanux-english.firebasestorage.app",
-  messagingSenderId: getEnv('VITE_FIREBASE_MESSAGING_SENDER_ID'), // e.g. 389474252282
-  appId: getEnv('VITE_FIREBASE_APP_ID'), // e.g. 1:389474252282:web:...
+  messagingSenderId: getEnv('VITE_FIREBASE_MESSAGING_SENDER_ID'),
+  appId: getEnv('VITE_FIREBASE_APP_ID'),
   measurementId: getEnv('VITE_FIREBASE_MEASUREMENT_ID') || "G-GME38D35FS"
 };
 
@@ -88,5 +88,6 @@ const app = initializeApp(safeConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const githubProvider = new GithubAuthProvider();
+// Note: This appId variable is for the internal Firestore path structure, unrelated to Firebase Client App ID
 export const appId = typeof __app_id !== 'undefined' ? __app_id : 'huan-power-english';
 export const isFirebaseReady = isValidConfig;
