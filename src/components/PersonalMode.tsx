@@ -60,15 +60,21 @@ const PersonalMode: React.FC<Props> = ({ user, voicePrefs, setVoicePrefs, isDark
                 await updateProfile(res.user, { displayName: name });
             }
         } catch (err: any) {
-            let msg = err.message;
+            console.error("Auth Error:", err);
+            let msg = err.message || '認證失敗';
+            
             if (msg.includes('auth/invalid-credential') || msg.includes('auth/wrong-password') || msg.includes('auth/user-not-found')) msg = '帳號或密碼錯誤';
             else if (msg.includes('auth/email-already-in-use')) msg = '此 Email 已被註冊';
             else if (msg.includes('auth/weak-password')) msg = '密碼強度不足 (至少 6 位)';
-            else if (msg.includes('api-key-not-valid')) {
+            else if (msg.includes('auth/network-request-failed')) msg = '網路連線失敗，請檢查網路';
+            else if (msg.includes('auth/too-many-requests')) msg = '登入失敗次數過多，請稍後再試';
+            else if (msg.includes('auth/unauthorized-domain')) msg = '網域未授權：請至 Firebase Console 新增此網域';
+            else if (msg.includes('api-key-not-valid') || msg.includes('auth/invalid-api-key')) {
                 msg = 'API Key 無效 (請點擊設定按鈕檢查)';
                 setShowConfig(true);
             }
-            setError(msg || '認證失敗，請檢查資料');
+            
+            setError(msg);
         } finally {
             setLoading(false);
         }
@@ -86,16 +92,19 @@ const PersonalMode: React.FC<Props> = ({ user, voicePrefs, setVoicePrefs, isDark
         try {
             await signInWithPopup(auth, githubProvider);
         } catch (err: any) {
-            console.error(err);
-            let msg = err.message;
+            console.error("GitHub Login Error:", err);
+            let msg = err.message || 'GitHub 登入失敗';
+            
             if (msg.includes('account-exists-with-different-credential')) msg = '此 Email 已使用其他方式登入';
             else if (msg.includes('popup-closed-by-user')) msg = '登入視窗已關閉';
+            else if (msg.includes('auth/popup-blocked')) msg = '彈出視窗被封鎖，請允許彈出視窗';
             else if (msg.includes('configuration-not-found')) msg = 'Firebase 尚未啟用 GitHub 登入';
-            else if (msg.includes('api-key-not-valid')) {
+            else if (msg.includes('auth/unauthorized-domain')) msg = '網域未授權：請至 Firebase Console 新增此網域';
+            else if (msg.includes('api-key-not-valid') || msg.includes('auth/invalid-api-key')) {
                  msg = 'API Key 無效';
                  setShowConfig(true);
             }
-            setError(msg || 'GitHub 登入失敗');
+            setError(msg);
         } finally {
             setLoading(false);
         }
@@ -105,7 +114,8 @@ const PersonalMode: React.FC<Props> = ({ user, voicePrefs, setVoicePrefs, isDark
         try {
             await signInAnonymously(auth);
         } catch (err: any) {
-            setError('匿名登入失敗');
+            console.error("Anon Login Error:", err);
+            setError('匿名登入失敗: ' + err.message);
         }
     };
 
