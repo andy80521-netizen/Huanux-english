@@ -1,18 +1,35 @@
-import React, { useState } from 'react';
-import { Info, X, Star, Medal, Award, Crown, Trophy, Wand2 } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { Info, X, Star, Medal, Award, Crown, Trophy, Wand2, Layers, ChevronDown } from 'lucide-react';
 import { VocabItem, BADGE_LEVELS, LISTENING_BADGE_LEVELS, GOD_LEVELS, BadgeLevel } from '../constants';
 import { getBadgeInfo } from '../utils';
 
-const BadgeItem: React.FC<{ item: VocabItem, activeWall: string, levels: BadgeLevel[] }> = ({ item, activeWall, levels }) => {
+interface BadgeGroup {
+    representative: VocabItem;
+    questions: string[];
+}
+
+const BadgeItem: React.FC<{ group: BadgeGroup, activeWall: string, levels: BadgeLevel[] }> = ({ group, activeWall, levels }) => {
+    const { representative, questions } = group;
     const isGodMode = activeWall === 'god';
-    const score = isGodMode ? 100000 : (activeWall === 'speaking' ? item.mastery : item.listeningMastery);
+    const score = isGodMode ? 100000 : (activeWall === 'speaking' ? representative.mastery : representative.listeningMastery);
     const { currentBadge } = getBadgeInfo(score, levels);
     const [showDetail, setShowDetail] = useState(false);
+    
+    const isMulti = questions.length > 1;
 
     return (
         <>
             <div onClick={() => setShowDetail(true)} className={`relative aspect-square rounded-2xl border-2 ${currentBadge.border} bg-white dark:bg-slate-900 flex flex-col items-center justify-center ${currentBadge.shadow} cursor-pointer hover:-translate-y-1 transition-all duration-300 overflow-hidden group shadow-lg`}>
                 <div className={`absolute inset-0 opacity-20 bg-gradient-to-br ${currentBadge.gradient}`} />
+                
+                {/* Multi-item indicator */}
+                {isMulti && (
+                    <div className="absolute top-2 right-2 z-20 flex items-center gap-0.5 bg-black/5 dark:bg-white/10 backdrop-blur-sm px-1.5 py-0.5 rounded-md border border-black/5 dark:border-white/5">
+                        <Layers size={10} className="text-slate-500 dark:text-slate-400" />
+                        <span className="text-[9px] font-black text-slate-600 dark:text-slate-300">{questions.length}</span>
+                    </div>
+                )}
+
                 <div className={`relative z-10 mb-1 p-2 rounded-full ${currentBadge.bg} ${currentBadge.ring} ring-1 shadow-md transition-all duration-500 group-hover:scale-110`}>
                     <currentBadge.icon 
                         size={18} 
@@ -21,14 +38,17 @@ const BadgeItem: React.FC<{ item: VocabItem, activeWall: string, levels: BadgeLe
                     />
                 </div>
                 <div className="relative z-10 text-center w-full px-1">
-                    <p className="text-[8px] font-black text-slate-700 dark:text-slate-300 truncate w-full leading-none tracking-tight">{item.id}. {item.question}</p>
+                    <p className="text-[8px] font-black text-slate-700 dark:text-slate-300 truncate w-full leading-none tracking-tight">
+                        {isMulti ? `${representative.answer}` : `${representative.id}. ${representative.question}`}
+                    </p>
+                    {isMulti && <p className="text-[6px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mt-0.5">Shared Mastery</p>}
                 </div>
                 <div className={`absolute bottom-0 w-full h-1 ${currentBadge.barColor}`} />
             </div>
             {showDetail && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4 backdrop-blur-md animate-in fade-in duration-300" onClick={() => setShowDetail(false)}>
-                    <div className="bg-white dark:bg-slate-900 rounded-[3rem] p-8 w-full max-w-xs shadow-2xl border-[6px] border-white dark:border-slate-800 relative animate-in zoom-in-95 duration-300" onClick={e => e.stopPropagation()}>
-                        <div className="flex flex-col items-center -mt-20 mb-6">
+                    <div className="bg-white dark:bg-slate-900 rounded-[3rem] p-8 w-full max-w-xs shadow-2xl border-[6px] border-white dark:border-slate-800 relative animate-in zoom-in-95 duration-300 flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
+                        <div className="flex flex-col items-center -mt-20 mb-6 shrink-0">
                             <div className={`p-6 rounded-full ${currentBadge.bg} ${currentBadge.ring} ring-[10px] ring-white dark:ring-slate-900 shadow-2xl mb-4 relative group`}>
                                 <div className={`absolute inset-0 ${currentBadge.bg} opacity-30 blur-2xl rounded-full scale-150`}></div>
                                 <currentBadge.icon size={64} className={`${currentBadge.color} ${currentBadge.glow} relative z-10`} strokeWidth={1.5} />
@@ -40,11 +60,31 @@ const BadgeItem: React.FC<{ item: VocabItem, activeWall: string, levels: BadgeLe
                                 <Star size={12} className="fill-amber-400 text-amber-400 animate-pulse" />
                             </div>
                         </div>
-                        <div className="text-center space-y-4">
-                            <div className="bg-slate-50 dark:bg-slate-800 p-4 rounded-2xl border border-slate-100 dark:border-slate-700 shadow-inner"><p className="text-[9px] font-black text-slate-300 dark:text-slate-500 uppercase tracking-widest mb-1">Question</p><p className="text-sm font-bold text-slate-700 dark:text-slate-300 leading-relaxed">{item.question}</p></div>
-                            <div className="bg-indigo-50 dark:bg-indigo-900/20 p-4 rounded-2xl border border-indigo-100 dark:border-indigo-900/30 shadow-sm"><p className="text-[9px] font-black text-indigo-300 dark:text-indigo-400 uppercase tracking-widest mb-1">Answer</p><p className="text-lg font-black text-indigo-600 dark:text-indigo-400 leading-tight">{item.answer}</p></div>
+                        
+                        <div className="text-center space-y-4 overflow-y-auto pr-1 -mr-2 scrollbar-thin scrollbar-thumb-slate-200 dark:scrollbar-thumb-slate-700">
+                            <div className="bg-indigo-50 dark:bg-indigo-900/20 p-4 rounded-2xl border border-indigo-100 dark:border-indigo-900/30 shadow-sm shrink-0">
+                                <p className="text-[9px] font-black text-indigo-300 dark:text-indigo-400 uppercase tracking-widest mb-1">Answer</p>
+                                <p className="text-lg font-black text-indigo-600 dark:text-indigo-400 leading-tight">{representative.answer}</p>
+                            </div>
+
+                            <div className="bg-slate-50 dark:bg-slate-800 p-4 rounded-2xl border border-slate-100 dark:border-slate-700 shadow-inner">
+                                <div className="flex items-center justify-center gap-2 mb-2">
+                                    <p className="text-[9px] font-black text-slate-300 dark:text-slate-500 uppercase tracking-widest">
+                                        {isMulti ? `Linked Questions (${questions.length})` : 'Question'}
+                                    </p>
+                                    {isMulti && <Layers size={10} className="text-slate-400" />}
+                                </div>
+                                <div className="space-y-2">
+                                    {questions.map((q, idx) => (
+                                        <div key={idx} className={`text-sm font-bold text-slate-700 dark:text-slate-300 leading-relaxed ${idx > 0 ? 'pt-2 border-t border-slate-200 dark:border-slate-700/50' : ''}`}>
+                                            {q}
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
                         </div>
-                        <button onClick={() => setShowDetail(false)} className="mt-8 w-full py-4 bg-slate-900 dark:bg-slate-700 text-white font-black rounded-2xl shadow-xl transition-all active:scale-90">收下榮耀</button>
+                        
+                        <button onClick={() => setShowDetail(false)} className="mt-6 w-full py-4 bg-slate-900 dark:bg-slate-700 text-white font-black rounded-2xl shadow-xl transition-all active:scale-90 shrink-0">收下榮耀</button>
                     </div>
                 </div>
             )}
@@ -74,29 +114,47 @@ const BadgeMode: React.FC<{ vocabData: VocabItem[] }> = ({ vocabData }) => {
     const [activeWall, setActiveWall] = useState('speaking');
     const [showGallery, setShowGallery] = useState(false);
 
-    // 語神權杖邏輯：同時達到大師 (10000) 與 天聽神 (5000)
-    const godItems = vocabData.filter(q => (q.mastery || 0) >= 10000 && (q.listeningMastery || 0) >= 5000 && !q.isHidden);
-    const godItemIds = new Set(godItems.map(item => item.id));
+    // Grouping helper
+    const getUniqueBadges = (items: VocabItem[]): BadgeGroup[] => {
+        const map = new Map<string, { representative: VocabItem, questions: string[] }>();
+        items.forEach(item => {
+            const key = item.answer.trim().toLowerCase();
+            if (!map.has(key)) {
+                map.set(key, { representative: item, questions: [item.question] });
+            } else {
+                map.get(key)!.questions.push(item.question);
+            }
+        });
+        return Array.from(map.values());
+    };
 
-    // 過濾出尚未晉升語神的成就，避免重複出現在普通牆面
-    const speakingBadges = vocabData.filter(q => (q.mastery || 0) >= 1000 && !q.isHidden && !godItemIds.has(q.id)).sort((a, b) => b.mastery - a.mastery);
-    const listeningBadges = vocabData.filter(q => (q.listeningMastery || 0) >= 500 && !q.isHidden && !godItemIds.has(q.id)).sort((a, b) => b.listeningMastery - a.listeningMastery);
+    // Filter Logic
+    const godItemsRaw = vocabData.filter(q => (q.mastery || 0) >= 10000 && (q.listeningMastery || 0) >= 5000 && !q.isHidden);
+    const godItemIds = new Set(godItemsRaw.map(item => item.id));
 
-    let currentBadges, levels, wallTheme, countLabel, WallIcon;
+    const speakingRaw = vocabData.filter(q => (q.mastery || 0) >= 1000 && !q.isHidden && !godItemIds.has(q.id));
+    const listeningRaw = vocabData.filter(q => (q.listeningMastery || 0) >= 500 && !q.isHidden && !godItemIds.has(q.id));
+
+    // Grouping
+    const godUnique = useMemo(() => getUniqueBadges(godItemsRaw), [godItemsRaw]);
+    const speakingUnique = useMemo(() => getUniqueBadges(speakingRaw).sort((a, b) => b.representative.mastery - a.representative.mastery), [speakingRaw]);
+    const listeningUnique = useMemo(() => getUniqueBadges(listeningRaw).sort((a, b) => b.representative.listeningMastery - a.representative.listeningMastery), [listeningRaw]);
+
+    let currentBadges: BadgeGroup[], levels, wallTheme, countLabel, WallIcon;
     if (activeWall === 'god') { 
-        currentBadges = godItems; 
+        currentBadges = godUnique; 
         levels = GOD_LEVELS; 
         wallTheme = { color: 'text-yellow-500', bg: 'bg-yellow-50' }; 
         countLabel = '傳 奇 權 杖'; 
         WallIcon = Wand2; 
     } else if (activeWall === 'listening') { 
-        currentBadges = listeningBadges; 
+        currentBadges = listeningUnique; 
         levels = LISTENING_BADGE_LEVELS; 
         wallTheme = { color: 'text-sky-600', bg: 'bg-sky-50' }; 
         countLabel = '獲 得 獎 盃'; 
         WallIcon = Trophy; 
     } else { 
-        currentBadges = speakingBadges; 
+        currentBadges = speakingUnique; 
         levels = BADGE_LEVELS; 
         wallTheme = { color: 'text-rose-600', bg: 'bg-rose-50' }; 
         countLabel = '獲 得 勳 章'; 
@@ -162,7 +220,7 @@ const BadgeMode: React.FC<{ vocabData: VocabItem[] }> = ({ vocabData }) => {
 
             {/* 勳章網格 */}
             <div className="grid grid-cols-6 gap-3 pb-32 px-1">
-                {currentBadges.map(item => (<BadgeItem key={item.id} item={item} activeWall={activeWall} levels={levels} />))}
+                {currentBadges.map((group, i) => (<BadgeItem key={i} group={group} activeWall={activeWall} levels={levels} />))}
                 {currentBadges.length === 0 && (
                     <div className="col-span-6 py-20 text-center text-slate-400 dark:text-slate-500 border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-[3rem] bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm">
                         <Trophy className="mx-auto mb-6 opacity-10" size={64} />
