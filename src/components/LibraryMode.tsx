@@ -297,7 +297,7 @@ const LibraryMode: React.FC<Props> = ({ vocabData, courses, onSaveItem, onDelete
                         </button>
                     )}
                     <h2 className="text-xl font-black text-slate-800 dark:text-white tracking-tight flex items-center gap-2">
-                        {currentLevel === 'courses' ? <><Folder className="text-indigo-600 dark:text-indigo-400" /> 題庫管理</> : <span className="truncate max-w-[150px]">{activeCourse}</span>}
+                        {currentLevel === 'courses' ? <><Folder className="text-indigo-600 dark:text-indigo-400" /> 課程管理</> : <span className="truncate max-w-[150px]">{activeCourse}</span>}
                     </h2>
                 </div>
                 <div className="flex gap-2">
