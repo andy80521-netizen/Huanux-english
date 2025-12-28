@@ -101,9 +101,81 @@ const App: React.FC = () => {
 
   // 4. 資料更新操作 (支援雲端與本地切換)
   const handleSaveItem = async (itemOrItems: VocabItem | VocabItem[]) => {
-      const items = Array.isArray(itemOrItems) ? itemOrItems : [itemOrItems];
+      let itemsToProcess = Array.isArray(itemOrItems) ? itemOrItems : [itemOrItems];
+      const currentData = vocabDataRef.current;
+      
+      // 使用 Map 來處理批量更新，確保 ID 不重複並能快速查找
+      const batchUpdateMap = new Map<number, VocabItem>();
+
+      // 將本次要儲存的項目先放入 Map
+      itemsToProcess.forEach(item => batchUpdateMap.set(item.id, item));
+
+      // 智慧同步邏輯：檢查是否有相同答案的項目
+      itemsToProcess.forEach(sourceItem => {
+          if (!sourceItem.answer) return;
+          const normAnswer = sourceItem.answer.trim().toLowerCase();
+
+          // 找出資料庫中所有「答案相同」但「ID 不同」的兄弟項目
+          const siblings = currentData.filter(d => 
+              d.id !== sourceItem.id && 
+              d.answer.trim().toLowerCase() === normAnswer
+          );
+
+          siblings.forEach(sibling => {
+              // 取得兄弟項目的最新狀態 (如果它也在本次 batchUpdateMap 中，取 Map 裡的)
+              const currentSibling = batchUpdateMap.get(sibling.id) || sibling;
+              
+              let newSourceMastery = sourceItem.mastery;
+              let newSiblingMastery = currentSibling.mastery;
+
+              // --- 口說分數同步邏輯 ---
+              // 情境 A：新卡片繼承 (Source 是新的/0分，兄弟有分數 -> Source 繼承兄弟)
+              if (sourceItem.mastery === 0 && currentSibling.mastery > 0) {
+                  newSourceMastery = currentSibling.mastery;
+              } 
+              // 情境 B：練習更新 (Source 有分數/變動，兄弟同步 Source)
+              else {
+                  newSiblingMastery = sourceItem.mastery;
+              }
+
+              let newSourceListening = sourceItem.listeningMastery;
+              let newSiblingListening = currentSibling.listeningMastery;
+
+              // --- 聽力分數同步邏輯 ---
+              if (sourceItem.listeningMastery === 0 && currentSibling.listeningMastery > 0) {
+                  newSourceListening = currentSibling.listeningMastery;
+              } else {
+                  newSiblingListening = sourceItem.listeningMastery;
+              }
+
+              // 如果 Source 需要被更新 (繼承了分數)，更新 Map 中的 Source
+              if (newSourceMastery !== sourceItem.mastery || newSourceListening !== sourceItem.listeningMastery) {
+                  const updatedSource = {
+                      ...sourceItem,
+                      mastery: newSourceMastery,
+                      listeningMastery: newSourceListening
+                  };
+                  batchUpdateMap.set(updatedSource.id, updatedSource);
+                  // 更新參照，以便後續迴圈使用最新數值
+                  sourceItem = updatedSource;
+              }
+
+              // 如果 Sibling 需要被更新 (被同步了)，加入 Map
+              if (newSiblingMastery !== currentSibling.mastery || newSiblingListening !== currentSibling.listeningMastery) {
+                  const updatedSibling = {
+                      ...currentSibling,
+                      mastery: newSiblingMastery,
+                      listeningMastery: newSiblingListening
+                  };
+                  batchUpdateMap.set(updatedSibling.id, updatedSibling);
+              }
+          });
+      });
+
+      const finalItems = Array.from(batchUpdateMap.values());
+
       if (user) { 
-        const promises = items.map(item => { 
+        const promises = finalItems.map(item => { 
           const id = item.id || Date.now() + Math.floor(Math.random() * 1000); 
           return setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'flashcards', id.toString()), { ...item, id }); 
         }); 
@@ -111,7 +183,7 @@ const App: React.FC = () => {
       } else { 
         setVocabData(prev => { 
           const newData = [...prev]; 
-          items.forEach(newItem => {
+          finalItems.forEach(newItem => {
             const index = newData.findIndex(i => i.id === newItem.id);
             if (index !== -1) newData[index] = newItem;
             else newData.push({ ...newItem, id: newItem.id || Date.now() });
