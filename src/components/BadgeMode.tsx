@@ -128,14 +128,22 @@ const BadgeMode: React.FC<{ vocabData: VocabItem[] }> = ({ vocabData }) => {
         return Array.from(map.values());
     };
 
-    // Filter Logic
-    const godItemsRaw = vocabData.filter(q => (q.mastery || 0) >= 10000 && (q.listeningMastery || 0) >= 5000 && !q.isHidden);
-    const godItemIds = new Set(godItemsRaw.map(item => item.id));
+    // Stable Filtering Logic to strictly exclude hidden items
+    const godItemsRaw = useMemo(() => 
+        vocabData.filter(q => (q.mastery || 0) >= 10000 && (q.listeningMastery || 0) >= 5000 && q.isHidden !== true), 
+    [vocabData]);
+    
+    const godItemIds = useMemo(() => new Set(godItemsRaw.map(item => item.id)), [godItemsRaw]);
 
-    const speakingRaw = vocabData.filter(q => (q.mastery || 0) >= 1000 && !q.isHidden && !godItemIds.has(q.id));
-    const listeningRaw = vocabData.filter(q => (q.listeningMastery || 0) >= 500 && !q.isHidden && !godItemIds.has(q.id));
+    const speakingRaw = useMemo(() => 
+        vocabData.filter(q => (q.mastery || 0) >= 1000 && q.isHidden !== true && !godItemIds.has(q.id)), 
+    [vocabData, godItemIds]);
 
-    // Grouping
+    const listeningRaw = useMemo(() => 
+        vocabData.filter(q => (q.listeningMastery || 0) >= 500 && q.isHidden !== true && !godItemIds.has(q.id)), 
+    [vocabData, godItemIds]);
+
+    // Grouping with dependencies on filtered lists
     const godUnique = useMemo(() => getUniqueBadges(godItemsRaw), [godItemsRaw]);
     const speakingUnique = useMemo(() => getUniqueBadges(speakingRaw).sort((a, b) => b.representative.mastery - a.representative.mastery), [speakingRaw]);
     const listeningUnique = useMemo(() => getUniqueBadges(listeningRaw).sort((a, b) => b.representative.listeningMastery - a.representative.listeningMastery), [listeningRaw]);
