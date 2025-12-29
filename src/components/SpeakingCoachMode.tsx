@@ -242,6 +242,13 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
             silentAudioRef.current.play().catch(() => {});
         }
         enableBackgroundAudioHack();
+
+        if (isRandomLoop) {
+            flowRef.current.active = true;
+            setIsPlayingFlow(true);
+            handleRandomNext(true); 
+            return;
+        }
     }
     
     flowRef.current.active = true; 

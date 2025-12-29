@@ -60,16 +60,23 @@ const ListeningCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab
         }
     }, [currentIndex, loopTrigger]);
 
+    // Play audio when result is shown
+    useEffect(() => {
+        if (showResult && isCoaching) {
+             handlePlayAudio();
+        }
+    }, [showResult]);
+
+    // 20-second Auto Advance for Loop/Random modes
     useEffect(() => {
         if (isCoaching && showResult && (isAutoLoop || isRandomLoop)) {
             const timer = setTimeout(() => {
-                if (!showResult) return;
                 if (isRandomLoop) handleRandomNext();
                 else handleNext();
-            }, 4000);
+            }, 20000);
             return () => clearTimeout(timer);
         }
-    }, [showResult, isCoaching]);
+    }, [showResult, isCoaching, isAutoLoop, isRandomLoop]);
 
     // iOS Audio Session Keep-Alive
     const activateAudioSession = () => {
@@ -111,7 +118,12 @@ const ListeningCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab
         activateAudioSession();
         
         setIsCoaching(true);
-        handlePlayAudio();
+
+        if (isRandomLoop) {
+            handleRandomNext();
+        } else {
+            handlePlayAudio();
+        }
     };
 
     const stopPractice = () => {
@@ -283,14 +295,23 @@ const ListeningCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab
                 </div>
             </div>
             <div className="p-6 flex flex-col items-center max-w-md mx-auto w-full">
-                {(isAutoLoop || isRandomLoop) && isCoaching && <p className="mb-4 text-[10px] font-bold text-slate-400 dark:text-slate-500 flex items-center gap-1 animate-pulse"><Activity size={12}/>{isAutoLoop ? '自動' : '隨機'}模式中：完成後自動跳轉</p>}
+                {(isAutoLoop || isRandomLoop) && isCoaching && <p className="mb-4 text-[10px] font-bold text-slate-400 dark:text-slate-500 flex items-center gap-1 animate-pulse"><Activity size={12}/>{isAutoLoop ? '自動' : '隨機'}模式中：20秒後自動跳轉</p>}
                 
                 <div className="w-full bg-white dark:bg-slate-900 rounded-3xl shadow-xl border border-slate-100 dark:border-slate-800 p-6 mb-6 flex flex-col items-center text-center">
-                     <div className="w-20 h-20 bg-orange-50 dark:bg-orange-900/20 rounded-full flex items-center justify-center mb-6 text-orange-500 dark:text-orange-400 shadow-inner"><Ear size={40} /></div>
                      
-                     <div className="flex items-center justify-center gap-4 mb-8 w-full">
+                     <div className="flex items-center justify-center gap-4 mb-8 w-full mt-2">
                         <button onClick={() => { activateAudioSession(); handlePlayAudio(); }} disabled={isPlaying} className={`p-4 rounded-full transition-all transform active:scale-95 shadow-lg flex items-center justify-center ${isPlaying ? 'bg-slate-100 dark:bg-slate-800 text-slate-300 dark:text-slate-600' : 'bg-orange-500 text-white hover:bg-orange-600 shadow-orange-200 dark:shadow-none'}`}>{isPlaying ? <Loader2 size={32} className="animate-spin" /> : <Play size={32} fill="currentColor" className="ml-1"/>}</button>
                         <div className="text-left"><p className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase">Listen</p><p className="text-sm font-bold text-slate-600 dark:text-slate-300">播放音檔</p></div>
+
+                        {(showResult && (isAutoLoop || isRandomLoop)) && (
+                            <button 
+                                onClick={() => isRandomLoop ? handleRandomNext() : handleNext()}
+                                className="p-3 bg-purple-600 text-white rounded-full shadow-lg shadow-purple-200 dark:shadow-none hover:bg-purple-700 transition-all animate-in fade-in slide-in-from-left-2 ml-2"
+                                title="下一題"
+                            >
+                                <SkipForward size={20} fill="currentColor" />
+                            </button>
+                        )}
                      </div>
 
                      {!showResult ? (
