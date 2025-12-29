@@ -128,19 +128,19 @@ const BadgeMode: React.FC<{ vocabData: VocabItem[] }> = ({ vocabData }) => {
         return Array.from(map.values());
     };
 
-    // Stable Filtering Logic to strictly exclude hidden items
+    // Stable Filtering Logic: Modified to INCLUDE hidden items for badges as requested
     const godItemsRaw = useMemo(() => 
-        vocabData.filter(q => (q.mastery || 0) >= 10000 && (q.listeningMastery || 0) >= 5000 && q.isHidden !== true), 
+        vocabData.filter(q => (q.mastery || 0) >= 10000 && (q.listeningMastery || 0) >= 5000), 
     [vocabData]);
     
     const godItemIds = useMemo(() => new Set(godItemsRaw.map(item => item.id)), [godItemsRaw]);
 
     const speakingRaw = useMemo(() => 
-        vocabData.filter(q => (q.mastery || 0) >= 1000 && q.isHidden !== true && !godItemIds.has(q.id)), 
+        vocabData.filter(q => (q.mastery || 0) >= 1000 && !godItemIds.has(q.id)), 
     [vocabData, godItemIds]);
 
     const listeningRaw = useMemo(() => 
-        vocabData.filter(q => (q.listeningMastery || 0) >= 500 && q.isHidden !== true && !godItemIds.has(q.id)), 
+        vocabData.filter(q => (q.listeningMastery || 0) >= 500 && !godItemIds.has(q.id)), 
     [vocabData, godItemIds]);
 
     // Grouping with dependencies on filtered lists
