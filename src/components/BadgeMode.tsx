@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Info, X, Star, Medal, Award, Crown, Trophy, Wand2, Layers, ChevronDown } from 'lucide-react';
+import { Info, X, Star, Medal, Award, Crown, Trophy, Wand2, Layers, ChevronDown, ArrowUpCircle } from 'lucide-react';
 import { VocabItem, BADGE_LEVELS, LISTENING_BADGE_LEVELS, GOD_LEVELS, BadgeLevel } from '../constants';
 import { getBadgeInfo } from '../utils';
 
@@ -8,28 +8,49 @@ interface BadgeGroup {
     questions: string[];
 }
 
-const BadgeItem: React.FC<{ group: BadgeGroup, activeWall: string, levels: BadgeLevel[] }> = ({ group, activeWall, levels }) => {
+const BadgeItem: React.FC<{ group: BadgeGroup, activeWall: string, levels: BadgeLevel[], vocabData: VocabItem[] }> = ({ group, activeWall, levels, vocabData }) => {
     const { representative, questions } = group;
     const isGodMode = activeWall === 'god';
     const score = isGodMode ? 100000 : (activeWall === 'speaking' ? representative.mastery : representative.listeningMastery);
     const { currentBadge } = getBadgeInfo(score, levels);
     const [showDetail, setShowDetail] = useState(false);
     
-    const isMulti = questions.length > 1;
+    // Calculate contributors (Long sentences that contain this short answer)
+    const contributors = useMemo(() => {
+        const targetAns = representative.answer.trim().toLowerCase();
+        if (!targetAns) return [];
+        return vocabData.filter(v => {
+             const vAns = v.answer.trim().toLowerCase();
+             // Check if other answer contains target AND is not equal (is longer)
+             return vAns !== targetAns && vAns.includes(targetAns);
+        });
+    }, [vocabData, representative.answer]);
+
+    // Merge exact matches and contributors into a single list
+    const allLinks = useMemo(() => {
+        const links = questions.map(q => ({ question: q, answer: representative.answer, type: 'exact' }));
+        contributors.forEach(c => {
+            links.push({ question: c.question, answer: c.answer, type: 'boost' });
+        });
+        return links;
+    }, [questions, contributors, representative.answer]);
+
+    const linkCount = allLinks.length;
+    const isMulti = linkCount > 1;
 
     return (
         <>
             <div onClick={() => setShowDetail(true)} className={`relative aspect-square rounded-2xl border-2 ${currentBadge.border} bg-white dark:bg-slate-900 flex flex-col items-center justify-center ${currentBadge.shadow} cursor-pointer hover:-translate-y-1 transition-all duration-300 overflow-hidden group shadow-lg`}>
                 <div className={`absolute inset-0 opacity-20 bg-gradient-to-br ${currentBadge.gradient}`} />
                 
-                {/* Multi-item indicator */}
+                {/* Unified Link indicator */}
                 {isMulti && (
                     <div className="absolute top-2 right-2 z-20 flex items-center gap-0.5 bg-black/5 dark:bg-white/10 backdrop-blur-sm px-1.5 py-0.5 rounded-md border border-black/5 dark:border-white/5">
                         <Layers size={10} className="text-slate-500 dark:text-slate-400" />
-                        <span className="text-[9px] font-black text-slate-600 dark:text-slate-300">{questions.length}</span>
+                        <span className="text-[9px] font-black text-slate-600 dark:text-slate-300">{linkCount}</span>
                     </div>
                 )}
-
+                
                 <div className={`relative z-10 mb-1 p-2 rounded-full ${currentBadge.bg} ${currentBadge.ring} ring-1 shadow-md transition-all duration-500 group-hover:scale-110`}>
                     <currentBadge.icon 
                         size={18} 
@@ -41,7 +62,7 @@ const BadgeItem: React.FC<{ group: BadgeGroup, activeWall: string, levels: Badge
                     <p className="text-[8px] font-black text-slate-700 dark:text-slate-300 truncate w-full leading-none tracking-tight">
                         {isMulti ? `${representative.answer}` : `${representative.id}. ${representative.question}`}
                     </p>
-                    {isMulti && <p className="text-[6px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mt-0.5">Shared Mastery</p>}
+                    {isMulti && <p className="text-[6px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mt-0.5">Linked Mastery</p>}
                 </div>
                 <div className={`absolute bottom-0 w-full h-1 ${currentBadge.barColor}`} />
             </div>
@@ -67,17 +88,26 @@ const BadgeItem: React.FC<{ group: BadgeGroup, activeWall: string, levels: Badge
                                 <p className="text-lg font-black text-indigo-600 dark:text-indigo-400 leading-tight">{representative.answer}</p>
                             </div>
 
-                            <div className="bg-slate-50 dark:bg-slate-800 p-4 rounded-2xl border border-slate-100 dark:border-slate-700 shadow-inner">
+                            <div className="bg-slate-50 dark:bg-slate-800 p-4 rounded-2xl border border-slate-100 dark:border-slate-700 shadow-inner shrink-0">
                                 <div className="flex items-center justify-center gap-2 mb-2">
                                     <p className="text-[9px] font-black text-slate-300 dark:text-slate-500 uppercase tracking-widest">
-                                        {isMulti ? `Linked Questions (${questions.length})` : 'Question'}
+                                        Linked Questions ({linkCount})
                                     </p>
                                     {isMulti && <Layers size={10} className="text-slate-400" />}
                                 </div>
-                                <div className="space-y-2">
-                                    {questions.map((q, idx) => (
-                                        <div key={idx} className={`text-sm font-bold text-slate-700 dark:text-slate-300 leading-relaxed ${idx > 0 ? 'pt-2 border-t border-slate-200 dark:border-slate-700/50' : ''}`}>
-                                            {q}
+                                <div className="space-y-2 max-h-48 overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-slate-200 dark:scrollbar-thumb-slate-700">
+                                    {allLinks.map((link, idx) => (
+                                        <div key={idx} className={`text-left text-sm text-slate-700 dark:text-slate-300 leading-relaxed ${idx > 0 ? 'pt-2 border-t border-slate-200 dark:border-slate-700/50' : ''}`}>
+                                            <div className="font-bold">{link.question}</div>
+                                            {/* Show answer context only for boosted items (non-exact matches) */}
+                                            {link.type === 'boost' && (
+                                                <div className="flex items-center gap-1 mt-0.5">
+                                                    <ArrowUpCircle size={10} className="text-emerald-500 shrink-0" />
+                                                    <div className="font-mono text-[10px] text-slate-400 dark:text-slate-500 opacity-80 truncate bg-white/50 dark:bg-black/20 px-1.5 py-0.5 rounded w-full">
+                                                        {link.answer}
+                                                    </div>
+                                                </div>
+                                            )}
                                         </div>
                                     ))}
                                 </div>
@@ -228,7 +258,7 @@ const BadgeMode: React.FC<{ vocabData: VocabItem[] }> = ({ vocabData }) => {
 
             {/* 勳章網格 */}
             <div className="grid grid-cols-6 gap-3 pb-32 px-1">
-                {currentBadges.map((group, i) => (<BadgeItem key={i} group={group} activeWall={activeWall} levels={levels} />))}
+                {currentBadges.map((group, i) => (<BadgeItem key={i} group={group} activeWall={activeWall} levels={levels} vocabData={vocabData} />))}
                 {currentBadges.length === 0 && (
                     <div className="col-span-6 py-20 text-center text-slate-400 dark:text-slate-500 border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-[3rem] bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm">
                         <Trophy className="mx-auto mb-6 opacity-10" size={64} />

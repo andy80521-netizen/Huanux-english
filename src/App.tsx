@@ -110,65 +110,85 @@ const App: React.FC = () => {
       // 將本次要儲存的項目先放入 Map
       itemsToProcess.forEach(item => batchUpdateMap.set(item.id, item));
 
-      // 智慧同步邏輯：檢查是否有相同答案的項目
+      // 智慧同步邏輯
       itemsToProcess.forEach(sourceItem => {
           if (!sourceItem.answer) return;
           const normAnswer = sourceItem.answer.trim().toLowerCase();
+          if (!normAnswer) return;
 
-          // 找出資料庫中所有「答案相同」但「ID 不同」的兄弟項目
-          const siblings = currentData.filter(d => 
-              d.id !== sourceItem.id && 
-              d.answer.trim().toLowerCase() === normAnswer
-          );
+          currentData.forEach(targetItem => {
+              // Skip self
+              if (targetItem.id === sourceItem.id) return;
 
-          siblings.forEach(sibling => {
-              // 取得兄弟項目的最新狀態 (如果它也在本次 batchUpdateMap 中，取 Map 裡的)
-              const currentSibling = batchUpdateMap.get(sibling.id) || sibling;
-              
-              let newSourceMastery = sourceItem.mastery;
-              let newSiblingMastery = currentSibling.mastery;
+              // Get latest version of target from map if it exists
+              const currentTarget = batchUpdateMap.get(targetItem.id) || targetItem;
+              const normTargetAnswer = currentTarget.answer.trim().toLowerCase();
+              if (!normTargetAnswer) return;
 
-              // --- 口說分數同步邏輯 ---
-              // 情境 A：新卡片繼承 (Source 是新的/0分，兄弟有分數 -> Source 繼承兄弟)
-              if (sourceItem.mastery === 0 && currentSibling.mastery > 0) {
-                  newSourceMastery = currentSibling.mastery;
-              } 
-              // 情境 B：練習更新 (Source 有分數/變動，兄弟同步 Source)
-              else {
-                  newSiblingMastery = sourceItem.mastery;
+              // 1. Exact Match Logic (Bidirectional / Inheritance)
+              if (normAnswer === normTargetAnswer) {
+                  let finalSourceMastery = sourceItem.mastery;
+                  let finalSourceListening = sourceItem.listeningMastery;
+                  let sourceChanged = false;
+
+                  // A. New Source inherits from Old Target (Inheritance)
+                  if (sourceItem.mastery === 0 && currentTarget.mastery > 0) {
+                      finalSourceMastery = currentTarget.mastery;
+                      sourceChanged = true;
+                  }
+                  if (sourceItem.listeningMastery === 0 && currentTarget.listeningMastery > 0) {
+                      finalSourceListening = currentTarget.listeningMastery;
+                      sourceChanged = true;
+                  }
+
+                  if (sourceChanged) {
+                      const updatedSource = { ...sourceItem, mastery: finalSourceMastery, listeningMastery: finalSourceListening };
+                      batchUpdateMap.set(updatedSource.id, updatedSource);
+                      // Update reference so subsequent checks in this loop use the updated values
+                      sourceItem = updatedSource; 
+                  }
+
+                  // B. Target syncs with Source (Sync)
+                  if (sourceItem.mastery !== currentTarget.mastery || sourceItem.listeningMastery !== currentTarget.listeningMastery) {
+                      const updatedTarget = { 
+                          ...currentTarget, 
+                          mastery: sourceItem.mastery, 
+                          listeningMastery: sourceItem.listeningMastery 
+                      };
+                      batchUpdateMap.set(updatedTarget.id, updatedTarget);
+                  }
               }
+              // 2. Containment Logic (Long contains Short)
+              // Rule: Long sentence mastery propagates to Short sentence.
+              // We check if Source (Long) contains Target (Short).
+              else if (normAnswer.includes(normTargetAnswer)) {
+                   let newTargetMastery = currentTarget.mastery;
+                   let newTargetListening = currentTarget.listeningMastery;
+                   let targetChanged = false;
 
-              let newSourceListening = sourceItem.listeningMastery;
-              let newSiblingListening = currentSibling.listeningMastery;
+                   // If Source (Long) has higher mastery, upgrade Target (Short).
+                   // We use MAX logic to ensure short sentence mastery doesn't drop if long sentence is weak.
+                   if (sourceItem.mastery > currentTarget.mastery) {
+                       newTargetMastery = sourceItem.mastery;
+                       targetChanged = true;
+                   }
+                   if (sourceItem.listeningMastery > currentTarget.listeningMastery) {
+                       newTargetListening = sourceItem.listeningMastery;
+                       targetChanged = true;
+                   }
 
-              // --- 聽力分數同步邏輯 ---
-              if (sourceItem.listeningMastery === 0 && currentSibling.listeningMastery > 0) {
-                  newSourceListening = currentSibling.listeningMastery;
-              } else {
-                  newSiblingListening = sourceItem.listeningMastery;
+                   if (targetChanged) {
+                       const updatedTarget = { 
+                           ...currentTarget, 
+                           mastery: newTargetMastery, 
+                           listeningMastery: newTargetListening 
+                       };
+                       batchUpdateMap.set(updatedTarget.id, updatedTarget);
+                   }
               }
-
-              // 如果 Source 需要被更新 (繼承了分數)，更新 Map 中的 Source
-              if (newSourceMastery !== sourceItem.mastery || newSourceListening !== sourceItem.listeningMastery) {
-                  const updatedSource = {
-                      ...sourceItem,
-                      mastery: newSourceMastery,
-                      listeningMastery: newSourceListening
-                  };
-                  batchUpdateMap.set(updatedSource.id, updatedSource);
-                  // 更新參照，以便後續迴圈使用最新數值
-                  sourceItem = updatedSource;
-              }
-
-              // 如果 Sibling 需要被更新 (被同步了)，加入 Map
-              if (newSiblingMastery !== currentSibling.mastery || newSiblingListening !== currentSibling.listeningMastery) {
-                  const updatedSibling = {
-                      ...currentSibling,
-                      mastery: newSiblingMastery,
-                      listeningMastery: newSiblingListening
-                  };
-                  batchUpdateMap.set(updatedSibling.id, updatedSibling);
-              }
+              // 3. Containment Logic (Short contained in Long)
+              // Rule: Short sentence mastery does NOT propagate to Long sentence.
+              // So if Target (Long) contains Source (Short), we do nothing.
           });
       });
 
