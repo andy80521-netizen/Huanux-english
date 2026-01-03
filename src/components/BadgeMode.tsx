@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Info, X, Star, Medal, Award, Crown, Trophy, Wand2, Layers, ChevronDown, ArrowUpCircle } from 'lucide-react';
 import { VocabItem, BADGE_LEVELS, LISTENING_BADGE_LEVELS, GOD_LEVELS, BadgeLevel } from '../constants';
-import { getBadgeInfo } from '../utils';
+import { getBadgeInfo, checkVocabContainment } from '../utils';
 
 interface BadgeGroup {
     representative: VocabItem;
@@ -17,20 +17,20 @@ const BadgeItem: React.FC<{ group: BadgeGroup, activeWall: string, levels: Badge
     
     // Calculate contributors (Long sentences that contain this short answer)
     const contributors = useMemo(() => {
-        const targetAns = representative.answer.trim().toLowerCase();
-        if (!targetAns) return [];
         return vocabData.filter(v => {
-             const vAns = v.answer.trim().toLowerCase();
-             // Check if other answer contains target AND is not equal (is longer)
-             return vAns !== targetAns && vAns.includes(targetAns);
+             // Check if other answer contains target AND is not equal (is longer/fuzzy match)
+             return v.id !== representative.id && checkVocabContainment(v.answer, representative.answer);
         });
-    }, [vocabData, representative.answer]);
+    }, [vocabData, representative.answer, representative.id]);
 
     // Merge exact matches and contributors into a single list
     const allLinks = useMemo(() => {
         const links = questions.map(q => ({ question: q, answer: representative.answer, type: 'exact' }));
         contributors.forEach(c => {
-            links.push({ question: c.question, answer: c.answer, type: 'boost' });
+            // Avoid duplicates if exact match already covered it (unlikely due to filter logic but good for safety)
+            if (!questions.includes(c.question)) {
+                links.push({ question: c.question, answer: c.answer, type: 'boost' });
+            }
         });
         return links;
     }, [questions, contributors, representative.answer]);

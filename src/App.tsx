@@ -6,6 +6,7 @@ import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { collection, doc, setDoc, onSnapshot, query, orderBy, deleteDoc, getDoc } from 'firebase/firestore';
 import { auth, db, appId } from './firebase';
 import { INITIAL_DATA, INITIAL_COURSES, VocabItem } from './constants';
+import { checkVocabContainment } from './utils';
 
 import WalkmanMode from './components/WalkmanMode';
 import SpeakingCoachMode from './components/SpeakingCoachMode';
@@ -160,8 +161,8 @@ const App: React.FC = () => {
               }
               // 2. Containment Logic (Long contains Short)
               // Rule: Long sentence mastery propagates to Short sentence.
-              // We check if Source (Long) contains Target (Short).
-              else if (normAnswer.includes(normTargetAnswer)) {
+              // We check if Source (Long) contains Target (Short) using Fuzzy Match (to handle tense e.g. have/had)
+              else if (checkVocabContainment(sourceItem.answer, currentTarget.answer)) {
                    let newTargetMastery = currentTarget.mastery;
                    let newTargetListening = currentTarget.listeningMastery;
                    let targetChanged = false;

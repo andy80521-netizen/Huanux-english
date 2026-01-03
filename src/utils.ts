@@ -183,3 +183,37 @@ export const calculateTierProgress = (score: number, currentThreshold: number, n
     const progress = score - currentThreshold;
     return Math.max(0, Math.min(100, (progress / range) * 100));
 };
+
+export const checkVocabContainment = (container: string, content: string): boolean => {
+    if (!container || !content) return false;
+    
+    // Clean: remove (...) and punctuation, convert to lower case
+    const clean = (s: string) => s.toLowerCase().replace(/\s*\(.*?\)\s*/g, '').replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, '').replace(/\s{2,}/g, ' ').trim();
+    
+    const cContainer = clean(container);
+    const cContent = clean(content);
+    
+    if (!cContainer || !cContent) return false;
+
+    // 1. Strict inclusion
+    if (cContainer.includes(cContent)) return true;
+
+    // 2. Fuzzy inclusion for phrases (handles simple tense changes like have/had)
+    const contentWords = cContent.split(' ');
+    const containerWords = cContainer.split(' ');
+    const len = contentWords.length;
+    
+    // Only apply fuzzy logic for phrases (>1 word) to avoid false positives on short words
+    if (len < 2) return false; 
+    
+    if (containerWords.length < len) return false;
+
+    for (let i = 0; i <= containerWords.length - len; i++) {
+        const windowStr = containerWords.slice(i, i + len).join(' ');
+        // 80% threshold usually handles single word variation in a 3-word phrase well
+        // e.g., "have a crack" (12) vs "had a crack" (11). Similarity > 80.
+        if (calculateSimilarity(windowStr, cContent) >= 80) return true;
+    }
+
+    return false;
+};
