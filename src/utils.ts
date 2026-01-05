@@ -217,3 +217,29 @@ export const checkVocabContainment = (container: string, content: string): boole
 
     return false;
 };
+
+export const expandContractions = (text: string) => {
+    if (!text) return '';
+    let res = text.toLowerCase();
+    
+    const specifics: Record<string, string> = {
+        "won't": "will not",
+        "can't": "cannot",
+        "shan't": "shall not",
+        "let's": "let us"
+    };
+    
+    for (const [k, v] of Object.entries(specifics)) {
+        res = res.replace(new RegExp(`\\b${k}\\b`, 'g'), v);
+    }
+    
+    // General suffixes
+    res = res
+        .replace(/'m\b/g, " am")
+        .replace(/'re\b/g, " are")
+        .replace(/'ll\b/g, " will")
+        .replace(/'ve\b/g, " have")
+        .replace(/n't\b/g, " not");
+        
+    return res;
+};

@@ -3,7 +3,7 @@ import {
   Ear, Play, SkipForward, SkipBack, RefreshCcw, Shuffle, ArrowLeft, Loader2, Keyboard, Activity, ChevronRight, StopCircle, PlayCircle, Trophy, CheckCircle2, XCircle
 } from 'lucide-react';
 import { VocabItem, BADGE_LEVELS, LISTENING_BADGE_LEVELS } from '../constants';
-import { speakTextPromise, getBadgeInfo, calculateTierProgress } from '../utils';
+import { speakTextPromise, getBadgeInfo, calculateTierProgress, expandContractions } from '../utils';
 
 // 無聲 MP3 Base64，用於欺騙 iOS 保持 Audio Session 活躍
 const SILENT_AUDIO = "data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4LjI5LjEwMAAAAAAAAAAAAAAA//OEAAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAAEAAABIADAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMD//////////////////////////////////////////////////////////////////wAAAAAATGF2YzU4LjU0AAAAAAAAAAAAAAAAJAAAAAAAAAAAASAA82oskAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
@@ -135,16 +135,25 @@ const ListeningCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab
 
     const handleCheckAnswer = () => {
         if (!currentEntry) return;
-        const normalizedInput = userInput.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
-        const normalizedAnswer = currentEntry.answer.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+        
+        // Normalize by expanding contractions first, then cleaning
+        const expandedInput = expandContractions(userInput);
+        const expandedAnswer = expandContractions(currentEntry.answer);
+        
+        const normalizedInput = expandedInput.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+        const normalizedAnswer = expandedAnswer.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+        
         const inputWords = normalizedInput.split(/\s+/).filter(w => w);
         const answerWords = normalizedAnswer.split(/\s+/).filter(w => w);
+        
         let matchCount = 0;
         let answerIndex = 0;
+        
         inputWords.forEach(word => {
              const foundIndex = answerWords.indexOf(word, answerIndex);
              if (foundIndex !== -1) { matchCount++; answerIndex = foundIndex + 1; }
         });
+        
         const accuracy = answerWords.length > 0 ? (matchCount / answerWords.length) * 100 : 0;
         const finalScore = Math.min(100, Math.round(accuracy));
         setScore(finalScore);
@@ -203,23 +212,39 @@ const ListeningCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab
         if (!currentEntry) return null;
 
         const inputWords = userInput.trim().split(/\s+/);
-        // Normalize answer words for comparison
-        const normalizedAnswerWords = currentEntry.answer.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/);
+        
+        // Normalize answer words for comparison using expanded form
+        const expandedAnswer = expandContractions(currentEntry.answer);
+        const normalizedAnswerWords = expandedAnswer.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/);
         
         let searchIndex = 0;
 
         return (
             <div className="flex flex-wrap gap-1.5 justify-center text-lg leading-relaxed">
                 {inputWords.map((word, idx) => {
-                    const cleanWord = word.toLowerCase().replace(/[^a-z0-9]/g, '');
-                    // Try to find this word in the answer starting from the last found position
-                    // This ensures we check for correct order
-                    const foundIndex = normalizedAnswerWords.indexOf(cleanWord, searchIndex);
+                    // Expand this specific user word to match against expanded answer
+                    const expandedUserWord = expandContractions(word);
+                    const cleanUserParts = expandedUserWord.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/);
                     
-                    let isMatch = false;
-                    if (foundIndex !== -1) {
-                        isMatch = true;
-                        searchIndex = foundIndex + 1; // Advance the search cursor
+                    // Check if *all* parts of the expanded user word match the next sequence in answer
+                    let isMatch = true;
+                    let tempSearchIndex = searchIndex;
+
+                    for (const part of cleanUserParts) {
+                         // Simple forward search from current position
+                         const foundIndex = normalizedAnswerWords.indexOf(part, tempSearchIndex);
+                         if (foundIndex !== -1) {
+                            // Enforce reasonable proximity/sequence? 
+                            // For simplicity, we just look forward.
+                            tempSearchIndex = foundIndex + 1;
+                         } else {
+                            isMatch = false;
+                            break;
+                         }
+                    }
+
+                    if (isMatch) {
+                        searchIndex = tempSearchIndex;
                     }
 
                     return (
