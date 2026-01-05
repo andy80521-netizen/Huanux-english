@@ -176,15 +176,45 @@ const ListeningCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab
         if (len === 1) return 0;
 
         if (unplayedIndicesRef.current.length === 0) {
-            unplayedIndicesRef.current = Array.from({length: len}, (_, i) => i);
+             // 1. Calculate Score Distribution for Listening
+             const scores = filteredData.map(v => v.listeningMastery || 0);
+             const maxScore = Math.max(...scores);
+             const minScore = Math.min(...scores);
+             
+             // 2. Decide Strategy
+             if (maxScore - minScore <= 200) {
+                 // Uniform Round Robin: Each item once per round
+                 unplayedIndicesRef.current = Array.from({length: len}, (_, i) => i);
+             } else {
+                 // Weighted Pool: More copies for lower scores
+                 const weightedPool: number[] = [];
+                 filteredData.forEach((v, idx) => {
+                     const score = v.listeningMastery || 0;
+                     // Weight formula: 1 + floor((max - score) / 100)
+                     const weight = 1 + Math.floor((maxScore - score) / 100);
+                     for(let k=0; k<weight; k++) {
+                         weightedPool.push(idx);
+                     }
+                 });
+                 unplayedIndicesRef.current = weightedPool;
+             }
         }
 
         let poolIndex = Math.floor(Math.random() * unplayedIndicesRef.current.length);
         let nextVocabIndex = unplayedIndicesRef.current[poolIndex];
 
+        // Try to avoid repeating the current card immediately if pool has other options
         if (nextVocabIndex === currentIndex && unplayedIndicesRef.current.length > 1) {
-             poolIndex = (poolIndex + 1) % unplayedIndicesRef.current.length;
-             nextVocabIndex = unplayedIndicesRef.current[poolIndex];
+             const originalPoolIndex = poolIndex;
+             // Linear scan to find a different item in the pool
+             for (let i = 1; i < unplayedIndicesRef.current.length; i++) {
+                 const checkIndex = (originalPoolIndex + i) % unplayedIndicesRef.current.length;
+                 if (unplayedIndicesRef.current[checkIndex] !== currentIndex) {
+                     poolIndex = checkIndex;
+                     nextVocabIndex = unplayedIndicesRef.current[poolIndex];
+                     break;
+                 }
+             }
         }
 
         unplayedIndicesRef.current.splice(poolIndex, 1);
