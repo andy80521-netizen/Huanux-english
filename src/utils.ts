@@ -222,11 +222,22 @@ export const expandContractions = (text: string) => {
     if (!text) return '';
     let res = text.toLowerCase();
     
+    // Normalize unicode apostrophes if any
+    res = res.replace(/[\u2018\u2019]/g, "'");
+
     const specifics: Record<string, string> = {
         "won't": "will not",
-        "can't": "cannot",
+        "can't": "can not",
+        "cannot": "can not",
         "shan't": "shall not",
-        "let's": "let us"
+        "let's": "let us",
+        "it's": "it is",
+        "that's": "that is",
+        "what's": "what is",
+        "who's": "who is",
+        "there's": "there is",
+        "he's": "he is",
+        "she's": "she is"
     };
     
     for (const [k, v] of Object.entries(specifics)) {
@@ -239,7 +250,9 @@ export const expandContractions = (text: string) => {
         .replace(/'re\b/g, " are")
         .replace(/'ll\b/g, " will")
         .replace(/'ve\b/g, " have")
-        .replace(/n't\b/g, " not");
+        .replace(/n't\b/g, " not")
+        .replace(/'s\b/g, " is")
+        .replace(/'d\b/g, " would");
         
     return res;
 };
