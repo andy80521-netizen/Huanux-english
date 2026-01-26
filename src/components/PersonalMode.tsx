@@ -214,7 +214,7 @@ const PersonalMode: React.FC<Props> = ({ user, voicePrefs, setVoicePrefs, isDark
                         <div className="bg-indigo-50 dark:bg-indigo-900/20 p-3 rounded-xl mb-4 text-xs text-indigo-800 dark:text-indigo-200 leading-relaxed border border-indigo-100 dark:border-indigo-900/30">
                             <p className="font-bold mb-1 flex items-center gap-1"><ExternalLink size={10} /> 如何取得設定碼：</p>
                             <ol className="list-decimal ml-4 space-y-1 opacity-90 text-[10px]">
-                                <li>前往 Firebase Console > 專案設定 (Project Settings)</li>
+                                <li>前往 Firebase Console &gt; 專案設定 (Project Settings)</li>
                                 <li>滑到下方 "Your apps" 區域</li>
                                 <li>選擇 "Config" 並複製 <span className="font-mono bg-white/50 dark:bg-black/20 px-1 rounded">const firebaseConfig = ...</span> 整段程式碼</li>
                             </ol>
