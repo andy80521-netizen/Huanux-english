@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Volume2, ChevronRight, Activity, LogOut, AlertTriangle, Mail, Lock, LogIn, UserPlus, Loader2, Moon, Sun, User, Database, Save, X, Github, PlayCircle, RefreshCw } from 'lucide-react';
+import { Settings, Volume2, ChevronRight, Activity, LogOut, AlertTriangle, Mail, Lock, LogIn, UserPlus, Loader2, Moon, Sun, User, Database, Save, X, Github, PlayCircle, RefreshCw, AlertCircle, ExternalLink } from 'lucide-react';
 import { User as FirebaseUser, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword, signInAnonymously, updateProfile, signInWithPopup } from 'firebase/auth';
-import { auth, isFirebaseReady, githubProvider } from '../firebase';
+import { auth, isFirebaseReady, githubProvider, isUsingDefaultConfig } from '../firebase';
 import { getVoices, speakTextPromise } from '../utils';
 
 interface Props {
@@ -50,7 +50,10 @@ const PersonalMode: React.FC<Props> = ({ user, voicePrefs, setVoicePrefs, isDark
             setShowConfig(true);
             return;
         }
-
+        
+        // We warn about default config, but we allow trying to login (in case user is the owner)
+        // Only stop if apiKey is clearly missing or invalid structure
+        
         try {
             if (isLoginMode) {
                 await signInWithEmailAndPassword(auth, email, password);
@@ -72,6 +75,8 @@ const PersonalMode: React.FC<Props> = ({ user, voicePrefs, setVoicePrefs, isDark
             else if (msg.includes('api-key-not-valid') || msg.includes('auth/invalid-api-key')) {
                 msg = 'API Key 無效 (請點擊設定按鈕檢查)';
                 setShowConfig(true);
+            } else if (msg.includes('permission-denied')) {
+                msg = '權限不足：請檢查 Firebase Firestore 規則';
             }
             
             setError(msg);
@@ -120,17 +125,39 @@ const PersonalMode: React.FC<Props> = ({ user, voicePrefs, setVoicePrefs, isDark
     };
 
     const parseLooseJson = (str: string) => {
+        // Try strict JSON parse first
         try {
             return JSON.parse(str);
         } catch (e) {
-            // Support parsing JS Object literal format (e.g. copied from Firebase console)
-            // 1. Wrap unquoted keys in quotes
-            let jsonStr = str.replace(/(\w+)\s*:/g, '"$1":');
-            // 2. Convert single quotes to double quotes
-            jsonStr = jsonStr.replace(/'/g, '"');
-            // 3. Remove trailing commas
-            jsonStr = jsonStr.replace(/,\s*}/g, '}');
-            return JSON.parse(jsonStr);
+            // Fallback: Parse Javascript Object Literal (e.g. copied from Firebase Console)
+            try {
+                // 1. Remove comments (single line and multi-line)
+                let cleaned = str.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+                
+                // 2. Extract the object part: Find first '{' and last '}'
+                const firstBrace = cleaned.indexOf('{');
+                const lastBrace = cleaned.lastIndexOf('}');
+                
+                if (firstBrace !== -1 && lastBrace !== -1) {
+                    cleaned = cleaned.substring(firstBrace, lastBrace + 1);
+                } else {
+                    // If no braces found, input might be invalid or just empty
+                    throw new Error("找不到物件括號 {}");
+                }
+
+                // 3. Use Function constructor to safely evaluate the object literal
+                // This handles unquoted keys, trailing commas, single quotes, etc.
+                const fn = new Function(`return (${cleaned});`);
+                const result = fn();
+                
+                if (!result || typeof result !== 'object') {
+                    throw new Error("解析結果不是有效的物件");
+                }
+                return result;
+            } catch (evalErr: any) {
+                console.warn("Config parse error:", evalErr);
+                throw new Error("格式錯誤。請確認您貼上的是正確的 Firebase Config 物件。");
+            }
         }
     };
 
@@ -152,7 +179,7 @@ const PersonalMode: React.FC<Props> = ({ user, voicePrefs, setVoicePrefs, isDark
             localStorage.setItem('firebase_config', JSON.stringify(parsed));
             window.location.reload();
         } catch (e: any) {
-            setError('格式錯誤: ' + e.message + '。請貼上完整的 Firebase Config Object。');
+            setError(e.message);
         }
     };
 
@@ -183,16 +210,30 @@ const PersonalMode: React.FC<Props> = ({ user, voicePrefs, setVoicePrefs, isDark
                                 <X size={18} />
                             </button>
                         </div>
-                        <p className="text-xs text-slate-500 dark:text-slate-400 mb-4 leading-relaxed">
-                            請貼上您的 Firebase Config Object 以啟用功能。<br/>
-                            <span className="opacity-70 font-mono text-[10px]">(支援直接貼上 JavaScript 物件格式)</span>
-                        </p>
+                        
+                        <div className="bg-indigo-50 dark:bg-indigo-900/20 p-3 rounded-xl mb-4 text-xs text-indigo-800 dark:text-indigo-200 leading-relaxed border border-indigo-100 dark:border-indigo-900/30">
+                            <p className="font-bold mb-1 flex items-center gap-1"><ExternalLink size={10} /> 如何取得設定碼：</p>
+                            <ol className="list-decimal ml-4 space-y-1 opacity-90 text-[10px]">
+                                <li>前往 Firebase Console > 專案設定 (Project Settings)</li>
+                                <li>滑到下方 "Your apps" 區域</li>
+                                <li>選擇 "Config" 並複製 <span className="font-mono bg-white/50 dark:bg-black/20 px-1 rounded">const firebaseConfig = ...</span> 整段程式碼</li>
+                            </ol>
+                        </div>
+
                         <textarea 
                             value={configJson}
                             onChange={(e) => setConfigJson(e.target.value)}
                             className="w-full h-32 p-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-mono focus:ring-2 focus:ring-indigo-500 outline-none text-slate-900 dark:text-white resize-none mb-4"
-                            placeholder={`const firebaseConfig = {\n  apiKey: "AIza...",\n  authDomain: "..."\n};`}
+                            placeholder={`請貼上完整的程式碼，例如：\nconst firebaseConfig = {\n  apiKey: "AIza...",\n  authDomain: "..."\n};`}
                         />
+                        
+                        {error && (
+                             <div className="mb-4 p-2 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-xs rounded-lg flex items-center gap-2">
+                                <AlertCircle size={14} className="shrink-0" />
+                                {error}
+                             </div>
+                        )}
+
                         <div className="flex gap-3">
                             <button 
                                 onClick={handleResetConfig} 
@@ -256,7 +297,7 @@ const PersonalMode: React.FC<Props> = ({ user, voicePrefs, setVoicePrefs, isDark
                                 {/* Config Button - Hidden in plain sight for setup */}
                                 <button 
                                     onClick={() => setShowConfig(true)}
-                                    className={`absolute right-0 top-0 p-1 transition-colors ${!isFirebaseReady ? 'text-orange-500 animate-pulse' : 'text-slate-300 hover:text-indigo-500 dark:text-slate-700'}`}
+                                    className={`absolute right-0 top-0 p-1 transition-colors ${!isFirebaseReady || isUsingDefaultConfig ? 'text-orange-500 animate-pulse' : 'text-slate-300 hover:text-indigo-500 dark:text-slate-700'}`}
                                     title="設定資料庫連線"
                                 >
                                     <Database size={16} />
@@ -266,6 +307,19 @@ const PersonalMode: React.FC<Props> = ({ user, voicePrefs, setVoicePrefs, isDark
                                 <h2 className="text-xl font-black text-slate-800 dark:text-white">{isLoginMode ? '登入帳號' : '註冊新帳號'}</h2>
                                 <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">跨裝置同步學習進度</p>
                             </div>
+
+                            {/* Default Config Warning - Refined message */}
+                            {isUsingDefaultConfig && (
+                                <div className="bg-orange-50 dark:bg-orange-900/20 border border-orange-100 dark:border-orange-900/30 p-4 rounded-xl mb-6 flex gap-3">
+                                    <AlertCircle className="text-orange-500 shrink-0" size={20} />
+                                    <div>
+                                        <h4 className="text-xs font-bold text-orange-700 dark:text-orange-400 mb-1">使用預設資料庫中</h4>
+                                        <p className="text-[10px] text-orange-600/80 dark:text-orange-400/80 leading-relaxed">
+                                            若您不是開發者，請點擊右上角 <Database size={10} className="inline"/> 設定您自己的 Firebase Config。若無法登入，請嘗試「訪客身分」。
+                                        </p>
+                                    </div>
+                                </div>
+                            )}
 
                             <div className="space-y-3 mb-6">
                                 <button 

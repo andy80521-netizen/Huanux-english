@@ -87,3 +87,6 @@ export const db = getFirestore(app);
 export const githubProvider = new GithubAuthProvider();
 export const appId = typeof __app_id !== 'undefined' ? __app_id : 'huan-power-english';
 export const isFirebaseReady = !!firebaseConfig.apiKey;
+
+// Helper to check if we are using the fallback/demo config
+export const isUsingDefaultConfig = firebaseConfig.projectId === PROVIDED_CONFIG.projectId;

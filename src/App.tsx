@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
-  BookOpen, Mic, Trophy, Activity, User, FolderOpen, Loader2, Ear
+  BookOpen, Mic, Trophy, Activity, User, FolderOpen, Loader2, Ear, AlertCircle
 } from 'lucide-react';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { collection, doc, setDoc, onSnapshot, query, orderBy, deleteDoc, getDoc } from 'firebase/firestore';
@@ -24,6 +24,7 @@ const App: React.FC = () => {
   const vocabDataRef = useRef<VocabItem[]>([]); 
   const [voicePrefs, setVoicePrefs] = useState({ zh: '', en: '' });
   const [isDarkMode, setIsDarkMode] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   // 1. 載入本地設定 (語音 & 夜間模式)
   useEffect(() => {
@@ -52,6 +53,7 @@ const App: React.FC = () => {
     const unsubscribe = onAuthStateChanged(auth, (u) => { 
       setUser(u); 
       setLoading(false); 
+      if (!u) setSyncError(null); // Clear error on logout
     }); 
     return () => unsubscribe(); 
   }, []);
@@ -71,9 +73,12 @@ const App: React.FC = () => {
       return; 
     }
 
-    // A. 監聽題目清單
+    setSyncError(null);
+
+    // A. 監聽題目清單 (Updated Path: artifacts/{appId}/users/{uid}/flashcards)
     const qVocab = query(collection(db, 'artifacts', appId, 'users', user.uid, 'flashcards'), orderBy('id'));
-    const unsubVocab = onSnapshot(qVocab, (snapshot) => {
+    const unsubVocab = onSnapshot(qVocab, 
+      (snapshot) => {
         const data = snapshot.docs.map(doc => doc.data() as VocabItem);
         if (data.length > 0) { 
           setVocabData(data); 
@@ -81,21 +86,38 @@ const App: React.FC = () => {
           // 雲端無資料時，將目前的訪客資料同步上去
           const dataToUpload = vocabDataRef.current.length > 0 ? vocabDataRef.current : INITIAL_DATA;
           dataToUpload.forEach(item => {
-             setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'flashcards', item.id.toString()), item);
+             setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'flashcards', item.id.toString()), item)
+                .catch(e => console.warn("Init vocab upload failed", e));
           });
         }
-    });
-
-    // B. 監聽使用者設定 (包含課程清單)
-    const unsubProfile = onSnapshot(doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'settings'), (snapshot) => {
-      if (snapshot.exists()) {
-        const data = snapshot.data();
-        if (data.courses) setCourses(data.courses);
-      } else {
-        // 初始化雲端課程清關
-        setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'settings'), { courses: INITIAL_COURSES });
+      }, 
+      (error) => {
+        console.warn("Firestore Vocab Sync Error:", error);
+        if (error.code === 'permission-denied') {
+            setSyncError("權限不足：無法讀取資料庫。請檢查 Firebase Rules 是否開放 artifacts 路徑。");
+        } else {
+            setSyncError("資料同步失敗，請檢查網路連線。");
+        }
       }
-    });
+    );
+
+    // B. 監聽使用者設定 (Updated Path: artifacts/{appId}/users/{uid}/profile/settings)
+    const unsubProfile = onSnapshot(doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'settings'), 
+      (snapshot) => {
+        if (snapshot.exists()) {
+          const data = snapshot.data();
+          if (data.courses) setCourses(data.courses);
+        } else {
+          // 初始化雲端課程清關
+          setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'settings'), { courses: INITIAL_COURSES })
+            .catch(e => console.warn("Init profile settings failed", e));
+        }
+      }, 
+      (error) => {
+        console.warn("Firestore Profile Sync Error:", error);
+        // Error handled by vocab listener already or will be logged here
+      }
+    );
 
     return () => { unsubVocab(); unsubProfile(); };
   }, [user]);
@@ -105,34 +127,26 @@ const App: React.FC = () => {
       let itemsToProcess = Array.isArray(itemOrItems) ? itemOrItems : [itemOrItems];
       const currentData = vocabDataRef.current;
       
-      // 使用 Map 來處理批量更新，確保 ID 不重複並能快速查找
       const batchUpdateMap = new Map<number, VocabItem>();
-
-      // 將本次要儲存的項目先放入 Map
       itemsToProcess.forEach(item => batchUpdateMap.set(item.id, item));
 
-      // 智慧同步邏輯
       itemsToProcess.forEach(sourceItem => {
           if (!sourceItem.answer) return;
           const normAnswer = sourceItem.answer.trim().toLowerCase();
           if (!normAnswer) return;
 
           currentData.forEach(targetItem => {
-              // Skip self
               if (targetItem.id === sourceItem.id) return;
 
-              // Get latest version of target from map if it exists
               const currentTarget = batchUpdateMap.get(targetItem.id) || targetItem;
               const normTargetAnswer = currentTarget.answer.trim().toLowerCase();
               if (!normTargetAnswer) return;
 
-              // 1. Exact Match Logic (Bidirectional / Inheritance)
               if (normAnswer === normTargetAnswer) {
                   let finalSourceMastery = sourceItem.mastery;
                   let finalSourceListening = sourceItem.listeningMastery;
                   let sourceChanged = false;
 
-                  // A. New Source inherits from Old Target (Inheritance)
                   if (sourceItem.mastery === 0 && currentTarget.mastery > 0) {
                       finalSourceMastery = currentTarget.mastery;
                       sourceChanged = true;
@@ -145,11 +159,9 @@ const App: React.FC = () => {
                   if (sourceChanged) {
                       const updatedSource = { ...sourceItem, mastery: finalSourceMastery, listeningMastery: finalSourceListening };
                       batchUpdateMap.set(updatedSource.id, updatedSource);
-                      // Update reference so subsequent checks in this loop use the updated values
                       sourceItem = updatedSource; 
                   }
 
-                  // B. Target syncs with Source (Sync)
                   if (sourceItem.mastery !== currentTarget.mastery || sourceItem.listeningMastery !== currentTarget.listeningMastery) {
                       const updatedTarget = { 
                           ...currentTarget, 
@@ -159,16 +171,11 @@ const App: React.FC = () => {
                       batchUpdateMap.set(updatedTarget.id, updatedTarget);
                   }
               }
-              // 2. Containment Logic (Long contains Short)
-              // Rule: Long sentence mastery propagates to Short sentence.
-              // We check if Source (Long) contains Target (Short) using Fuzzy Match (to handle tense e.g. have/had)
               else if (checkVocabContainment(sourceItem.answer, currentTarget.answer)) {
                    let newTargetMastery = currentTarget.mastery;
                    let newTargetListening = currentTarget.listeningMastery;
                    let targetChanged = false;
 
-                   // If Source (Long) has higher mastery, upgrade Target (Short).
-                   // We use MAX logic to ensure short sentence mastery doesn't drop if long sentence is weak.
                    if (sourceItem.mastery > currentTarget.mastery) {
                        newTargetMastery = sourceItem.mastery;
                        targetChanged = true;
@@ -187,20 +194,22 @@ const App: React.FC = () => {
                        batchUpdateMap.set(updatedTarget.id, updatedTarget);
                    }
               }
-              // 3. Containment Logic (Short contained in Long)
-              // Rule: Short sentence mastery does NOT propagate to Long sentence.
-              // So if Target (Long) contains Source (Short), we do nothing.
           });
       });
 
       const finalItems = Array.from(batchUpdateMap.values());
 
       if (user) { 
-        const promises = finalItems.map(item => { 
-          const id = item.id || Date.now() + Math.floor(Math.random() * 1000); 
-          return setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'flashcards', id.toString()), { ...item, id }); 
-        }); 
-        await Promise.all(promises); 
+        try {
+            const promises = finalItems.map(item => { 
+                const id = item.id || Date.now() + Math.floor(Math.random() * 1000); 
+                return setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'flashcards', id.toString()), { ...item, id }); 
+            }); 
+            await Promise.all(promises); 
+        } catch (e) {
+            console.error("Save Item Error:", e);
+            setSyncError("儲存失敗：請檢查網路或權限");
+        }
       } else { 
         setVocabData(prev => { 
           const newData = [...prev]; 
@@ -218,8 +227,12 @@ const App: React.FC = () => {
   const handleDeleteItem = async (idOrIds: number | number[]) => {
       const ids = Array.isArray(idOrIds) ? idOrIds : [idOrIds];
       if (user) { 
-        const promises = ids.map(id => deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'flashcards', id.toString())));
-        await Promise.all(promises); 
+        try {
+            const promises = ids.map(id => deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'flashcards', id.toString())));
+            await Promise.all(promises); 
+        } catch (e) {
+            console.error("Delete Item Error:", e);
+        }
       } else { 
         setVocabData(prev => {
           const filtered = prev.filter(i => !ids.includes(i.id));
@@ -241,7 +254,11 @@ const App: React.FC = () => {
       
       setCourses(updatedCourses);
       if (user) {
-        await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'settings'), { courses: updatedCourses }, { merge: true });
+        try {
+            await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'settings'), { courses: updatedCourses }, { merge: true });
+        } catch (e) {
+            console.error("Save Course Error:", e);
+        }
       } else {
         localStorage.setItem('guest_courses', JSON.stringify(updatedCourses));
       }
@@ -254,7 +271,11 @@ const App: React.FC = () => {
     await handleDeleteItem(idsToDelete); 
     
     if (user) {
-      await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'settings'), { courses: updatedCourses }, { merge: true });
+      try {
+          await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'settings'), { courses: updatedCourses }, { merge: true });
+      } catch (e) {
+          console.error("Delete Course Error:", e);
+      }
     } else {
       localStorage.setItem('guest_courses', JSON.stringify(updatedCourses));
     }
@@ -266,8 +287,16 @@ const App: React.FC = () => {
     <div className={`${isDarkMode ? 'dark' : ''} h-full`}>
         <div className="fixed inset-0 bg-slate-200 dark:bg-slate-950 flex justify-center overflow-hidden font-sans text-slate-900 dark:text-slate-100 selection:bg-indigo-100 dark:selection:bg-indigo-900/50">
           <div className="w-full max-w-lg h-full bg-white dark:bg-slate-900 shadow-2xl flex flex-col relative overflow-hidden sm:rounded-none md:rounded-2xl md:my-4 md:h-[calc(100%-2rem)] md:border border-slate-300 dark:border-slate-800 transition-colors duration-300">
-            <div className="bg-white/90 dark:bg-slate-900/90 backdrop-blur-md z-20 px-6 py-4 flex justify-between items-center border-b border-slate-100 dark:border-slate-800 sticky top-0 transition-colors duration-300">
-              <div><h1 className="text-lg font-black text-slate-800 dark:text-white tracking-tight flex items-center gap-2"><Activity className="text-indigo-600 dark:text-indigo-400" size={24} />Huanux <span className="text-indigo-600 dark:text-indigo-400">ENGLISH</span></h1></div>
+            <div className="bg-white/90 dark:bg-slate-900/90 backdrop-blur-md z-20 px-6 py-4 flex flex-col justify-between border-b border-slate-100 dark:border-slate-800 sticky top-0 transition-colors duration-300">
+              <div className="flex justify-between items-center w-full">
+                <div><h1 className="text-lg font-black text-slate-800 dark:text-white tracking-tight flex items-center gap-2"><Activity className="text-indigo-600 dark:text-indigo-400" size={24} />Huanux <span className="text-indigo-600 dark:text-indigo-400">ENGLISH</span></h1></div>
+              </div>
+              {syncError && (
+                 <div className="mt-2 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-[10px] px-3 py-2 rounded-lg flex items-center gap-2 animate-in slide-in-from-top-2">
+                    <AlertCircle size={12} />
+                    <span className="font-bold">{syncError}</span>
+                 </div>
+              )}
             </div>
             <div className="flex-1 overflow-hidden relative bg-slate-50 dark:bg-slate-950 transition-colors duration-300">
               {activeTab === 'learn' && <WalkmanMode vocabData={vocabData} courses={courses} voicePrefs={voicePrefs} />}
