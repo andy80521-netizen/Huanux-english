@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
-  Mic, Mic2, StopCircle, PlayCircle, SkipForward, SkipBack, RefreshCcw, Shuffle, ArrowLeft, Volume2, BarChart2, Headphones, ChevronRight, Activity, Loader2, Zap, AlertCircle, Trophy
+  Mic, Mic2, StopCircle, PlayCircle, Play, SkipForward, SkipBack, RefreshCcw, Shuffle, ArrowLeft, Volume2, BarChart2, Headphones, ChevronRight, Activity, Loader2, Zap, AlertCircle, Trophy
 } from 'lucide-react';
 import { VocabItem, BADGE_LEVELS, LISTENING_BADGE_LEVELS } from '../constants';
 import { speakTextPromise, calculateSimilarity, getBadgeInfo, calculateTierProgress } from '../utils';
@@ -19,6 +19,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
   const [coachCourse, setCoachCourse] = useState<string | null>(null); 
   const [isAutoLoop, setIsAutoLoop] = useState(false);
   const [isRandomLoop, setIsRandomLoop] = useState(false);
+  const [isSingleLoop, setIsSingleLoop] = useState(false);
   const [isPlayingFlow, setIsPlayingFlow] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [phase, setPhase] = useState('idle'); 
@@ -118,7 +119,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
 
   // Watch index for auto-loop triggers
   useEffect(() => {
-    if ((isAutoLoop || isRandomLoop) && isPlayingFlow && flowRef.current.active && filteredData.length > 0) {
+    if ((isAutoLoop || isRandomLoop || isSingleLoop) && isPlayingFlow && flowRef.current.active && filteredData.length > 0) {
       const timer = setTimeout(() => {
         startFlow(false); 
       }, 800); 
@@ -403,12 +404,18 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
 
       if (!flowRef.current.active) return;
 
-      if (isAutoLoop || isRandomLoop) {
+      if (isAutoLoop || isRandomLoop || isSingleLoop) {
           setPhase('idle');
           await new Promise(r => setTimeout(r, 800)); 
           
-          if (isRandomLoop) handleRandomNext(true); 
-          else handleNext(true); 
+          if (isSingleLoop) {
+             // Just trigger re-run for same index
+             setLoopTrigger(prev => prev + 1);
+          } else if (isRandomLoop) {
+             handleRandomNext(true); 
+          } else {
+             handleNext(true); 
+          }
       } else {
           stopFlow(false); 
       }
@@ -449,8 +456,12 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
   };
 
   const handleNext = (retainStream = false) => {
-    if (!retainStream) stopFlow(true); 
-    else {
+    if (!retainStream) {
+        stopFlow(true);
+        setIsAutoLoop(false);
+        setIsRandomLoop(false);
+        setIsSingleLoop(false);
+    } else {
         setShowResult(false);
         setAudioURL(null);
         setPhase('idle');
@@ -462,7 +473,10 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
   };
 
   const handlePrev = () => {
-    stopFlow(true); 
+    stopFlow(true);
+    setIsAutoLoop(false);
+    setIsRandomLoop(false);
+    setIsSingleLoop(false);
     setPhase('idle');
     setShowResult(false);
     setAudioURL(null);
@@ -522,8 +536,12 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
   };
 
   const handleRandomNext = (retainStream = false) => {
-    if (!retainStream) stopFlow(true);
-    else {
+    if (!retainStream) {
+        stopFlow(true);
+        setIsAutoLoop(false);
+        setIsRandomLoop(false);
+        setIsSingleLoop(false);
+    } else {
         setShowResult(false);
         setAudioURL(null);
         setPhase('idle');
@@ -560,6 +578,10 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
   const speakProgress = calculateTierProgress(currentSpeakingScore, speakInfo.currentBadge.threshold, speakInfo.nextBadge?.threshold);
   const listenProgress = calculateTierProgress(currentListeningScore, listenInfo.currentBadge.threshold, listenInfo.nextBadge?.threshold);
 
+  const isSingleTestMode = isPlayingFlow && !isAutoLoop && !isRandomLoop && !isSingleLoop;
+  const isSingleLoopMode = isPlayingFlow && isSingleLoop;
+  const isLoopMode = isPlayingFlow && (isAutoLoop || isRandomLoop);
+
 
   return (
     <div className="flex flex-col h-full bg-slate-50 dark:bg-slate-950 relative overflow-y-auto pb-20">
@@ -569,7 +591,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
       <div className="bg-white dark:bg-slate-900 p-4 shadow-sm sticky top-0 z-10">
         <div className="flex justify-between items-center mb-4">
            <div className="flex items-center gap-2 flex-1 min-w-0">
-             <button onClick={() => { stopFlow(true); setCoachCourse(null); }} className="p-1 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 shrink-0"><ArrowLeft size={20} className="text-slate-500 dark:text-slate-400"/></button>
+             <button onClick={() => { stopFlow(true); setIsAutoLoop(false); setIsRandomLoop(false); setIsSingleLoop(false); setCoachCourse(null); }} className="p-1 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 shrink-0"><ArrowLeft size={20} className="text-slate-500 dark:text-slate-400"/></button>
              <span className="text-xs font-bold text-slate-400 dark:text-slate-500 bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded truncate">{coachCourse}</span>
            </div>
 
@@ -582,7 +604,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
              </div>
              <select 
                 value={currentIndex} 
-                onChange={(e) => { stopFlow(true); setCurrentIndex(Number(e.target.value)); }} 
+                onChange={(e) => { stopFlow(true); setIsAutoLoop(false); setIsRandomLoop(false); setIsSingleLoop(false); setCurrentIndex(Number(e.target.value)); }} 
                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
              >
                {filteredData.map((item, index) => (
@@ -593,9 +615,9 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
         </div>
         <div className="flex items-center justify-between gap-2">
             {!isAutoLoop && !isRandomLoop && <button onClick={() => handlePrev()} className="px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"><SkipBack size={20} /></button>}
-            <button onClick={() => { setIsAutoLoop(!isAutoLoop); setIsRandomLoop(false); if(isPlayingFlow) stopFlow(false); }} className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold transition-all ${isAutoLoop ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200 dark:shadow-none' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'}`}><RefreshCcw size={18} className={isAutoLoop ? 'animate-spin-slow' : ''} />自動</button>
-            <button onClick={() => { setIsRandomLoop(!isRandomLoop); setIsAutoLoop(false); if(isPlayingFlow) stopFlow(false); }} className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold transition-all ${isRandomLoop ? 'bg-purple-600 text-white shadow-lg shadow-purple-200 dark:shadow-none' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'}`}><Shuffle size={18} />隨機</button>
-            {!isAutoLoop && !isRandomLoop && <button onClick={() => handleNext()} className="px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"><SkipForward size={20} /></button>}
+            <button onClick={() => { setIsAutoLoop(!isAutoLoop); setIsRandomLoop(false); setIsSingleLoop(false); if(isPlayingFlow) stopFlow(false); }} className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold transition-all ${isAutoLoop ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200 dark:shadow-none' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'}`}><RefreshCcw size={18} className={isAutoLoop ? 'animate-spin-slow' : ''} />自動</button>
+            <button onClick={() => { setIsRandomLoop(!isRandomLoop); setIsAutoLoop(false); setIsSingleLoop(false); if(isPlayingFlow) stopFlow(false); }} className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold transition-all ${isRandomLoop ? 'bg-purple-600 text-white shadow-lg shadow-purple-200 dark:shadow-none' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'}`}><Shuffle size={18} />隨機</button>
+            {!isAutoLoop && !isRandomLoop && !isSingleLoop && <button onClick={() => handleNext()} className="px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"><SkipForward size={20} /></button>}
         </div>
       </div>
       
@@ -612,7 +634,10 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
 
            <div className={`transition-all duration-500 w-full ${showResult ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-10 hidden'}`}>
                <div className="mb-6 text-center">
-                 <div className="text-2xl font-bold text-indigo-600 dark:text-indigo-400 mb-2 leading-snug">{currentEntry?.answer}</div>
+                 <div className="flex items-center justify-center gap-2 mb-2">
+                    <div className="text-2xl font-bold text-indigo-600 dark:text-indigo-400 leading-snug">{currentEntry?.answer}</div>
+                    <button onClick={() => currentEntry && speakTextPromise(currentEntry.answer, 1.0, voicePrefs)} className="p-2 text-indigo-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900 rounded-full transition-all"><Volume2 size={20} /></button>
+                 </div>
                  <div className="text-sm font-mono text-slate-400 dark:text-slate-500 bg-slate-50 dark:bg-slate-800 inline-block px-3 py-1 rounded-full border border-slate-100 dark:border-slate-700">{currentEntry?.phonetic}</div>
                </div>
 
@@ -700,17 +725,67 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
            )}
         </div>
 
-        <button 
-          onClick={() => isPlayingFlow ? stopFlow(true) : startFlow(true)} 
-          className={`w-full max-w-md py-4 rounded-2xl font-bold text-lg shadow-xl transition-all flex items-center justify-center gap-3 ${isPlayingFlow ? 'bg-red-50 dark:bg-red-900/20 text-red-500 dark:text-red-400 border border-red-100 dark:border-red-900' : 'bg-indigo-600 text-white shadow-indigo-200 dark:shadow-none hover:scale-105 active:scale-95'}`}
-        >
-          {isPlayingFlow ? <><StopCircle /> 停止測驗</> : <><PlayCircle /> 開始測驗</>}
-        </button>
+        <div className="flex flex-col gap-3 w-full max-w-md">
+            <div className="flex gap-3 w-full">
+                <button 
+                    onClick={() => {
+                        if (isSingleTestMode) {
+                            stopFlow(true);
+                        } else {
+                            stopFlow(true);
+                            setIsSingleLoop(false);
+                            setIsAutoLoop(false);
+                            setIsRandomLoop(false);
+                            setTimeout(() => startFlow(true), 100);
+                        }
+                    }}
+                    className={`flex-1 py-4 rounded-2xl font-bold text-lg shadow-xl transition-all flex items-center justify-center gap-2 ${isSingleTestMode ? 'bg-red-50 dark:bg-red-900/20 text-red-500 dark:text-red-400 border border-red-100 dark:border-red-900' : 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900 hover:bg-indigo-50 dark:hover:bg-indigo-900/30'}`}
+                >
+                    {isSingleTestMode ? <><StopCircle size={20}/> 停止</> : <><Play size={20}/> 單題測試</>}
+                </button>
+
+                <button 
+                    onClick={() => {
+                        if (isSingleLoopMode) {
+                            stopFlow(true);
+                            setIsSingleLoop(false);
+                        } else {
+                            stopFlow(true);
+                            setIsSingleLoop(true);
+                            setIsAutoLoop(false);
+                            setIsRandomLoop(false);
+                            setTimeout(() => startFlow(true), 100);
+                        }
+                    }}
+                    className={`flex-1 py-4 rounded-2xl font-bold text-lg shadow-xl transition-all flex items-center justify-center gap-2 ${isSingleLoopMode ? 'bg-red-50 dark:bg-red-900/20 text-red-500 dark:text-red-400 border border-red-100 dark:border-red-900' : 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900 hover:bg-indigo-50 dark:hover:bg-indigo-900/30'}`}
+                >
+                    {isSingleLoopMode ? <><StopCircle size={20}/> 停止</> : <><RefreshCcw size={20}/> 單題重複</>}
+                </button>
+            </div>
+
+            <button 
+            onClick={() => {
+                if (isLoopMode) {
+                    stopFlow(true);
+                    setIsAutoLoop(false);
+                    setIsRandomLoop(false);
+                } else {
+                    stopFlow(true);
+                    if (!isRandomLoop) setIsAutoLoop(true);
+                    setIsSingleLoop(false);
+                    setTimeout(() => startFlow(true), 100);
+                }
+            }} 
+            className={`w-full py-4 rounded-2xl font-bold text-lg shadow-xl transition-all flex items-center justify-center gap-3 ${isLoopMode ? 'bg-red-50 dark:bg-red-900/20 text-red-500 dark:text-red-400 border border-red-100 dark:border-red-900' : 'bg-indigo-600 text-white shadow-indigo-200 dark:shadow-none hover:scale-105 active:scale-95'}`}
+            >
+            {isLoopMode ? <><StopCircle /> 停止循環</> : <><PlayCircle /> 開始循環</>}
+            </button>
+        </div>
         
-        {(isAutoLoop || isRandomLoop) && isPlayingFlow && (
+        {(isAutoLoop || isRandomLoop || isSingleLoop) && isPlayingFlow && (
           <div className="mt-4 flex flex-col items-center gap-2">
-             <p className="text-xs font-bold text-slate-400 dark:text-slate-500 flex items-center gap-1 animate-pulse"><Zap size={12} className="text-orange-500"/> {isAutoLoop ? '自動' : '隨機'}模式：智慧偵測講完即評分</p>
-             <button onClick={() => stopFlow(true)} className="text-[10px] text-indigo-500 dark:text-indigo-400 font-bold hover:underline">取消循環</button>
+             <p className="text-xs font-bold text-slate-400 dark:text-slate-500 flex items-center gap-1 animate-pulse"><Zap size={12} className="text-orange-500"/> {isSingleLoop ? '單題重複' : (isAutoLoop ? '自動' : '隨機')}模式：智慧偵測講完即評分</p>
+             <button onClick={() => { stopFlow(true); setIsAutoLoop(false); setIsRandomLoop(false); setIsSingleLoop(false); }} className="text-[10px] text-indigo-500 dark:text-indigo-400 font-bold hover:underline">取消循環</button>
           </div>
         )}
       </div>
