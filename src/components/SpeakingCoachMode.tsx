@@ -32,6 +32,11 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [loopTrigger, setLoopTrigger] = useState(0); // Trigger for same-index looping
   
+  const loopStateRef = useRef({ auto: isAutoLoop, random: isRandomLoop, single: isSingleLoop });
+  useEffect(() => {
+      loopStateRef.current = { auto: isAutoLoop, random: isRandomLoop, single: isSingleLoop };
+  }, [isAutoLoop, isRandomLoop, isSingleLoop]);
+  
   // Resources
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null); 
@@ -244,7 +249,7 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
         }
         enableBackgroundAudioHack();
 
-        if (isRandomLoop) {
+        if (loopStateRef.current.random) {
             flowRef.current.active = true;
             setIsPlayingFlow(true);
             handleRandomNext(true); 
@@ -404,14 +409,14 @@ const SpeakingCoachMode: React.FC<Props> = ({ vocabData, courses, onUpdateVocab,
 
       if (!flowRef.current.active) return;
 
-      if (isAutoLoop || isRandomLoop || isSingleLoop) {
+      if (loopStateRef.current.auto || loopStateRef.current.random || loopStateRef.current.single) {
           setPhase('idle');
           await new Promise(r => setTimeout(r, 800)); 
           
-          if (isSingleLoop) {
+          if (loopStateRef.current.single) {
              // Just trigger re-run for same index
              setLoopTrigger(prev => prev + 1);
-          } else if (isRandomLoop) {
+          } else if (loopStateRef.current.random) {
              handleRandomNext(true); 
           } else {
              handleNext(true); 
