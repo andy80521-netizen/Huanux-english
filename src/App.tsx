@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
-  BookOpen, Mic, Trophy, Activity, User, FolderOpen, Loader2, Ear, AlertCircle
+  Trophy, Activity, User, FolderOpen, Loader2, AlertCircle, BookOpen, Sparkles
 } from 'lucide-react';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { collection, doc, setDoc, onSnapshot, query, orderBy, deleteDoc, getDoc } from 'firebase/firestore';
@@ -8,15 +8,13 @@ import { auth, db, appId } from './firebase';
 import { INITIAL_DATA, INITIAL_COURSES, VocabItem } from './constants';
 import { checkVocabContainment } from './utils';
 
-import WalkmanMode from './components/WalkmanMode';
-import SpeakingCoachMode from './components/SpeakingCoachMode';
-import ListeningCoachMode from './components/ListeningCoachMode';
 import BadgeMode from './components/BadgeMode';
-import LibraryMode from './components/LibraryMode';
 import PersonalMode from './components/PersonalMode';
+import MaterialImportMode from './components/MaterialImportMode';
+import LanguageModelMode from './components/LanguageModelMode';
 
 const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState('learn'); 
+  const [activeTab, setActiveTab] = useState('material'); 
   const [vocabData, setVocabData] = useState<VocabItem[]>([]);
   const [courses, setCourses] = useState<string[]>(INITIAL_COURSES);
   const [user, setUser] = useState<FirebaseUser | null>(null);
@@ -299,19 +297,15 @@ const App: React.FC = () => {
               )}
             </div>
             <div className="flex-1 overflow-hidden relative bg-slate-50 dark:bg-slate-950 transition-colors duration-300">
-              {activeTab === 'learn' && <WalkmanMode vocabData={vocabData} courses={courses} voicePrefs={voicePrefs} />}
-              {activeTab === 'coach' && <SpeakingCoachMode vocabData={vocabData} courses={courses} onUpdateVocab={handleSaveItem} voicePrefs={voicePrefs} />}
-              {activeTab === 'listen' && <ListeningCoachMode vocabData={vocabData} courses={courses} onUpdateVocab={handleSaveItem} voicePrefs={voicePrefs} />}
-              {activeTab === 'badges' && <BadgeMode vocabData={vocabData} />}
-              {activeTab === 'library' && <LibraryMode vocabData={vocabData} setVocabData={setVocabData} courses={courses} setCourses={setCourses} onSaveItem={handleSaveItem} onDeleteItem={handleDeleteItem} onSaveCourse={handleSaveCourse} onDeleteCourse={handleDeleteCourse} voicePrefs={voicePrefs} />}
+              {activeTab === 'material' && <MaterialImportMode />}
+              {activeTab === 'languageModel' && <LanguageModelMode />}
+              {activeTab === 'badges' && <BadgeMode />}
               {activeTab === 'personal' && <PersonalMode user={user} voicePrefs={voicePrefs} setVoicePrefs={setVoicePrefs} isDarkMode={isDarkMode} setIsDarkMode={setIsDarkMode} />}
             </div>
             <div className="bg-white dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800 px-2 py-2 flex justify-around items-center z-20 pb-safe shadow-[0_-5px_20px_rgba(0,0,0,0.02)] dark:shadow-none transition-colors duration-300">
-              <button onClick={() => setActiveTab('learn')} className={`flex flex-col items-center gap-1 p-2 rounded-2xl transition-all min-w-[3.5rem] duration-300 ${activeTab === 'learn' ? 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 font-bold -translate-y-1' : 'text-slate-400 dark:text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800'}`}><BookOpen size={20} strokeWidth={activeTab === 'learn' ? 2.5 : 2} /><span className="text-[10px]">隨身聽</span></button>
-              <button onClick={() => setActiveTab('listen')} className={`flex flex-col items-center gap-1 p-2 rounded-2xl transition-all min-w-[3.5rem] duration-300 ${activeTab === 'listen' ? 'text-orange-500 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/30 font-bold -translate-y-1' : 'text-slate-400 dark:text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800'}`}><Ear size={20} strokeWidth={activeTab === 'listen' ? 2.5 : 2} /><span className="text-[10px]">聽力教練</span></button>
-              <button onClick={() => setActiveTab('coach')} className={`flex flex-col items-center gap-1 p-2 rounded-2xl transition-all min-w-[3.5rem] duration-300 ${activeTab === 'coach' ? 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 font-bold -translate-y-1' : 'text-slate-400 dark:text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800'}`}><Mic size={20} strokeWidth={activeTab === 'coach' ? 2.5 : 2} /><span className="text-[10px]">口說教練</span></button>
+              <button onClick={() => setActiveTab('material')} className={`flex flex-col items-center gap-1 p-2 rounded-2xl transition-all min-w-[3.5rem] duration-300 ${activeTab === 'material' ? 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 font-bold -translate-y-1' : 'text-slate-400 dark:text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800'}`}><BookOpen size={20} strokeWidth={activeTab === 'material' ? 2.5 : 2} /><span className="text-[10px]">啟蒙的開始</span></button>
+              <button onClick={() => setActiveTab('languageModel')} className={`flex flex-col items-center gap-1 p-2 rounded-2xl transition-all min-w-[3.5rem] duration-300 ${activeTab === 'languageModel' ? 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 font-bold -translate-y-1' : 'text-slate-400 dark:text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800'}`}><Sparkles size={20} strokeWidth={activeTab === 'languageModel' ? 2.5 : 2} /><span className="text-[10px]">語言模型</span></button>
               <button onClick={() => setActiveTab('badges')} className={`flex flex-col items-center gap-1 p-2 rounded-2xl transition-all min-w-[3.5rem] duration-300 ${activeTab === 'badges' ? 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 font-bold -translate-y-1' : 'text-slate-400 dark:text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800'}`}><Trophy size={20} strokeWidth={activeTab === 'badges' ? 2.5 : 2} /><span className="text-[10px]">勳章房</span></button>
-              <button onClick={() => setActiveTab('library')} className={`flex flex-col items-center gap-1 p-2 rounded-2xl transition-all min-w-[3.5rem] duration-300 ${activeTab === 'library' ? 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 font-bold -translate-y-1' : 'text-slate-400 dark:text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800'}`}><FolderOpen size={20} strokeWidth={activeTab === 'library' ? 2.5 : 2} /><span className="text-[10px]">課程管理</span></button>
               <button onClick={() => setActiveTab('personal')} className={`flex flex-col items-center gap-1 p-2 rounded-2xl transition-all min-w-[3.5rem] duration-300 ${activeTab === 'personal' ? 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 font-bold -translate-y-1' : 'text-slate-400 dark:text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800'}`}><User size={20} strokeWidth={activeTab === 'personal' ? 2.5 : 2} /><span className="text-[10px]">個人</span></button>
             </div>
           </div>

@@ -1,6 +1,7 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GithubAuthProvider } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
+import { getStorage } from 'firebase/storage';
 
 // Define global types for injected variables
 declare global {
@@ -84,6 +85,7 @@ const app = initializeApp(firebaseConfig);
 
 export const auth = getAuth(app);
 export const db = getFirestore(app);
+export const storage = getStorage(app);
 export const githubProvider = new GithubAuthProvider();
 export const appId = typeof __app_id !== 'undefined' ? __app_id : 'huan-power-english';
 export const isFirebaseReady = !!firebaseConfig.apiKey;

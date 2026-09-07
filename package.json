@@ -9,10 +9,13 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "react": "^19.2.3",
+    "@google/genai": "^2.20.0",
+    "@types/pdfjs-dist": "^2.10.377",
+    "firebase": "^12.7.0",
     "lucide-react": "^0.562.0",
-    "react-dom": "^19.2.3",
-    "firebase": "^12.7.0"
+    "pdfjs-dist": "^6.3.289",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
