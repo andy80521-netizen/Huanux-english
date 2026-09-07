@@ -16,28 +16,20 @@ const cleanAndParseJSON = (text: string) => {
 };
 
 export async function splitTextToSentences(sourceText: string): Promise<{ text: string; translation: string }[]> {
-    const prompt = `請將以下英文文本逐句斷句，並提供每一句的繁體中文翻譯。
-請只回傳 JSON 格式的陣列，不要包含任何 markdown 標記、\`\`\`json 標籤或其他文字。
-text 欄位必須是原文逐字內容，絕對不可改寫、不可濃縮摘要。
-格式範例：[{ "text": "Sentence 1.", "translation": "翻譯 1。" }, ...]
-
-原文內容：
-${sourceText}`;
-
-    const response = await ai.models.generateContent({
-        model: TEXT_MODEL,
-        contents: prompt,
-        config: {
-            temperature: 0.1,
-            responseMimeType: "application/json",
-        }
+    const response = await fetch('/.netlify/functions/split-text', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ sourceText })
     });
 
-    if (!response.text) {
-        throw new Error("Gemini API 回傳空內容");
+    if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || `請求失敗 (HTTP ${response.status})`);
     }
 
-    return cleanAndParseJSON(response.text);
+    return await response.json();
 }
 
 
