@@ -43,6 +43,8 @@ export default function TodayReviewView() {
             });
             setPatterns(loaded);
             setLoading(false);
+        }, (error) => {
+            console.error('[監聽來源:TodayReviewView-languagePatterns]', error);
         });
         return () => unsubscribe();
     }, [user]);

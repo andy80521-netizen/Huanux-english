@@ -30,6 +30,7 @@ export default function LanguageModelListView({ onPatternClick }: { onPatternCli
             setPatterns(data);
             setLoading(false);
         }, (err) => {
+            console.error("[監聽來源:LanguageModelListView-languagePatterns]", err);
             console.error("Error fetching language patterns: ", err);
             setLoading(false);
         });

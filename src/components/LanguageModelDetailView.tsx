@@ -20,6 +20,8 @@ export default function LanguageModelDetailView({ patternId, onBack }: { pattern
             if (snapshot.exists()) {
                 setPattern({ id: snapshot.id, ...snapshot.data() } as LanguagePattern);
             }
+        }, (error) => {
+            console.error('[監聽來源:LanguageModelDetailView-languagePattern]', error);
         });
 
         return () => unsubscribe();

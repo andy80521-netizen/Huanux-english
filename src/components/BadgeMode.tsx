@@ -31,6 +31,8 @@ export default function BadgeMode() {
             });
             setPatterns(loaded);
             setLoading(false);
+        }, (error) => {
+            console.error('[監聽來源:BadgeMode-languagePatterns]', error);
         });
         return () => unsubscribe();
     }, [user]);

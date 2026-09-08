@@ -18,6 +18,8 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
             if (snapshot.exists()) {
                 setMaterial({ id: snapshot.id, ...snapshot.data() } as Material);
             }
+        }, (error) => {
+            console.error('[監聽來源:MaterialDetailView-material]', error);
         });
 
     

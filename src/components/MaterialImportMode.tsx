@@ -76,6 +76,8 @@ export default function MaterialImportMode() {
                         const data = docSnap.data();
                         if (data.courses) setCourses(data.courses);
                     }
+                }, (error) => {
+                    console.error('[監聽來源:MaterialImportMode-profileSettings]', error);
                 });
 
                 const itemsRef = collection(db, 'artifacts', appId, 'users', currentUser.uid, 'flashcards');
@@ -87,6 +89,8 @@ export default function MaterialImportMode() {
                         items.push({ id: Number(doc.id), ...doc.data() } as VocabItem);
                     });
                     setVocabData(items);
+                }, (error) => {
+                    console.error('[監聽來源:MaterialImportMode-flashcards]', error);
                 });
 
             } catch (e) {

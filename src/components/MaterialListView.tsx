@@ -71,6 +71,7 @@ export default function MaterialListView({ onAddClick, onMaterialClick }: { onAd
             setMaterials(mats);
             setLoading(false);
         }, (err) => {
+            console.error("[監聽來源:MaterialListView-materials]", err);
             console.error("Error fetching materials: ", err);
             setError("無法讀取教材列表");
             setLoading(false);

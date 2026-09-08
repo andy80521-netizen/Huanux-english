@@ -90,6 +90,7 @@ const App: React.FC = () => {
         }
       }, 
       (error) => {
+        console.error('[監聽來源:App-flashcards]', error);
         console.warn("Firestore Vocab Sync Error:", error);
         if (error.code === 'permission-denied') {
             setSyncError("權限不足：無法讀取資料庫。請檢查 Firebase Rules 是否開放 artifacts 路徑。");
@@ -112,6 +113,7 @@ const App: React.FC = () => {
         }
       }, 
       (error) => {
+        console.error('[監聽來源:App-profileSettings]', error);
         console.warn("Firestore Profile Sync Error:", error);
         // Error handled by vocab listener already or will be logged here
       }
