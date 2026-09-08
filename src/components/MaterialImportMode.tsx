@@ -28,6 +28,7 @@ export default function MaterialImportMode() {
     const [selectedMaterial, setSelectedMaterial] = useState<string | null>(null);
     const [loadingState, setLoadingState] = useState<'idle' | 'processing' | 'uploading' | 'analyzing' | 'generating' | 'timestamping'>('idle');
     const [timestampWarning, setTimestampWarning] = useState(false);
+    const [lowConfidenceTimestamps, setLowConfidenceTimestamps] = useState(false);
     const [pendingMaterial, setPendingMaterial] = useState<PendingMaterial | null>(null);
         const [ttsProgress, setTtsProgress] = useState<{ current: number; total: number } | null>(null);
     const [saveSuccess, setSaveSuccess] = useState(false);
@@ -239,6 +240,7 @@ export default function MaterialImportMode() {
         setResults([]);
         setSaveSuccess(false);
         setTimestampWarning(false);
+        setLowConfidenceTimestamps(false);
         
         try {
             const uploadResult = await uploadFileToGemini(file);
@@ -250,8 +252,11 @@ export default function MaterialImportMode() {
             setLoadingState('timestamping');
             let timestamps: { startTime: number; endTime: number }[] = [];
             let currentTimestampWarning = false;
+            let currentLowConfidence = false;
             try {
-                timestamps = await detectTimestamps(fileData, res);
+                const result = await detectTimestamps(fileData, file, res);
+                timestamps = result.timestamps;
+                currentLowConfidence = result.lowConfidence;
             } catch (err: any) {
                 console.error("抓取時間軸失敗:", err);
                 currentTimestampWarning = true;
@@ -274,6 +279,7 @@ export default function MaterialImportMode() {
                 sentences: pendingSentences
             });
             setTimestampWarning(currentTimestampWarning);
+            setLowConfidenceTimestamps(currentLowConfidence);
             
         } catch (e: any) {
             handleError(e);
@@ -599,6 +605,7 @@ export default function MaterialImportMode() {
                     fileName={pendingMaterial.fileName}
                     initialSentences={pendingMaterial.sentences}
                     timestampWarning={timestampWarning}
+                    lowConfidenceTimestamps={lowConfidenceTimestamps}
                     onSave={confirmAndSaveMaterial}
                     onCancel={handleCancelReview}
                 />

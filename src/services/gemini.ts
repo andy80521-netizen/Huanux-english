@@ -182,10 +182,13 @@ export async function generateSpeechForSentences(
 }
 
 
+import { detectSilenceIntervals } from '../utils/audioAnalysis';
+
 export async function detectTimestamps(
   fileData: { uri: string; mimeType: string },
+  audioFile: File,
   sentences: { text: string }[]
-): Promise<{ startTime: number; endTime: number }[]> {
+): Promise<{ timestamps: { startTime: number; endTime: number }[]; lowConfidence: boolean }> {
 
     const prompt = `這裡有一段音檔以及它的逐字稿。請幫我為逐字稿中的「每一句話」找出在音檔中對應的開始時間與結束時間（以秒為單位，可以是小數）。
 請嚴格遵守以下規則：
@@ -229,7 +232,101 @@ ${JSON.stringify(sentences.map(s => s.text), null, 2)}`;
         }
     }
 
-    return parsed;
+    const geminiGuessedTimestamps = parsed as { startTime: number; endTime: number }[];
+
+    try {
+        const { intervals: silenceIntervals, duration: audioDuration } = await detectSilenceIntervals(audioFile);
+        const expectedGapCount = sentences.length - 1;
+
+        if (expectedGapCount <= 0) {
+            return {
+                timestamps: [{ startTime: 0, endTime: audioDuration }],
+                lowConfidence: false
+            };
+        }
+
+        let finalSilences = [...silenceIntervals];
+        const diff = finalSilences.length - expectedGapCount;
+
+        if (diff > 0) {
+            // 有多餘停頓點，需要篩選
+            const geminiBoundaries: number[] = [];
+            for (let i = 0; i < expectedGapCount; i++) {
+                geminiBoundaries.push(geminiGuessedTimestamps[i].endTime);
+                geminiBoundaries.push(geminiGuessedTimestamps[i + 1].startTime);
+            }
+
+            while (finalSilences.length > expectedGapCount) {
+                let worstIndex = -1;
+                let maxMinDistance = -1;
+
+                for (let i = 0; i < finalSilences.length; i++) {
+                    const silenceMid = (finalSilences[i].start + finalSilences[i].end) / 2;
+                    let minDistance = Infinity;
+                    for (const gb of geminiBoundaries) {
+                        const dist = Math.abs(silenceMid - gb);
+                        if (dist < minDistance) {
+                            minDistance = dist;
+                        }
+                    }
+                    if (minDistance > maxMinDistance) {
+                        maxMinDistance = minDistance;
+                        worstIndex = i;
+                    }
+                }
+                
+                if (worstIndex !== -1) {
+                    finalSilences.splice(worstIndex, 1);
+                }
+            }
+        } else if (diff === -1) {
+            // 少一個，找出距離所有 silence 最遠的 Gemini boundary 補進來
+            const geminiBoundaries: number[] = [];
+            for (let i = 0; i < expectedGapCount; i++) {
+                geminiBoundaries.push(geminiGuessedTimestamps[i].endTime);
+                geminiBoundaries.push(geminiGuessedTimestamps[i + 1].startTime);
+            }
+            
+            let bestGeminiBoundary = 0;
+            let maxMinDistance = -1;
+
+            for (const gb of geminiBoundaries) {
+                let minDistance = Infinity;
+                for (const s of finalSilences) {
+                    const silenceMid = (s.start + s.end) / 2;
+                    const dist = Math.abs(silenceMid - gb);
+                    if (dist < minDistance) {
+                        minDistance = dist;
+                    }
+                }
+                if (minDistance > maxMinDistance) {
+                    maxMinDistance = minDistance;
+                    bestGeminiBoundary = gb;
+                }
+            }
+            finalSilences.push({ start: bestGeminiBoundary, end: bestGeminiBoundary });
+        }
+
+        // 當調整後長度一致時，套用校正
+        if (finalSilences.length === expectedGapCount) {
+            finalSilences.sort((a, b) => a.start - b.start);
+            const correctedTimestamps = [];
+
+            for (let i = 0; i < sentences.length; i++) {
+                const startTime = i === 0 ? 0 : (finalSilences[i - 1].start + finalSilences[i - 1].end) / 2;
+                const endTime = i === sentences.length - 1 ? audioDuration : (finalSilences[i].start + finalSilences[i].end) / 2;
+                correctedTimestamps.push({ startTime, endTime });
+            }
+
+            return { timestamps: correctedTimestamps, lowConfidence: false };
+        } else {
+            // 如果還是不一致 (例如 diff < -1)，退回原始猜測
+            return { timestamps: geminiGuessedTimestamps, lowConfidence: true };
+        }
+    } catch (err) {
+        console.warn("自動校正時間軸失敗，退回原始猜測:", err);
+        return { timestamps: geminiGuessedTimestamps, lowConfidence: true };
+    }
 }
 
 

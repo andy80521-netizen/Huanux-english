@@ -16,12 +16,13 @@ export interface MaterialReviewPanelProps {
     fileName: string;
     initialSentences: ReviewSentence[];
     timestampWarning: boolean;
+    lowConfidenceTimestamps?: boolean;
     onSave: (sentences: ReviewSentence[]) => void;
     onCancel: () => void;
 }
 
 export default function MaterialReviewPanel({
-    source, audioFile, audioBlob, fileName, initialSentences, timestampWarning, onSave, onCancel
+    source, audioFile, audioBlob, fileName, initialSentences, timestampWarning, lowConfidenceTimestamps, onSave, onCancel
 }: MaterialReviewPanelProps) {
     const [sentences, setSentences] = useState<ReviewSentence[]>(initialSentences);
     const [audioUrl, setAudioUrl] = useState<string>('');
@@ -90,6 +91,15 @@ export default function MaterialReviewPanel({
                     <AlertCircle size={20} className="shrink-0" />
                     <span className="font-bold leading-relaxed">
                         自動抓取時間軸失敗，所有時間軸目前都是 0，請務必手動校對每一句。
+                    </span>
+                </div>
+            )}
+
+            {source === 'upload' && !timestampWarning && lowConfidenceTimestamps && (
+                <div className="mb-6 bg-yellow-50 dark:bg-yellow-900/20 text-yellow-600 dark:text-yellow-400 text-sm px-4 py-4 rounded-xl flex items-center gap-3 shadow-sm border border-yellow-100 dark:border-yellow-800">
+                    <AlertCircle size={20} className="shrink-0" />
+                    <span className="font-bold leading-relaxed">
+                        此篇教材的時間軸自動校正信心度較低,請務必逐句仔細核對每句的起訖時間,不要直接跳過校對。
                     </span>
                 </div>
             )}
