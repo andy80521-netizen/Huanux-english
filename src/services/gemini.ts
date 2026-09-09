@@ -608,3 +608,88 @@ ${sourceText}
         throw new Error("解析語言模型句型失敗：" + e.message);
     }
 }
+
+
+
+export interface TranscribedSentence {
+  text: string;
+  translation: string;
+  startTime: number;
+  endTime: number;
+  needsReview: boolean;
+}
+
+export async function transcribeAudioWithTimestamps(
+  audioFile: File
+): Promise<TranscribedSentence[]> {
+    const uploadResult = await uploadFileToGemini(audioFile);
+    
+    const prompt = `請逐句轉錄這段音檔的內容,每一句話都要包含這句話開始出現的時間點(秒)跟結束的時間點(秒)。只回傳JSON陣列,格式為[{text, translation, startTime, endTime}]`;
+
+    const response = await ai.models.generateContent({
+        model: TEXT_MODEL,
+        contents: [
+            prompt,
+            {
+                fileData: {
+                    fileUri: uploadResult.uri,
+                    mimeType: uploadResult.mimeType
+                }
+            }
+        ],
+        config: {
+            temperature: 0.1,
+            responseMimeType: "application/json",
+        }
+    });
+
+    if (!response.text) {
+        throw new Error("無法抓取時間軸：Gemini API 回傳空內容");
+    }
+
+    const parsed = cleanAndParseJSON(response.text);
+    if (!Array.isArray(parsed)) {
+        throw new Error("回傳格式不正確");
+    }
+
+    const { intervals } = await detectSilenceIntervals(audioFile);
+    
+    const results: TranscribedSentence[] = [];
+    
+    for (let i = 0; i < parsed.length; i++) {
+        const item = parsed[i];
+        let needsReview = false;
+        
+        // 校驗 startTime
+        if (i > 0) {
+            let minDistance = Infinity;
+            for (const gap of intervals) {
+                const gapMid = (gap.start + gap.end) / 2;
+                const dist = Math.abs(item.startTime - gapMid);
+                if (dist < minDistance) minDistance = dist;
+            }
+            if (minDistance > 2) needsReview = true;
+        }
+        
+        // 校驗 endTime
+        if (i < parsed.length - 1) {
+            let minDistance = Infinity;
+            for (const gap of intervals) {
+                const gapMid = (gap.start + gap.end) / 2;
+                const dist = Math.abs(item.endTime - gapMid);
+                if (dist < minDistance) minDistance = dist;
+            }
+            if (minDistance > 2) needsReview = true;
+        }
+
+        results.push({
+            text: item.text || '',
+            translation: item.translation || '',
+            startTime: Number(item.startTime) || 0,
+            endTime: Number(item.endTime) || 0,
+            needsReview
+        });
+    }
+
+    return results;
+}

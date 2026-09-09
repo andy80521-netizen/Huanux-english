@@ -1,13 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Play, Pause, Save, X, AlertCircle } from 'lucide-react';
 
-export type ReviewSentence = {
-    text: string;
-    translation: string;
-    startTime: number;
-    endTime: number;
-    lowConfidence?: boolean;
-};
+import { MaterialSentence } from '../types';
+
+export type ReviewSentence = Pick<MaterialSentence, 'text' | 'translation' | 'startTime' | 'endTime' | 'lowConfidence' | 'needsReview'>;
 
 export interface MaterialReviewPanelProps {
     source: 'upload' | 'tts';
@@ -15,14 +11,13 @@ export interface MaterialReviewPanelProps {
     audioBlob?: Blob;
     fileName: string;
     initialSentences: ReviewSentence[];
-    timestampWarning: boolean;
-    lowConfidenceTimestamps?: boolean;
+    
     onSave: (sentences: ReviewSentence[]) => void;
     onCancel: () => void;
 }
 
 export default function MaterialReviewPanel({
-    source, audioFile, audioBlob, fileName, initialSentences, timestampWarning, lowConfidenceTimestamps, onSave, onCancel
+    source, audioFile, audioBlob, fileName, initialSentences,  onSave, onCancel
 }: MaterialReviewPanelProps) {
     const [sentences, setSentences] = useState<ReviewSentence[]>(initialSentences);
     const [audioUrl, setAudioUrl] = useState<string>('');
@@ -86,33 +81,26 @@ export default function MaterialReviewPanel({
                 </div>
             </div>
 
-            {source === 'upload' && timestampWarning && (
-                <div className="mb-6 bg-yellow-50 dark:bg-yellow-900/20 text-yellow-600 dark:text-yellow-400 text-sm px-4 py-4 rounded-xl flex items-center gap-3 shadow-sm border border-yellow-100 dark:border-yellow-800">
-                    <AlertCircle size={20} className="shrink-0" />
-                    <span className="font-bold leading-relaxed">
-                        自動抓取時間軸失敗，所有時間軸目前都是 0，請務必手動校對每一句。
-                    </span>
-                </div>
-            )}
+            
 
-            {source === 'upload' && !timestampWarning && lowConfidenceTimestamps && (
-                <div className="mb-6 bg-yellow-50 dark:bg-yellow-900/20 text-yellow-600 dark:text-yellow-400 text-sm px-4 py-4 rounded-xl flex items-center gap-3 shadow-sm border border-yellow-100 dark:border-yellow-800">
-                    <AlertCircle size={20} className="shrink-0" />
-                    <span className="font-bold leading-relaxed">
-                        此篇教材的時間軸自動校正信心度較低,請務必逐句仔細核對每句的起訖時間,不要直接跳過校對。
-                    </span>
-                </div>
-            )}
+            
 
             <audio ref={audioRef} src={audioUrl} onTimeUpdate={handleTimeUpdate} onEnded={() => setPlayingIndex(null)} />
 
             <div className="space-y-4">
                 {sentences.map((s, i) => (
-                    <div key={i} className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 flex flex-col gap-3">
+                    <div key={i} className={`p-4 rounded-xl flex flex-col gap-3 border ${s.needsReview ? 'bg-yellow-50/50 dark:bg-yellow-900/10 border-yellow-400 dark:border-yellow-600' : 'bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700'}`}>
                         <div className="flex justify-between items-start gap-4">
                             <div className="flex-1 space-y-2">
                                 <div className="flex items-center justify-between">
-                                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">原文 (English)</label>
+                                    <div className="flex items-center gap-2">
+                                        <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">原文 (English)</label>
+                                        {s.needsReview && (
+                                            <span className="text-xs font-bold text-yellow-600 dark:text-yellow-400 flex items-center gap-1 bg-yellow-100 dark:bg-yellow-900/40 px-2 py-0.5 rounded-full">
+                                                <AlertCircle size={14} /> 此句時間軸可能不夠精確,建議仔細核對
+                                            </span>
+                                        )}
+                                    </div>
                                     {s.lowConfidence && (
                                         <span className="text-[10px] font-bold bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full shrink-0">
                                             低信心度

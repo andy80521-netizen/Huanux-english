@@ -6,6 +6,7 @@ export interface MaterialSentence {
   startTime: number;         // 秒，對應 mp3 時間軸
   endTime: number;
   lowConfidence?: boolean;
+  needsReview?: boolean;  // 時間軸校驗:跟音量分析的真實停頓點誤差過大,建議使用者複核
   mastery: number;           // 沿用現有 mastery 累加機制
   lastScores?: { pronunciation: number; fluency: number; stress: number; total: number };
   extracted?: boolean;  // 是否已萃取過語言模型句型

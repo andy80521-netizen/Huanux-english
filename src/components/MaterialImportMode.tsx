@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { FileText, Headphones, AlertCircle, Loader2, Upload, CheckCircle, Volume2, Sparkles, FolderOpen } from 'lucide-react';
-import { splitTextToSentences, transcribeAudioToSentences, generateSpeechForSentences, detectTimestamps, uploadFileToGemini, extractPatternsFromText } from '../services/gemini';
+import { splitTextToSentences, generateSpeechForSentences, transcribeAudioWithTimestamps, extractPatternsFromText } from '../services/gemini';
 import { extractTextFromPdf } from '../utils/pdfExtract';
 import { auth, db, storage, appId } from '../firebase';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -225,6 +225,9 @@ export default function MaterialImportMode() {
         }
     };
 
+    
+    
+    
     const handleAudioUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
@@ -235,7 +238,7 @@ export default function MaterialImportMode() {
             return;
         }
 
-        setLoadingState('uploading');
+        setLoadingState('transcribing'); // Changed from uploading
         setError(null);
         setResults([]);
         setSaveSuccess(false);
@@ -243,33 +246,14 @@ export default function MaterialImportMode() {
         setLowConfidenceTimestamps(false);
         
         try {
-            const uploadResult = await uploadFileToGemini(file);
-            const fileData = { uri: uploadResult.uri, mimeType: uploadResult.mimeType };
-
-            const res = await transcribeAudioToSentences(fileData, (status) => setLoadingState(status));
-            setResults(res);
+            const result = await transcribeAudioWithTimestamps(file);
             
-            setLoadingState('timestamping');
-            let timestamps: { startTime: number; endTime: number }[] = [];
-            let currentTimestampWarning = false;
-            let currentLowConfidence = false;
-            try {
-                const result = await detectTimestamps(fileData, file, res);
-                timestamps = result.timestamps;
-                currentLowConfidence = result.lowConfidence;
-            } catch (err: any) {
-                console.error("抓取時間軸失敗:", err);
-                currentTimestampWarning = true;
-                setTimestampWarning(true);
-                timestamps = res.map(() => ({ startTime: 0, endTime: 0 }));
-            }
-
-            const pendingSentences = res.map((r, i) => ({
+            const pendingSentences = result.map(r => ({
                 text: r.text,
                 translation: r.translation,
-                startTime: timestamps[i].startTime,
-                endTime: timestamps[i].endTime,
-                lowConfidence: r.lowConfidence
+                startTime: r.startTime,
+                endTime: r.endTime,
+                needsReview: r.needsReview
             }));
 
             setPendingMaterial({
@@ -278,18 +262,15 @@ export default function MaterialImportMode() {
                 fileName: file.name,
                 sentences: pendingSentences
             });
-            setTimestampWarning(currentTimestampWarning);
-            setLowConfidenceTimestamps(currentLowConfidence);
             
         } catch (e: any) {
+            console.error("處理音檔失敗:", e);
             handleError(e);
         } finally {
             setLoadingState('idle');
             if (audioInputRef.current) audioInputRef.current.value = '';
         }
     };
-
-
     const handleGenerate = async () => {
         const uid = auth.currentUser?.uid;
         if (!uid) {
@@ -368,6 +349,7 @@ export default function MaterialImportMode() {
                     startTime: r.startTime,
                     endTime: r.endTime,
                     lowConfidence: r.lowConfidence,
+                    needsReview: r.needsReview,
                     mastery: 0
                 })),
                 createdAt: Date.now(),
@@ -468,6 +450,8 @@ export default function MaterialImportMode() {
                         <Upload size={18} />
                         選擇音檔 (.mp3, .m4a)
                     </button>
+                    
+
                 </div>
 
                 {/* 路徑二：文字 / PDF 上傳 */}
@@ -604,8 +588,8 @@ export default function MaterialImportMode() {
                     audioBlob={pendingMaterial.audioBlob}
                     fileName={pendingMaterial.fileName}
                     initialSentences={pendingMaterial.sentences}
-                    timestampWarning={timestampWarning}
-                    lowConfidenceTimestamps={lowConfidenceTimestamps}
+                    
+                    
                     onSave={confirmAndSaveMaterial}
                     onCancel={handleCancelReview}
                 />
