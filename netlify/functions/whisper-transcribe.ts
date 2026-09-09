@@ -20,127 +20,123 @@ interface MergedSentence {
 }
 
 function mergeSegmentsIntoSentences(segments: Segment[], words: Word[] = []): MergedSentence[] {
-  const results: MergedSentence[] = [];
+  const COMMON_ABBREVIATIONS = ["Dr", "Mr", "Mrs", "Ms", "St", "Jr", "Sr", "Prof"];
+
+  // 步驟一：先把 segments 按照標點分組，不處理時間邊界
+  const groupedSentences: { text: string; firstSeg: Segment; lastSeg: Segment; lowConfidence?: boolean }[] = [];
   
   let currentSentenceParts: string[] = [];
-  let currentStartTime: number = 0;
-  let currentEndTime: number = 0;
+  let firstSeg: Segment | null = null;
   let segmentCount = 0;
-  
-  // 任務一：維護一個字數索引的累加計數器
-  let wordCursor = 0;
-  let sentenceFirstWordIndex = 0;
-
-  // 輔助函式：透過索引去 words 陣列裡直接取值，若超出範圍則退回預設值
-  const getIndexedTimestamps = (firstIdx: number, lastIdx: number, defaultStart: number, defaultEnd: number) => {
-    let finalStart = defaultStart;
-    let finalEnd = defaultEnd;
-
-    if (words && words.length > 0) {
-      const firstWordObj = words[firstIdx];
-      if (firstWordObj && typeof firstWordObj.start === 'number') {
-        finalStart = firstWordObj.start;
-      }
-      
-      const lastWordObj = words[lastIdx];
-      if (lastWordObj && typeof lastWordObj.end === 'number') {
-        finalEnd = lastWordObj.end;
-      }
-    }
-
-    return { finalStart, finalEnd };
-  };
-
-  const COMMON_ABBREVIATIONS = ["Dr", "Mr", "Mrs", "Ms", "St", "Jr", "Sr", "Prof"];
 
   for (let i = 0; i < segments.length; i++) {
     const seg = segments[i];
     const trimmedText = seg.text.trim();
     
-    // 計算這個 segment 有幾個字（避開空字串產生長度為 1 的 ['']）
-    const textWords = trimmedText ? trimmedText.split(/\s+/) : [];
-    const wordCountOfThisSegment = textWords.length;
-    
-    const segFirstWordIndex = wordCursor;
-    // 這個 segment 結束的索引
-    const segLastWordIndex = wordCursor + Math.max(0, wordCountOfThisSegment - 1);
-    
-    // 如果是這一句的第一個片段，記錄起點時間與第一個字的索引
     if (segmentCount === 0) {
-      currentStartTime = seg.start;
-      sentenceFirstWordIndex = segFirstWordIndex;
+      firstSeg = seg;
     }
     
     currentSentenceParts.push(trimmedText);
-    currentEndTime = seg.end;
     segmentCount++;
 
-    // 將 cursor 移到下一個 segment 的起點
-    wordCursor += wordCountOfThisSegment;
-
-    const combinedText = currentSentenceParts.join(" ");
-    
-    // 任務二：判斷是否為常見縮寫
-    // 檢查結尾字元是否為句子結束標點
     const hasSentenceEndPunctuation = /[.!?]["”']?$/.test(trimmedText);
-    // 剔除標點符號，用來做「完全等於清單內縮寫」的精確比對
     const textWithoutPunctuation = trimmedText.replace(/[.!?]["”']?$/, "");
     const isAbbreviation = COMMON_ABBREVIATIONS.some(abbr => abbr.toLowerCase() === textWithoutPunctuation.toLowerCase());
-    
-    // 若符合標點規則且「整個 segment 並非縮寫」，才視為句子結束
     const isSentenceEnd = hasSentenceEndPunctuation && !isAbbreviation;
 
     if (isSentenceEnd) {
-      const { finalStart, finalEnd } = getIndexedTimestamps(
-        sentenceFirstWordIndex, 
-        segLastWordIndex, 
-        currentStartTime, 
-        currentEndTime
-      );
-
-      results.push({
-        text: combinedText,
-        startTime: finalStart,
-        endTime: finalEnd
+      groupedSentences.push({
+        text: currentSentenceParts.join(" "),
+        firstSeg: firstSeg!,
+        lastSeg: seg
       });
-      // 清空狀態
       currentSentenceParts = [];
       segmentCount = 0;
     } else if (segmentCount >= 4) {
-      const { finalStart, finalEnd } = getIndexedTimestamps(
-        sentenceFirstWordIndex, 
-        segLastWordIndex, 
-        currentStartTime, 
-        currentEndTime
-      );
-
-      // 安全網：滿 4 個 segment 強制中斷
-      results.push({
-        text: combinedText,
-        startTime: finalStart,
-        endTime: finalEnd,
+      groupedSentences.push({
+        text: currentSentenceParts.join(" "),
+        firstSeg: firstSeg!,
+        lastSeg: seg,
         lowConfidence: true
       });
-      // 清空狀態
       currentSentenceParts = [];
       segmentCount = 0;
     }
   }
 
-  // 處理收尾：如果全部陣列跑完還有未輸出的字串
   if (segmentCount > 0) {
-    // 此時 wordCursor 已經往前推過了，所以最後一個字的索引是 wordCursor - 1
-    const { finalStart, finalEnd } = getIndexedTimestamps(
-      sentenceFirstWordIndex, 
-      Math.max(0, wordCursor - 1), 
-      currentStartTime, 
-      currentEndTime
-    );
+    groupedSentences.push({
+      text: currentSentenceParts.join(" "),
+      firstSeg: firstSeg!,
+      lastSeg: segments[segments.length - 1]
+    });
+  }
+
+  // 步驟二：透過 words 尋找最大的停頓空隙，精確計算句子間的邊界
+  const findPreciseBoundary = (roughBoundaryTime: number, words: Word[], sentenceIndex: number): number => {
+    // 篩選出 start 落在 roughBoundaryTime - 2 到 roughBoundaryTime + 2 的字
+    const filteredWords = words.filter(w => w.start >= roughBoundaryTime - 2 && w.start <= roughBoundaryTime + 2);
+    filteredWords.sort((a, b) => a.start - b.start);
+
+    // 防呆：如果找不到足夠的字，退回原本的 segment 邊界
+    if (filteredWords.length < 2) {
+      return roughBoundaryTime;
+    }
+
+    let maxGap = -1;
+    let maxGapIndex = 0;
+
+    // 依序檢查相鄰兩個字之間的空隙
+    for (let k = 0; k < filteredWords.length - 1; k++) {
+      const gap = filteredWords[k + 1].start - filteredWords[k].end;
+      if (gap > maxGap) {
+        maxGap = gap;
+        maxGapIndex = k;
+      }
+    }
+
+    // 取空隙的正中間值
+    const preciseBoundary = (filteredWords[maxGapIndex].end + filteredWords[maxGapIndex + 1].start) / 2;
+
+    // 暫時性 Log：核對第 1、2 句之間 (index 0) 與 第 8、9 句之間 (index 7)
+    if (sentenceIndex === 0 || sentenceIndex === 7) {
+      console.log(`\n========== 句子分界點核對 (第 ${sentenceIndex + 1} 句結束 與 第 ${sentenceIndex + 2} 句開始) ==========`);
+      console.log(`原本 Segment 給的 Rough Boundary: ${roughBoundaryTime}`);
+      console.log(`篩選範圍內的 Words:`, JSON.stringify(filteredWords));
+      console.log(`找到的最大空隙是: ${maxGap.toFixed(4)} 秒`);
+      console.log(`空隙發生在 "${filteredWords[maxGapIndex].word}" (end: ${filteredWords[maxGapIndex].end}) 與 "${filteredWords[maxGapIndex + 1].word}" (start: ${filteredWords[maxGapIndex + 1].start}) 之間`);
+      console.log(`最後算出的精確分界時間點: ${preciseBoundary}`);
+      console.log(`========================================================================\n`);
+    }
+
+    return preciseBoundary;
+  };
+
+  const results: MergedSentence[] = [];
+
+  for (let i = 0; i < groupedSentences.length; i++) {
+    const group = groupedSentences[i];
+    
+    // 預設為該句自己 segment 的 start / end
+    let startTime = group.firstSeg.start;
+    let endTime = group.lastSeg.end;
+
+    // 下一句的 startTime 直接沿用上一句算出來的同一個分界值
+    if (i > 0) {
+      startTime = results[i - 1].endTime;
+    }
+
+    // 每一句的 endTime，如果後面還有下一句，就呼叫 findPreciseBoundary 計算
+    if (i < groupedSentences.length - 1) {
+      endTime = findPreciseBoundary(group.lastSeg.end, words, i);
+    }
 
     results.push({
-      text: currentSentenceParts.join(" "),
-      startTime: finalStart,
-      endTime: finalEnd
+      text: group.text,
+      startTime,
+      endTime,
+      ...(group.lowConfidence ? { lowConfidence: true } : {})
     });
   }
 
