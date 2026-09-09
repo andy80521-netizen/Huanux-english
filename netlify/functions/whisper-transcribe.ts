@@ -1,5 +1,82 @@
 import { Context } from "@netlify/functions";
 
+interface Segment {
+  text: string;
+  start: number;
+  end: number;
+}
+
+interface MergedSentence {
+  text: string;
+  startTime: number;
+  endTime: number;
+  lowConfidence?: boolean;
+}
+
+function mergeSegmentsIntoSentences(segments: Segment[]): MergedSentence[] {
+  const results: MergedSentence[] = [];
+  
+  let currentSentenceParts: string[] = [];
+  let currentStartTime: number = 0;
+  let currentEndTime: number = 0;
+  let segmentCount = 0;
+
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
+    const trimmedText = seg.text.trim();
+    
+    // 如果是這一句的第一個片段，記錄起點時間
+    if (segmentCount === 0) {
+      currentStartTime = seg.start;
+    }
+    
+    currentSentenceParts.push(trimmedText);
+    currentEndTime = seg.end;
+    segmentCount++;
+
+    // 組合到目前的完整字串（用空白連接）
+    const combinedText = currentSentenceParts.join(" ");
+    
+    // 檢查結尾字元是否為句子結束標點（支援後面緊接引號）
+    // [.!?] 匹配基本標點，["”']? 匹配可選的單雙引號，$ 匹配字串結尾
+    const isSentenceEnd = /[.!?]["”']?$/.test(trimmedText);
+
+    if (isSentenceEnd) {
+      // 遇到結尾標點，正常輸出這句
+      results.push({
+        text: combinedText,
+        startTime: currentStartTime,
+        endTime: currentEndTime
+      });
+      // 清空狀態，準備迎接下一句
+      currentSentenceParts = [];
+      segmentCount = 0;
+    } else if (segmentCount >= 4) {
+      // 安全網：當「滿 4 個」segment 還沒遇到標點時，強制在此處中斷並輸出
+      results.push({
+        text: combinedText,
+        startTime: currentStartTime,
+        endTime: currentEndTime,
+        lowConfidence: true
+      });
+      // 清空狀態
+      currentSentenceParts = [];
+      segmentCount = 0;
+    }
+  }
+
+  // 處理收尾：如果全部陣列跑完，手上還有未輸出的字串（即音檔最後一句沒有句號）
+  if (segmentCount > 0) {
+    results.push({
+      text: currentSentenceParts.join(" "),
+      startTime: currentStartTime,
+      endTime: currentEndTime
+    });
+  }
+
+  return results;
+}
+
 export default async (req: Request, context: Context) => {
   if (req.method !== "POST") {
     return new Response("Method Not Allowed", { status: 405 });
@@ -55,11 +132,7 @@ export default async (req: Request, context: Context) => {
     }
 
     // 將 Whisper 回傳的 segments 轉換為需求格式
-    const results = (data.segments || []).map((seg: any) => ({
-      text: seg.text,
-      startTime: seg.start,
-      endTime: seg.end
-    }));
+    const results = mergeSegmentsIntoSentences(data.segments || []);
 
     return new Response(JSON.stringify(results), { 
       status: 200, 
