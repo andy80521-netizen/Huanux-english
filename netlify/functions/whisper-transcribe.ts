@@ -6,6 +6,12 @@ interface Segment {
   end: number;
 }
 
+interface Word {
+  word: string;
+  start: number;
+  end: number;
+}
+
 interface MergedSentence {
   text: string;
   startTime: number;
@@ -13,13 +19,40 @@ interface MergedSentence {
   lowConfidence?: boolean;
 }
 
-function mergeSegmentsIntoSentences(segments: Segment[]): MergedSentence[] {
+function mergeSegmentsIntoSentences(segments: Segment[], words: Word[] = []): MergedSentence[] {
   const results: MergedSentence[] = [];
   
   let currentSentenceParts: string[] = [];
   let currentStartTime: number = 0;
   let currentEndTime: number = 0;
   let segmentCount = 0;
+
+  const getRefinedTimestamps = (start: number, end: number) => {
+    let finalStart = start;
+    let finalEnd = end;
+    
+    if (words && words.length > 0) {
+      // 找出第一個 word.start >= (這句話第一個 segment 的 start) 的字
+      const firstWord = words.find(w => w.start >= start);
+      if (firstWord) {
+        finalStart = firstWord.start;
+      }
+      
+      // 找出最後一個 word.start < (這句話最後一個 segment 的 end) 的字
+      let lastWord: Word | undefined;
+      for (let i = words.length - 1; i >= 0; i--) {
+        if (words[i].start < end) {
+          lastWord = words[i];
+          break;
+        }
+      }
+      if (lastWord) {
+        finalEnd = lastWord.end;
+      }
+    }
+    
+    return { finalStart, finalEnd };
+  };
 
   for (let i = 0; i < segments.length; i++) {
     const seg = segments[i];
@@ -42,21 +75,23 @@ function mergeSegmentsIntoSentences(segments: Segment[]): MergedSentence[] {
     const isSentenceEnd = /[.!?]["”']?$/.test(trimmedText);
 
     if (isSentenceEnd) {
+      const { finalStart, finalEnd } = getRefinedTimestamps(currentStartTime, currentEndTime);
       // 遇到結尾標點，正常輸出這句
       results.push({
         text: combinedText,
-        startTime: currentStartTime,
-        endTime: currentEndTime
+        startTime: finalStart,
+        endTime: finalEnd
       });
       // 清空狀態，準備迎接下一句
       currentSentenceParts = [];
       segmentCount = 0;
     } else if (segmentCount >= 4) {
+      const { finalStart, finalEnd } = getRefinedTimestamps(currentStartTime, currentEndTime);
       // 安全網：當「滿 4 個」segment 還沒遇到標點時，強制在此處中斷並輸出
       results.push({
         text: combinedText,
-        startTime: currentStartTime,
-        endTime: currentEndTime,
+        startTime: finalStart,
+        endTime: finalEnd,
         lowConfidence: true
       });
       // 清空狀態
@@ -67,10 +102,11 @@ function mergeSegmentsIntoSentences(segments: Segment[]): MergedSentence[] {
 
   // 處理收尾：如果全部陣列跑完，手上還有未輸出的字串（即音檔最後一句沒有句號）
   if (segmentCount > 0) {
+    const { finalStart, finalEnd } = getRefinedTimestamps(currentStartTime, currentEndTime);
     results.push({
       text: currentSentenceParts.join(" "),
-      startTime: currentStartTime,
-      endTime: currentEndTime
+      startTime: finalStart,
+      endTime: finalEnd
     });
   }
 
@@ -109,6 +145,7 @@ export default async (req: Request, context: Context) => {
     openAiFormData.append("response_format", "verbose_json");
     // 注意：針對陣列參數，有些 API 接受 timestamp_granularities[]，Node 的 fetch 也支援直接 append
     openAiFormData.append("timestamp_granularities[]", "segment");
+    openAiFormData.append("timestamp_granularities[]", "word");
 
     // 呼叫 OpenAI Whisper API
     const openAiResponse = await fetch("https://api.openai.com/v1/audio/transcriptions", {
@@ -131,8 +168,8 @@ export default async (req: Request, context: Context) => {
       });
     }
 
-    // 將 Whisper 回傳的 segments 轉換為需求格式
-    const results = mergeSegmentsIntoSentences(data.segments || []);
+    // 將 Whisper 回傳的 segments 轉換為需求格式，並傳入 words 進行精確時間對齊
+    const results = mergeSegmentsIntoSentences(data.segments || [], data.words || []);
 
     return new Response(JSON.stringify(results), { 
       status: 200, 
