@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>Whisper API 測試工具</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; max-width: 900px; margin: auto; line-height: 1.5; color: #333; }
+        .section { margin-bottom: 20px; padding: 15px; border: 1px solid #ccc; border-radius: 8px; background: #fff; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f4f4f4; }
+        #loading { color: #0056b3; font-weight: bold; display: none; margin-top: 10px; }
+        #errorMsg { color: #d32f2f; display: none; margin-top: 10px; white-space: pre-wrap; background: #ffebee; padding: 10px; border-radius: 4px; border: 1px solid #ffcdd2; }
+        .hint { color: #1565c0; font-size: 0.95em; margin-bottom: 15px; background: #e3f2fd; padding: 10px 15px; border-radius: 4px; border: 1px solid #bbdefb; }
+        button { cursor: pointer; padding: 5px 10px; }
+        #submitBtn { font-size: 16px; padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 4px; margin-top: 10px; }
+        #submitBtn:disabled { background: #ccc; cursor: not-allowed; }
+        tr:hover { background-color: #f9f9f9; }
+    </style>
+</head>
+<body>
+    <h2>Whisper Function 測試工具</h2>
+    
+    <div class="hint">
+        <strong>提示：</strong>請逐句核對文字內容是否對應正確的語音片段，特別留意是否有兩句被合併、或一句被切成兩段的情況。
+    </div>
+
+    <div class="section">
+        <input type="file" id="audioInput" accept="audio/*">
+        <br><br>
+        <audio id="audioPlayer" controls style="width: 100%; display: none;"></audio>
+        <button id="submitBtn" disabled>開始測試</button>
+        <div id="loading">處理中，請稍候... (這可能需要幾秒到幾十秒鐘)</div>
+        <div id="errorMsg"></div>
+    </div>
+
+    <div class="section" id="resultsSection" style="display: none;">
+        <h3>解析結果</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th width="50">序號</th>
+                    <th>文字內容 (text)</th>
+                    <th width="80">開始時間</th>
+                    <th width="80">結束時間</th>
+                    <th width="100">操作</th>
+                </tr>
+            </thead>
+            <tbody id="resultsBody"></tbody>
+        </table>
+    </div>
+
+    <script>
+        const audioInput = document.getElementById('audioInput');
+        const audioPlayer = document.getElementById('audioPlayer');
+        const submitBtn = document.getElementById('submitBtn');
+        const loading = document.getElementById('loading');
+        const errorMsg = document.getElementById('errorMsg');
+        const resultsSection = document.getElementById('resultsSection');
+        const resultsBody = document.getElementById('resultsBody');
+
+        let selectedFile = null;
+        let currentPlayHandler = null;
+
+        audioInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                selectedFile = e.target.files[0];
+                const objectUrl = URL.createObjectURL(selectedFile);
+                audioPlayer.src = objectUrl;
+                audioPlayer.style.display = 'block';
+                submitBtn.disabled = false;
+            } else {
+                selectedFile = null;
+                audioPlayer.style.display = 'none';
+                audioPlayer.src = '';
+                submitBtn.disabled = true;
+            }
+        });
+
+        submitBtn.addEventListener('click', async () => {
+            if (!selectedFile) return;
+
+            // Reset UI for new request
+            submitBtn.disabled = true;
+            loading.style.display = 'block';
+            errorMsg.style.display = 'none';
+            resultsSection.style.display = 'none';
+            resultsBody.innerHTML = '';
+            errorMsg.textContent = '';
+
+            const formData = new FormData();
+            formData.append('file', selectedFile);
+
+            try {
+                const response = await fetch('/.netlify/functions/whisper-transcribe', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const responseText = await response.text();
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP Error: ${response.status} ${response.statusText}\n\nResponse Body:\n${responseText}`);
+                }
+
+                const data = JSON.parse(responseText);
+                renderTable(data);
+            } catch (error) {
+                errorMsg.textContent = error.message;
+                errorMsg.style.display = 'block';
+            } finally {
+                loading.style.display = 'none';
+                submitBtn.disabled = false;
+            }
+        });
+
+        function renderTable(segments) {
+            resultsBody.innerHTML = '';
+            
+            if (!Array.isArray(segments) || segments.length === 0) {
+                const tr = document.createElement('tr');
+                const td = document.createElement('td');
+                td.colSpan = 5;
+                td.textContent = '未取得任何段落資料或格式不符。';
+                tr.appendChild(td);
+                resultsBody.appendChild(tr);
+                resultsSection.style.display = 'block';
+                return;
+            }
+
+            segments.forEach((seg, index) => {
+                const tr = document.createElement('tr');
+                
+                // 序號
+                const tdIndex = document.createElement('td');
+                tdIndex.textContent = index + 1;
+                
+                // 文字內容
+                const tdText = document.createElement('td');
+                tdText.textContent = seg.text;
+                
+                // 開始時間
+                const tdStart = document.createElement('td');
+                tdStart.textContent = seg.startTime != null ? Number(seg.startTime).toFixed(1) : '-';
+                
+                // 結束時間
+                const tdEnd = document.createElement('td');
+                tdEnd.textContent = seg.endTime != null ? Number(seg.endTime).toFixed(1) : '-';
+                
+                // 操作按鈕
+                const tdAction = document.createElement('td');
+                const playBtn = document.createElement('button');
+                playBtn.textContent = '▶ 播放這句';
+                playBtn.onclick = () => playSegment(seg.startTime, seg.endTime);
+                tdAction.appendChild(playBtn);
+                
+                tr.appendChild(tdIndex);
+                tr.appendChild(tdText);
+                tr.appendChild(tdStart);
+                tr.appendChild(tdEnd);
+                tr.appendChild(tdAction);
+                
+                resultsBody.appendChild(tr);
+            });
+            
+            resultsSection.style.display = 'block';
+        }
+
+        function playSegment(startTime, endTime) {
+            if (startTime == null || endTime == null) return;
+            
+            audioPlayer.currentTime = startTime;
+            audioPlayer.play();
+
+            // 移除前一次的監聽器，避免多個 setTimeout 或 handler 重疊
+            if (currentPlayHandler) {
+                audioPlayer.removeEventListener('timeupdate', currentPlayHandler);
+            }
+
+            currentPlayHandler = () => {
+                if (audioPlayer.currentTime >= endTime) {
+                    audioPlayer.pause();
+                    audioPlayer.removeEventListener('timeupdate', currentPlayHandler);
+                    currentPlayHandler = null;
+                }
+            };
+            
+            audioPlayer.addEventListener('timeupdate', currentPlayHandler);
+        }
+    </script>
+</body>
+</html>
