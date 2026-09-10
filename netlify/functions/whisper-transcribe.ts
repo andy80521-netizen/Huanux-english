@@ -76,7 +76,7 @@ function mergeSegmentsIntoSentences(segments: Segment[]): MergedSentence[] {
   // 只調整 startTime，endTime 維持不變。
   const resultsWithBuffer = results.map(r => ({
     ...r,
-    startTime: Math.max(0, r.startTime - 1)
+    startTime: Math.max(0, r.startTime - 0.5)
   }));
 
   return resultsWithBuffer;
