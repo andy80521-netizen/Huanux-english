@@ -13,22 +13,49 @@ interface MergedSentence {
   lowConfidence?: boolean;
 }
 
+function normalizeForComparison(text: string): string {
+  return text.trim().toLowerCase().replace(/[.!?]["”']?$/, "");
+}
+
+function removeHallucinatedRepeats(segments: Segment[]): (Segment & { flaggedAsRepeat?: boolean })[] {
+  const cleaned: (Segment & { flaggedAsRepeat?: boolean })[] = [];
+  for (const seg of segments) {
+    const normalized = normalizeForComparison(seg.text);
+    const prev = cleaned[cleaned.length - 1];
+    if (prev && normalizeForComparison(prev.text) === normalized) {
+      // 判定為幻覺重複，跳過這個 segment，但標記前一個已保留的 segment
+      prev.flaggedAsRepeat = true;
+      continue;
+    }
+    cleaned.push({ ...seg });
+  }
+  return cleaned;
+}
+
 function mergeSegmentsIntoSentences(segments: Segment[]): MergedSentence[] {
+  const cleanedSegments = removeHallucinatedRepeats(segments);
   const results: MergedSentence[] = [];
 
   let currentSentenceParts: string[] = [];
   let currentStartTime: number = 0;
   let currentEndTime: number = 0;
   let segmentCount = 0;
+  let currentSentenceHasRepeat = false;
 
   const COMMON_ABBREVIATIONS = ["Dr", "Mr", "Mrs", "Ms", "St", "Jr", "Sr", "Prof"];
+  const MAX_SECONDS_PER_WORD = 1.2;
+  const MIN_DURATION_FOR_RATE_CHECK = 3;
 
-  for (let i = 0; i < segments.length; i++) {
-    const seg = segments[i];
+  for (let i = 0; i < cleanedSegments.length; i++) {
+    const seg = cleanedSegments[i];
     const trimmedText = seg.text.trim();
 
     if (segmentCount === 0) {
       currentStartTime = seg.start;
+    }
+
+    if (seg.flaggedAsRepeat) {
+      currentSentenceHasRepeat = true;
     }
 
     currentSentenceParts.push(trimmedText);
@@ -47,10 +74,12 @@ function mergeSegmentsIntoSentences(segments: Segment[]): MergedSentence[] {
       results.push({
         text: combinedText,
         startTime: currentStartTime,
-        endTime: currentEndTime
+        endTime: currentEndTime,
+        ...(currentSentenceHasRepeat ? { lowConfidence: true } : {})
       });
       currentSentenceParts = [];
       segmentCount = 0;
+      currentSentenceHasRepeat = false;
     } else if (segmentCount >= 4) {
       results.push({
         text: combinedText,
@@ -60,6 +89,7 @@ function mergeSegmentsIntoSentences(segments: Segment[]): MergedSentence[] {
       });
       currentSentenceParts = [];
       segmentCount = 0;
+      currentSentenceHasRepeat = false;
     }
   }
 
@@ -67,16 +97,26 @@ function mergeSegmentsIntoSentences(segments: Segment[]): MergedSentence[] {
     results.push({
       text: currentSentenceParts.join(" "),
       startTime: currentStartTime,
-      endTime: currentEndTime
+      endTime: currentEndTime,
+      ...(currentSentenceHasRepeat ? { lowConfidence: true } : {})
     });
   }
 
-  // 安全緩衝：每句 startTime 統一往前推 0.5 秒，允許與上一句重疊，
+  const resultsWithRateCheck = results.map(r => {
+    const duration = r.endTime - r.startTime;
+    const wordCount = r.text.trim().split(/\s+/).filter(Boolean).length;
+    const secondsPerWord = wordCount > 0 ? duration / wordCount : 0;
+    const isAbnormalRate =
+      duration > MIN_DURATION_FOR_RATE_CHECK && secondsPerWord > MAX_SECONDS_PER_WORD;
+    return isAbnormalRate ? { ...r, lowConfidence: true } : r;
+  });
+
+  // 安全緩衝：每句 startTime 統一往前推 0.2 秒，允許與上一句重疊，
   // 寧可多聽到前一句尾音，也不要漏掉這句真正的第一個字。
   // 只調整 startTime，endTime 維持不變。
-  const resultsWithBuffer = results.map(r => ({
+  const resultsWithBuffer = resultsWithRateCheck.map(r => ({
     ...r,
-    startTime: Math.max(0, r.startTime - 0.5)
+    startTime: Math.max(0, r.startTime - 0.2)
   }));
 
   return resultsWithBuffer;
