@@ -82,63 +82,112 @@ function mergeSegmentsIntoSentences(segments: Segment[]): MergedSentence[] {
   return resultsWithBuffer;
 }
 
+async function writeToFirestore(
+  resultDocPath: string,
+  idToken: string,
+  fields: Record<string, any>,
+  fieldPaths: string[]
+): Promise<void> {
+  try {
+    const cleanPath = resultDocPath.replace(/^\/+/, "");
+    const documentResourcePath = cleanPath.startsWith("projects/")
+      ? cleanPath
+      : `projects/huanux-english/databases/(default)/documents/${cleanPath}`;
+
+    const updateMaskParams = fieldPaths
+      .map(path => `updateMask.fieldPaths=${encodeURIComponent(path)}`)
+      .join("&");
+
+    const firestoreUrl = `https://firestore.googleapis.com/v1/${documentResourcePath}?${updateMaskParams}`;
+
+    const response = await fetch(firestoreUrl, {
+      method: "PATCH",
+      headers: {
+        "Authorization": `Bearer ${idToken}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ fields })
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error(`Firestore REST API write failed (HTTP ${response.status} ${response.statusText}):`, errText);
+    }
+  } catch (err: any) {
+    console.error("Firestore REST API write exception:", err);
+  }
+}
+
+export const config = { background: true };
+
 export default async (req: Request, context: Context) => {
   if (req.method !== "POST") {
     return new Response("Method Not Allowed", { status: 405 });
   }
 
+  let body: any;
+  try {
+    body = await req.json();
+  } catch (e: any) {
+    console.error("Invalid JSON body received:", e?.message);
+    return new Response(null, { status: 200 });
+  }
+
+  const { audioUrl, idToken, resultDocPath } = body || {};
+
+  if (
+    !audioUrl || typeof audioUrl !== "string" || !audioUrl.startsWith("https://") ||
+    !idToken || typeof idToken !== "string" ||
+    !resultDocPath || typeof resultDocPath !== "string"
+  ) {
+    console.error("Missing or invalid parameters:", {
+      hasAudioUrl: typeof audioUrl === "string",
+      hasIdToken: typeof idToken === "string",
+      hasResultDocPath: typeof resultDocPath === "string"
+    });
+    return new Response(null, { status: 200 });
+  }
+
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
-    return new Response(JSON.stringify({ error: "Missing OPENAI_API_KEY" }), { 
-      status: 500,
-      headers: { "Content-Type": "application/json" }
-    });
+    const errMsg = "Server configuration error: Missing OPENAI_API_KEY";
+    console.error(errMsg);
+    await writeToFirestore(
+      resultDocPath,
+      idToken,
+      {
+        status: { stringValue: "error" },
+        errorMessage: { stringValue: errMsg },
+        completedAt: { stringValue: new Date().toISOString() }
+      },
+      ["status", "errorMessage", "completedAt"]
+    );
+    return new Response(null, { status: 200 });
   }
 
   try {
-    let body: any;
-    try {
-      body = await req.json();
-    } catch (e: any) {
-      return new Response(JSON.stringify({ 
-        error: "Invalid JSON body", 
-        message: e.message 
-      }), {
-        status: 400,
-        headers: { "Content-Type": "application/json" }
-      });
-    }
-
-    const { audioUrl } = body || {};
-    if (!audioUrl || typeof audioUrl !== "string" || !audioUrl.startsWith("https://")) {
-      return new Response(JSON.stringify({ 
-        error: "Missing or invalid 'audioUrl': must be a string starting with 'https://'" 
-      }), {
-        status: 400,
-        headers: { "Content-Type": "application/json" }
-      });
-    }
-
+    // 下載音檔
     let audioBuffer: ArrayBuffer;
     try {
       const audioResponse = await fetch(audioUrl);
       if (!audioResponse.ok) {
-        return new Response(JSON.stringify({ 
-          error: `Failed to download audio from audioUrl: HTTP ${audioResponse.status} ${audioResponse.statusText}` 
-        }), {
-          status: 400,
-          headers: { "Content-Type": "application/json" }
-        });
+        throw new Error(`HTTP ${audioResponse.status} ${audioResponse.statusText}`);
       }
       audioBuffer = await audioResponse.arrayBuffer();
     } catch (fetchErr: any) {
-      return new Response(JSON.stringify({ 
-        error: "Network error while downloading audio from audioUrl", 
-        message: fetchErr.message 
-      }), {
-        status: 500,
-        headers: { "Content-Type": "application/json" }
-      });
+      const errMsg = `下載音檔失敗: ${fetchErr.message}`;
+      console.error(errMsg, fetchErr);
+      await writeToFirestore(
+        resultDocPath,
+        idToken,
+        {
+          status: { stringValue: "error" },
+          errorMessage: { stringValue: errMsg },
+          completedAt: { stringValue: new Date().toISOString() }
+        },
+        ["status", "errorMessage", "completedAt"]
+      );
+      return new Response(null, { status: 200 });
     }
 
     // 準備傳送給 OpenAI 的 FormData
@@ -147,7 +196,6 @@ export default async (req: Request, context: Context) => {
     openAiFormData.append("file", audioBlob, "audio.mp3");
     openAiFormData.append("model", "whisper-1");
     openAiFormData.append("response_format", "verbose_json");
-    // 只要求 segment 顆粒度，不再要求 word（word 陣列與 segment 文字對不齊，已證實不可靠）
     openAiFormData.append("timestamp_granularities[]", "segment");
 
     // 呼叫 OpenAI Whisper API
@@ -155,8 +203,6 @@ export default async (req: Request, context: Context) => {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${apiKey}`
-        // 注意: 使用 fetch 傳送 FormData 時，絕對不能手動設定 Content-Type，
-        // 瀏覽器/Node 會自動補上帶有正確 boundary 的 multipart/form-data
       },
       body: openAiFormData
     });
@@ -164,26 +210,67 @@ export default async (req: Request, context: Context) => {
     const data = await openAiResponse.json();
 
     if (!openAiResponse.ok) {
-      console.error("OpenAI API Error:", data);
-      return new Response(JSON.stringify({ error: "OpenAI API request failed", details: data }), { 
-        status: openAiResponse.status,
-        headers: { "Content-Type": "application/json" }
-      });
+      const errMsg = `OpenAI API 錯誤 (${openAiResponse.status}): ${data?.error?.message || JSON.stringify(data)}`;
+      console.error(errMsg, data);
+      await writeToFirestore(
+        resultDocPath,
+        idToken,
+        {
+          status: { stringValue: "error" },
+          errorMessage: { stringValue: errMsg },
+          completedAt: { stringValue: new Date().toISOString() }
+        },
+        ["status", "errorMessage", "completedAt"]
+      );
+      return new Response(null, { status: 200 });
     }
 
     // 將 Whisper 回傳的 segments 轉換為需求格式
     const results = mergeSegmentsIntoSentences(data.segments || []);
 
-    return new Response(JSON.stringify(results), { 
-      status: 200, 
-      headers: { "Content-Type": "application/json" } 
+    // 轉換成 Firestore REST API arrayValue 格式
+    const firestoreResultsValues = results.map(item => {
+      const fields: Record<string, any> = {
+        text: { stringValue: item.text },
+        startTime: { doubleValue: Number(item.startTime) },
+        endTime: { doubleValue: Number(item.endTime) }
+      };
+      if (typeof item.lowConfidence === "boolean") {
+        fields.lowConfidence = { booleanValue: item.lowConfidence };
+      }
+      return {
+        mapValue: { fields }
+      };
     });
 
+    // 寫入 Firestore 結果
+    await writeToFirestore(
+      resultDocPath,
+      idToken,
+      {
+        status: { stringValue: "completed" },
+        results: {
+          arrayValue: firestoreResultsValues.length > 0 ? { values: firestoreResultsValues } : {}
+        },
+        completedAt: { stringValue: new Date().toISOString() }
+      },
+      ["status", "results", "completedAt"]
+    );
+
+    return new Response(null, { status: 200 });
   } catch (error: any) {
-    console.error("Transcription error:", error);
-    return new Response(JSON.stringify({ error: "Internal Server Error", message: error.message }), { 
-      status: 500,
-      headers: { "Content-Type": "application/json" }
-    });
+    const errMsg = `Transcription error: ${error.message}`;
+    console.error(errMsg, error);
+    await writeToFirestore(
+      resultDocPath,
+      idToken,
+      {
+        status: { stringValue: "error" },
+        errorMessage: { stringValue: errMsg },
+        completedAt: { stringValue: new Date().toISOString() }
+      },
+      ["status", "errorMessage", "completedAt"]
+    );
+    return new Response(null, { status: 200 });
   }
 };
