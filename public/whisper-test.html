@@ -136,7 +136,8 @@
                 // 第一階段：上傳至 Firebase Storage
                 loading.textContent = '1/2 正在上傳音檔至 Firebase Storage...';
                 const uploadStart = performance.now();
-                const storagePath = `artifacts/huan-power-english/test-uploads/${Date.now()}.mp3`;
+                const anonUid = auth.currentUser.uid;
+                const storagePath = `artifacts/huan-power-english/users/${anonUid}/test-uploads/${Date.now()}.mp3`;
                 const storageRef = ref(storage, storagePath);
 
                 await uploadBytes(storageRef, selectedFile, {
