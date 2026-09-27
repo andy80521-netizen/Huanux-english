@@ -3,5 +3,8 @@
   "description": "An advanced English learning application featuring Walkman mode, listening and speaking coaches, and a gamified badge system.",
   "requestFramePermissions": [
     "microphone"
+  ],
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
   ]
 }
