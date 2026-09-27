@@ -24,5 +24,8 @@
     "netlify-cli": "^27.5.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"
+  },
+  "overrides": {
+    "ansi-regex": "6.1.0"
   }
 }
