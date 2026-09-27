@@ -10,6 +10,7 @@
         th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
         th { background-color: #f4f4f4; }
         #loading { color: #0056b3; font-weight: bold; display: none; margin-top: 10px; }
+        #timeStatus { color: #2e7d32; font-weight: bold; display: none; margin-top: 10px; background: #e8f5e9; padding: 10px; border-radius: 4px; border: 1px solid #c8e6c9; }
         #errorMsg { color: #d32f2f; display: none; margin-top: 10px; white-space: pre-wrap; background: #ffebee; padding: 10px; border-radius: 4px; border: 1px solid #ffcdd2; }
         .hint { color: #1565c0; font-size: 0.95em; margin-bottom: 15px; background: #e3f2fd; padding: 10px 15px; border-radius: 4px; border: 1px solid #bbdefb; }
         button { cursor: pointer; padding: 5px 10px; }
@@ -31,6 +32,7 @@
         <audio id="audioPlayer" controls style="width: 100%; display: none;"></audio>
         <button id="submitBtn" disabled>開始測試</button>
         <div id="loading">處理中，請稍候... (這可能需要幾秒到幾十秒鐘)</div>
+        <div id="timeStatus"></div>
         <div id="errorMsg"></div>
     </div>
 
@@ -50,11 +52,36 @@
         </table>
     </div>
 
-    <script>
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
+
+        let firebaseConfig = {
+            apiKey: "AIzaSyDsBeLHqos1Rx5mi1ydCRErfV2oldfJ93E",
+            authDomain: "huanux-english.firebaseapp.com",
+            projectId: "huanux-english",
+            storageBucket: "huanux-english.firebasestorage.app",
+            messagingSenderId: "389474252282",
+            appId: "1:389474252282:web:6dbc2d1e350d043740e043",
+            measurementId: "G-GME38D35FS"
+        };
+
+        try {
+            const local = localStorage.getItem('firebase_config');
+            if (local) {
+                const parsed = JSON.parse(local);
+                if (parsed && parsed.apiKey) firebaseConfig = parsed;
+            }
+        } catch (e) {}
+
+        const app = initializeApp(firebaseConfig);
+        const storage = getStorage(app);
+
         const audioInput = document.getElementById('audioInput');
         const audioPlayer = document.getElementById('audioPlayer');
         const submitBtn = document.getElementById('submitBtn');
         const loading = document.getElementById('loading');
+        const timeStatus = document.getElementById('timeStatus');
         const errorMsg = document.getElementById('errorMsg');
         const resultsSection = document.getElementById('resultsSection');
         const resultsBody = document.getElementById('resultsBody');
@@ -83,29 +110,60 @@
             // Reset UI for new request
             submitBtn.disabled = true;
             loading.style.display = 'block';
+            timeStatus.style.display = 'none';
+            timeStatus.innerHTML = '';
             errorMsg.style.display = 'none';
             resultsSection.style.display = 'none';
             resultsBody.innerHTML = '';
             errorMsg.textContent = '';
 
-            const formData = new FormData();
-            formData.append('file', selectedFile);
+            let uploadSeconds = null;
 
             try {
+                // 第一階段：上傳至 Firebase Storage
+                loading.textContent = '1/2 正在上傳音檔至 Firebase Storage...';
+                const uploadStart = performance.now();
+                const storagePath = `artifacts/huan-power-english/test-uploads/${Date.now()}.mp3`;
+                const storageRef = ref(storage, storagePath);
+
+                await uploadBytes(storageRef, selectedFile, {
+                    contentType: selectedFile.type || 'audio/mpeg'
+                });
+
+                const audioUrl = await getDownloadURL(storageRef);
+                const uploadEnd = performance.now();
+                uploadSeconds = ((uploadEnd - uploadStart) / 1000).toFixed(2);
+
+                // 第二階段：呼叫 Whisper Function
+                loading.textContent = '2/2 音檔已上傳，正在呼叫 Whisper Function 處理中...';
+                const whisperStart = performance.now();
+
                 const response = await fetch('/.netlify/functions/whisper-transcribe', {
                     method: 'POST',
-                    body: formData
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ audioUrl })
                 });
 
                 const responseText = await response.text();
-                
+                const whisperEnd = performance.now();
+                const whisperSeconds = ((whisperEnd - whisperStart) / 1000).toFixed(2);
+
                 if (!response.ok) {
                     throw new Error(`HTTP Error: ${response.status} ${response.statusText}\n\nResponse Body:\n${responseText}`);
                 }
 
+                timeStatus.innerHTML = `上傳到 Storage：${uploadSeconds} 秒<br>Whisper Function 處理：${whisperSeconds} 秒`;
+                timeStatus.style.display = 'block';
+
                 const data = JSON.parse(responseText);
                 renderTable(data);
             } catch (error) {
+                if (uploadSeconds !== null) {
+                    timeStatus.innerHTML = `上傳到 Storage：${uploadSeconds} 秒<br>Whisper Function 處理：未完成 (發生錯誤)`;
+                    timeStatus.style.display = 'block';
+                }
                 errorMsg.textContent = error.message;
                 errorMsg.style.display = 'block';
             } finally {
