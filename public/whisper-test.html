@@ -54,6 +54,7 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
 
         let firebaseConfig = {
@@ -75,6 +76,7 @@
         } catch (e) {}
 
         const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
         const storage = getStorage(app);
 
         const audioInput = document.getElementById('audioInput');
@@ -120,6 +122,17 @@
             let uploadSeconds = null;
 
             try {
+                // 匿名登入檢查
+                if (!auth.currentUser) {
+                    loading.textContent = '正在進行匿名登入...';
+                    try {
+                        await signInAnonymously(auth);
+                    } catch (authError) {
+                        console.error('Anonymous sign-in failed:', authError);
+                        throw new Error(`匿名登入失敗，請確認 Firebase Console 的 Authentication 設定裡有沒有啟用 Anonymous 這個登入方式。\n\n詳細錯誤訊息：${authError.message}`);
+                    }
+                }
+
                 // 第一階段：上傳至 Firebase Storage
                 loading.textContent = '1/2 正在上傳音檔至 Firebase Storage...';
                 const uploadStart = performance.now();
