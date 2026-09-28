@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { FileText, Headphones, AlertCircle, Loader2, Upload, CheckCircle, Volume2, Sparkles, FolderOpen } from 'lucide-react';
-import { splitTextToSentences, generateSpeechForSentences, transcribeAudioWithTimestamps, extractPatternsFromText } from '../services/gemini';
+import { splitTextToSentences, generateSpeechForSentences, extractPatternsFromText } from '../services/gemini';
 import { extractTextFromPdf } from '../utils/pdfExtract';
 import { auth, db, storage, appId } from '../firebase';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -19,6 +19,8 @@ export type PendingMaterial = {
     audioBlob?: Blob;
     fileName: string;
     sentences: ReviewSentence[];
+    materialId?: string;
+    audioUrl?: string;
 };
 
 
@@ -26,7 +28,7 @@ export type PendingMaterial = {
 export default function MaterialImportMode() {
     const [currentView, setCurrentView] = useState<'list' | 'import' | 'detail'>('list');
     const [selectedMaterial, setSelectedMaterial] = useState<string | null>(null);
-    const [loadingState, setLoadingState] = useState<'idle' | 'processing' | 'uploading' | 'analyzing' | 'generating' | 'timestamping'>('idle');
+    const [loadingState, setLoadingState] = useState<'idle' | 'processing' | 'uploading' | 'analyzing' | 'generating' | 'timestamping' | 'uploadingAudio' | 'transcribing'>('idle');
     const [timestampWarning, setTimestampWarning] = useState(false);
     const [lowConfidenceTimestamps, setLowConfidenceTimestamps] = useState(false);
     const [pendingMaterial, setPendingMaterial] = useState<PendingMaterial | null>(null);
@@ -40,6 +42,29 @@ export default function MaterialImportMode() {
     const [courses, setCourses] = useState<string[]>([]);
     const [vocabData, setVocabData] = useState<VocabItem[]>([]);
     const [selectedCourses, setSelectedCourses] = useState<string[]>([]);
+    const [whisperError, setWhisperError] = useState<string | null>(null);
+
+    const whisperRunIdRef = useRef<number>(0);
+    const whisperUnsubscribeRef = useRef<(() => void) | null>(null);
+    const whisperTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const activeJobRef = useRef<{ materialId: string; audioUrl: string; file: File } | null>(null);
+
+    const clearWhisperListener = () => {
+        if (whisperUnsubscribeRef.current) {
+            whisperUnsubscribeRef.current();
+            whisperUnsubscribeRef.current = null;
+        }
+        if (whisperTimeoutRef.current) {
+            clearTimeout(whisperTimeoutRef.current);
+            whisperTimeoutRef.current = null;
+        }
+    };
+
+    useEffect(() => {
+        return () => {
+            clearWhisperListener();
+        };
+    }, []);
 
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -228,46 +253,175 @@ export default function MaterialImportMode() {
     
     
     
-    const handleAudioUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-        
+    const startWhisperTranscription = async (materialId: string, audioUrl: string, file: File) => {
+        const runId = ++whisperRunIdRef.current;
         const uid = auth.currentUser?.uid;
         if (!uid) {
             setError("請先登入");
             return;
         }
 
-        setLoadingState('transcribing'); // Changed from uploading
+        clearWhisperListener();
+        setLoadingState('transcribing');
+        setWhisperError(null);
+        activeJobRef.current = { materialId, audioUrl, file };
+
+        try {
+            const taskDocPath = `artifacts/${appId}/users/${uid}/transcriptionJobs/${materialId}`;
+            const taskDocRef = doc(db, taskDocPath);
+
+            await setDoc(taskDocRef, {
+                status: 'processing',
+                createdAt: Date.now()
+            });
+            if (runId !== whisperRunIdRef.current) return;
+
+            const idToken = await auth.currentUser.getIdToken();
+            if (runId !== whisperRunIdRef.current) return;
+
+            try {
+                const response = await fetch('/.netlify/functions/whisper-transcribe', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        audioUrl,
+                        idToken,
+                        resultDocPath: taskDocPath
+                    })
+                });
+
+                if (runId !== whisperRunIdRef.current) return;
+
+                if (!response.ok) {
+                    console.warn(`whisper-transcribe 回傳非 2xx: ${response.status}`);
+                }
+            } catch (fetchErr: any) {
+                if (runId !== whisperRunIdRef.current) return;
+                clearWhisperListener();
+                setLoadingState('idle');
+                setWhisperError(`呼叫轉錄服務失敗: ${fetchErr.message || fetchErr}`);
+                return;
+            }
+
+            if (runId !== whisperRunIdRef.current) return;
+
+            whisperTimeoutRef.current = setTimeout(() => {
+                if (runId !== whisperRunIdRef.current) return;
+                clearWhisperListener();
+                setLoadingState('idle');
+                setWhisperError('轉錄處理逾時（已等待 5 分鐘），請檢查 Netlify Function Log 查看執行狀況。');
+            }, 5 * 60 * 1000);
+
+            const unsubscribe = onSnapshot(taskDocRef, (snapshot) => {
+                if (runId !== whisperRunIdRef.current) return;
+                if (!snapshot.exists()) return;
+                const data = snapshot.data();
+
+                if (data.status === 'completed') {
+                    clearWhisperListener();
+                    setLoadingState('idle');
+                    setWhisperError(null);
+
+                    const rawResults = Array.isArray(data.results) ? data.results : [];
+                    const pendingSentences: ReviewSentence[] = rawResults.map((r: any) => ({
+                        text: r.text || '',
+                        translation: '',
+                        startTime: Number(r.startTime) || 0,
+                        endTime: Number(r.endTime) || 0,
+                        lowConfidence: !!r.lowConfidence
+                    }));
+
+                    setPendingMaterial({
+                        source: 'upload',
+                        audioFile: file,
+                        fileName: file.name,
+                        sentences: pendingSentences,
+                        materialId,
+                        audioUrl
+                    });
+                } else if (data.status === 'error') {
+                    clearWhisperListener();
+                    setLoadingState('idle');
+                    setWhisperError(data.errorMessage || '轉錄處理發生錯誤。');
+                }
+            }, (snapshotErr) => {
+                if (runId !== whisperRunIdRef.current) return;
+                clearWhisperListener();
+                setLoadingState('idle');
+                setWhisperError(`監聽任務狀態失敗: ${snapshotErr.message}`);
+            });
+
+            whisperUnsubscribeRef.current = unsubscribe;
+        } catch (err: any) {
+            if (runId !== whisperRunIdRef.current) return;
+            clearWhisperListener();
+            setLoadingState('idle');
+            setWhisperError(err.message || '啟動轉錄流程失敗');
+        }
+    };
+
+    const handleRetryWhisper = () => {
+        if (!activeJobRef.current) return;
+        const { materialId, audioUrl, file } = activeJobRef.current;
+        startWhisperTranscription(materialId, audioUrl, file);
+    };
+
+    const handleCancelWhisper = () => {
+        whisperRunIdRef.current++;
+        clearWhisperListener();
+        setLoadingState('idle');
+        setWhisperError(null);
+        activeJobRef.current = null;
+        if (audioInputRef.current) audioInputRef.current.value = '';
+    };
+
+    const handleAudioUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        if (file.size > 24 * 1024 * 1024) {
+            setError("檔案超過 24MB，請壓縮或改用較短的音檔");
+            if (audioInputRef.current) audioInputRef.current.value = '';
+            return;
+        }
+
+        const uid = auth.currentUser?.uid;
+        if (!uid) {
+            setError("請先登入");
+            if (audioInputRef.current) audioInputRef.current.value = '';
+            return;
+        }
+
+        const runId = ++whisperRunIdRef.current;
+
+        clearWhisperListener();
+        setLoadingState('uploadingAudio');
         setError(null);
+        setWhisperError(null);
         setResults([]);
         setSaveSuccess(false);
         setTimestampWarning(false);
         setLowConfidenceTimestamps(false);
-        
-        try {
-            const result = await transcribeAudioWithTimestamps(file);
-            
-            const pendingSentences = result.map(r => ({
-                text: r.text,
-                translation: r.translation,
-                startTime: r.startTime,
-                endTime: r.endTime,
-                needsReview: r.needsReview
-            }));
 
-            setPendingMaterial({
-                source: 'upload',
-                audioFile: file,
-                fileName: file.name,
-                sentences: pendingSentences
-            });
-            
+        try {
+            const materialId = doc(collection(db, 'artifacts', appId, 'users', uid, 'materials')).id;
+            const storageRef = ref(storage, `artifacts/${appId}/users/${uid}/materials/${materialId}.mp3`);
+
+            await uploadBytes(storageRef, file, { contentType: 'audio/mpeg' });
+            if (runId !== whisperRunIdRef.current) return;
+
+            const audioUrl = await getDownloadURL(storageRef);
+            if (runId !== whisperRunIdRef.current) return;
+
+            await startWhisperTranscription(materialId, audioUrl, file);
         } catch (e: any) {
+            if (runId !== whisperRunIdRef.current) return;
             console.error("處理音檔失敗:", e);
+            clearWhisperListener();
             handleError(e);
         } finally {
-            setLoadingState('idle');
             if (audioInputRef.current) audioInputRef.current.value = '';
         }
     };
@@ -425,6 +579,29 @@ export default function MaterialImportMode() {
                 </div>
             )}
 
+            {whisperError && (
+                <div className="mb-6 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm p-4 rounded-xl flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-sm border border-red-100 dark:border-red-800 animate-in slide-in-from-top-2">
+                    <div className="flex items-center gap-2">
+                        <AlertCircle size={18} className="shrink-0" />
+                        <span className="font-bold leading-relaxed">{whisperError}</span>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                        <button
+                            onClick={handleRetryWhisper}
+                            className="px-3 py-1.5 bg-red-600 text-white font-bold rounded-lg hover:bg-red-700 transition-colors text-xs"
+                        >
+                            重試
+                        </button>
+                        <button
+                            onClick={handleCancelWhisper}
+                            className="px-3 py-1.5 bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold rounded-lg hover:bg-slate-300 dark:hover:bg-slate-700 transition-colors text-xs"
+                        >
+                            取消
+                        </button>
+                    </div>
+                </div>
+            )}
+
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                 {/* 路徑一：音訊上傳 */}
                 <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-800">
@@ -437,7 +614,7 @@ export default function MaterialImportMode() {
                     
                     <input 
                         type="file" 
-                        accept="audio/mp3,audio/mpeg,audio/wav,audio/m4a" 
+                        accept=".mp3,audio/mpeg" 
                         className="hidden" 
                         ref={audioInputRef}
                         onChange={handleAudioUpload}
@@ -448,7 +625,7 @@ export default function MaterialImportMode() {
                         className="w-full py-4 rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:border-indigo-500 hover:text-indigo-600 dark:hover:border-indigo-400 dark:hover:text-indigo-400 transition-colors flex items-center justify-center gap-2 font-bold disabled:opacity-50"
                     >
                         <Upload size={18} />
-                        選擇音檔 (.mp3, .m4a)
+                        選擇音檔 (.mp3)
                     </button>
                     
 
@@ -554,12 +731,22 @@ export default function MaterialImportMode() {
                 <div className="flex flex-col items-center justify-center py-12 text-slate-400">
                     <Loader2 className="animate-spin text-indigo-600 mb-4" size={40} />
                     <p className="font-bold">
+                        {loadingState === 'uploadingAudio' && '正在上傳音檔至 Storage...'}
+                        {loadingState === 'transcribing' && 'Whisper 正在進行語音轉錄與斷句...'}
                         {loadingState === 'uploading' && '正在上傳音檔至 Gemini...'}
                         {loadingState === 'analyzing' && 'Gemini AI 正在分析音檔...'}
                         {loadingState === 'processing' && 'Gemini AI 正在處理中...'}
                         {loadingState === 'generating' && `正在生成語音 (${ttsProgress?.current || 0}/${ttsProgress?.total || 0})...`}
                         {loadingState === 'timestamping' && 'Gemini AI 正在抓取時間軸...'}
                     </p>
+                    {(loadingState === 'uploadingAudio' || loadingState === 'transcribing') && (
+                        <button
+                            onClick={handleCancelWhisper}
+                            className="mt-4 px-4 py-2 bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold rounded-xl hover:bg-slate-300 dark:hover:bg-slate-700 transition-colors text-sm"
+                        >
+                            取消匯入
+                        </button>
+                    )}
                 </div>
             )}
 
