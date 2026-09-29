@@ -118,12 +118,15 @@ function mergeSegmentsIntoSentences(segments: Segment[]): MergedSentence[] {
     });
   }
 
-  // 安全緩衝：每句 startTime 統一往前推 0.2 秒，允許與上一句重疊，
+  // 安全緩衝：每句 startTime 統一往前推 0.1 秒，允許與上一句重疊，
   // 寧可多聽到前一句尾音，也不要漏掉這句真正的第一個字。
   // 只調整 startTime，endTime 維持不變。
+  // 最後把 startTime / endTime 四捨五入到小數點後兩位，去除浮點數誤差。
+  const roundTo2 = (n: number) => Math.round(n * 100) / 100;
   const resultsWithBuffer = mergedResults.map(r => ({
     ...r,
-    startTime: Math.max(0, r.startTime - 0.2)
+    startTime: roundTo2(Math.max(0, r.startTime - 0.1)),
+    endTime: roundTo2(r.endTime)
   }));
 
   return resultsWithBuffer;
@@ -145,7 +148,8 @@ async function writeToFirestore(
       .map(path => `updateMask.fieldPaths=${encodeURIComponent(path)}`)
       .join("&");
 
-    const firestoreUrl = `https://firestore.googleapis.com/v1/${documentResourcePath}?${updateMaskParams}`;
+    // currentDocument.exists=true：任務文件已被使用者取消刪除時，寫入會失敗，不會把文件重新建立回來
+    const firestoreUrl = `https://firestore.googleapis.com/v1/${documentResourcePath}?${updateMaskParams}&currentDocument.exists=true`;
 
     const response = await fetch(firestoreUrl, {
       method: "PATCH",

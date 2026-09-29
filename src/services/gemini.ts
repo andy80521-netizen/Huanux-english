@@ -693,3 +693,50 @@ export async function transcribeAudioWithTimestamps(
 
     return results;
 }
+
+export async function translateSentences(
+  sentences: string[],
+  onProgress?: (done: number, total: number) => void
+): Promise<string[]> {
+    if (sentences.length === 0) {
+        return [];
+    }
+
+    const BATCH_SIZE = 30;
+    const allTranslations: string[] = [];
+    const total = sentences.length;
+
+    const batches: string[][] = [];
+    for (let i = 0; i < sentences.length; i += BATCH_SIZE) {
+        batches.push(sentences.slice(i, i + BATCH_SIZE));
+    }
+
+    for (let b = 0; b < batches.length; b++) {
+        const batch = batches[b];
+        const response = await fetch('/.netlify/functions/translate-sentences', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ sentences: batch })
+        });
+
+        if (!response.ok) {
+            const errData = await response.json().catch(() => ({}));
+            throw new Error(errData.error || `請求失敗 (HTTP ${response.status})`);
+        }
+
+        const data = await response.json();
+        const batchTranslations = data?.translations;
+
+        if (!Array.isArray(batchTranslations) || batchTranslations.length !== batch.length) {
+            throw new Error(`翻譯失敗：第 ${b + 1} 批句數不符（預期 ${batch.length} 句，收到 ${batchTranslations?.length || 0} 句）`);
+        }
+
+        allTranslations.push(...batchTranslations);
+        onProgress?.(allTranslations.length, total);
+    }
+
+    return allTranslations;
+}
+

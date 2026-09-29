@@ -1,12 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { FileText, Headphones, AlertCircle, Loader2, Upload, CheckCircle, Volume2, Sparkles, FolderOpen } from 'lucide-react';
-import { splitTextToSentences, generateSpeechForSentences, extractPatternsFromText } from '../services/gemini';
+import { splitTextToSentences, generateSpeechForSentences, extractPatternsFromText, translateSentences } from '../services/gemini';
 import { extractTextFromPdf } from '../utils/pdfExtract';
 import { auth, db, storage, appId } from '../firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { INITIAL_COURSES, INITIAL_DATA, VocabItem } from '../constants';
-import { doc, setDoc, collection, onSnapshot, query, orderBy, getDoc } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { doc, setDoc, deleteDoc, collection, onSnapshot, query, orderBy, getDoc } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { Material } from '../types';
 import MaterialReviewPanel, { ReviewSentence } from './MaterialReviewPanel';
 import MaterialListView from './MaterialListView';
@@ -28,7 +28,7 @@ export type PendingMaterial = {
 export default function MaterialImportMode() {
     const [currentView, setCurrentView] = useState<'list' | 'import' | 'detail'>('list');
     const [selectedMaterial, setSelectedMaterial] = useState<string | null>(null);
-    const [loadingState, setLoadingState] = useState<'idle' | 'processing' | 'uploading' | 'analyzing' | 'generating' | 'timestamping' | 'uploadingAudio' | 'transcribing'>('idle');
+    const [loadingState, setLoadingState] = useState<'idle' | 'processing' | 'uploading' | 'analyzing' | 'generating' | 'timestamping' | 'uploadingAudio' | 'transcribing' | 'translating'>('idle');
     const [timestampWarning, setTimestampWarning] = useState(false);
     const [lowConfidenceTimestamps, setLowConfidenceTimestamps] = useState(false);
     const [pendingMaterial, setPendingMaterial] = useState<PendingMaterial | null>(null);
@@ -43,7 +43,10 @@ export default function MaterialImportMode() {
     const [vocabData, setVocabData] = useState<VocabItem[]>([]);
     const [selectedCourses, setSelectedCourses] = useState<string[]>([]);
     const [whisperError, setWhisperError] = useState<string | null>(null);
+    const [translateProgress, setTranslateProgress] = useState<{ done: number; total: number } | null>(null);
+    const [translationError, setTranslationError] = useState<string | null>(null);
 
+    const isSavingRef = useRef<boolean>(false);
     const whisperRunIdRef = useRef<number>(0);
     const whisperUnsubscribeRef = useRef<(() => void) | null>(null);
     const whisperTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -253,6 +256,25 @@ export default function MaterialImportMode() {
     
     
     
+    const cleanupPathOneUpload = async (materialId: string) => {
+        const uid = auth.currentUser?.uid;
+        if (!uid || !materialId) return;
+
+        try {
+            const storageRef = ref(storage, `artifacts/${appId}/users/${uid}/materials/${materialId}.mp3`);
+            await deleteObject(storageRef);
+        } catch (e) {
+            console.warn('刪除 Storage 暫存音檔失敗或檔案不存在:', e);
+        }
+
+        try {
+            const taskDocRef = doc(db, 'artifacts', appId, 'users', uid, 'transcriptionJobs', materialId);
+            await deleteDoc(taskDocRef);
+        } catch (e) {
+            console.warn('刪除任務文件失敗或文件不存在:', e);
+        }
+    };
+
     const startWhisperTranscription = async (materialId: string, audioUrl: string, file: File) => {
         const runId = ++whisperRunIdRef.current;
         const uid = auth.currentUser?.uid;
@@ -274,7 +296,10 @@ export default function MaterialImportMode() {
                 status: 'processing',
                 createdAt: Date.now()
             });
-            if (runId !== whisperRunIdRef.current) return;
+            if (runId !== whisperRunIdRef.current) {
+                try { await deleteDoc(taskDocRef); } catch (e) { console.warn('刪除任務文件失敗:', e); }
+                return;
+            }
 
             const idToken = await auth.currentUser.getIdToken();
             if (runId !== whisperRunIdRef.current) return;
@@ -321,6 +346,7 @@ export default function MaterialImportMode() {
 
                 if (data.status === 'completed') {
                     clearWhisperListener();
+                    activeJobRef.current = null;
                     setLoadingState('idle');
                     setWhisperError(null);
 
@@ -373,6 +399,9 @@ export default function MaterialImportMode() {
         clearWhisperListener();
         setLoadingState('idle');
         setWhisperError(null);
+        if (activeJobRef.current?.materialId) {
+            cleanupPathOneUpload(activeJobRef.current.materialId);
+        }
         activeJobRef.current = null;
         if (audioInputRef.current) audioInputRef.current.value = '';
     };
@@ -410,10 +439,16 @@ export default function MaterialImportMode() {
             const storageRef = ref(storage, `artifacts/${appId}/users/${uid}/materials/${materialId}.mp3`);
 
             await uploadBytes(storageRef, file, { contentType: 'audio/mpeg' });
-            if (runId !== whisperRunIdRef.current) return;
+            if (runId !== whisperRunIdRef.current) {
+                cleanupPathOneUpload(materialId);
+                return;
+            }
 
             const audioUrl = await getDownloadURL(storageRef);
-            if (runId !== whisperRunIdRef.current) return;
+            if (runId !== whisperRunIdRef.current) {
+                cleanupPathOneUpload(materialId);
+                return;
+            }
 
             await startWhisperTranscription(materialId, audioUrl, file);
         } catch (e: any) {
@@ -471,6 +506,72 @@ export default function MaterialImportMode() {
             return;
         }
 
+        if (pendingMaterial.source === 'upload' && pendingMaterial.materialId && pendingMaterial.audioUrl) {
+            if (isSavingRef.current) return;
+            isSavingRef.current = true;
+            setTranslationError(null);
+            setLoadingState('translating');
+
+            try {
+                let translations: string[];
+                try {
+                    translations = await translateSentences(
+                        finalSentences.map(s => s.text),
+                        (done, total) => setTranslateProgress({ done, total })
+                    );
+                } catch (transErr: any) {
+                    setTranslationError(`翻譯失敗：${transErr.message || transErr}。請再按一次「確認儲存」重試，校對內容已保留。`);
+                    return;
+                }
+
+                try {
+                    const materialRef = doc(db, 'artifacts', appId, 'users', uid, 'materials', pendingMaterial.materialId);
+                    const materialDoc: Material = {
+                        id: pendingMaterial.materialId,
+                        title: pendingMaterial.fileName,
+                        course: "未分類",
+                        sourceText: finalSentences.map(r => r.text).join(' '),
+                        audioUrl: pendingMaterial.audioUrl,
+                        audioSource: 'upload',
+                        sentences: finalSentences.map((r, i) => ({
+                            id: `s_${i}`,
+                            text: r.text,
+                            translation: translations[i] || '',
+                            startTime: r.startTime,
+                            endTime: r.endTime,
+                            lowConfidence: r.lowConfidence,
+                            needsReview: r.needsReview,
+                            mastery: 0
+                        })),
+                        createdAt: Date.now(),
+                        graduated: false
+                    };
+
+                    await setDoc(materialRef, materialDoc);
+
+                    try {
+                        const taskDocRef = doc(db, 'artifacts', appId, 'users', uid, 'transcriptionJobs', pendingMaterial.materialId);
+                        await deleteDoc(taskDocRef);
+                    } catch (delErr) {
+                        console.warn('刪除轉錄任務文件失敗:', delErr);
+                    }
+
+                    setTranslationError(null);
+                    setSaveSuccess(true);
+                    setPendingMaterial(null);
+                    setResults([]);
+                    setCurrentView('list');
+                } catch (saveErr: any) {
+                    setTranslationError(`儲存失敗：${saveErr.message || saveErr}。請再按一次「確認儲存」重試，校對內容已保留。`);
+                }
+            } finally {
+                isSavingRef.current = false;
+                setTranslateProgress(null);
+                setLoadingState('idle');
+            }
+            return;
+        }
+
         setLoadingState('processing');
         setError(null);
 
@@ -522,7 +623,17 @@ export default function MaterialImportMode() {
         }
     };
 
-    const handleCancelReview = () => {
+    const handleCancelReview = async () => {
+        if (isSavingRef.current) {
+            setTranslationError('翻譯中，請稍候完成後再操作');
+            return;
+        }
+
+        if (pendingMaterial?.source === 'upload' && pendingMaterial.materialId) {
+            await cleanupPathOneUpload(pendingMaterial.materialId);
+        }
+
+        setTranslationError(null);
         setPendingMaterial(null);
         setResults([]);
         setSaveSuccess(false);
@@ -564,8 +675,16 @@ export default function MaterialImportMode() {
         <div className="flex flex-col h-full bg-slate-50 dark:bg-slate-950 p-6 overflow-y-auto pb-20">
             <div className="flex items-center gap-4 mb-6">
                 <button 
-                    onClick={() => setCurrentView('list')}
-                    className="p-2 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 rounded-full shadow-sm hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                    onClick={async () => {
+                        if (loadingState === 'uploadingAudio' || loadingState === 'transcribing' || activeJobRef.current) {
+                            handleCancelWhisper();
+                        } else if (pendingMaterial?.source === 'upload') {
+                            await handleCancelReview();
+                        }
+                        setCurrentView('list');
+                    }}
+                    disabled={loadingState === 'translating'}
+                    className="p-2 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 rounded-full shadow-sm hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors disabled:opacity-50"
                 >
                     <ChevronLeft size={24} />
                 </button>
@@ -602,7 +721,7 @@ export default function MaterialImportMode() {
                 </div>
             )}
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div className="grid grid-cols-1 gap-6 mb-8">
                 {/* 路徑一：音訊上傳 */}
                 <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-800">
                     <div className="flex items-center gap-3 mb-4">
@@ -733,6 +852,7 @@ export default function MaterialImportMode() {
                     <p className="font-bold">
                         {loadingState === 'uploadingAudio' && '正在上傳音檔至 Storage...'}
                         {loadingState === 'transcribing' && 'Whisper 正在進行語音轉錄與斷句...'}
+                        {loadingState === 'translating' && `正在翻譯（已完成 ${translateProgress?.done || 0} / 共 ${translateProgress?.total || 0} 句）...`}
                         {loadingState === 'uploading' && '正在上傳音檔至 Gemini...'}
                         {loadingState === 'analyzing' && 'Gemini AI 正在分析音檔...'}
                         {loadingState === 'processing' && 'Gemini AI 正在處理中...'}
@@ -768,6 +888,13 @@ export default function MaterialImportMode() {
                 </div>
             )}
 
+            {translationError && (
+                <div className="mb-6 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm px-4 py-3 rounded-xl flex items-center gap-2 shadow-sm border border-red-100 dark:border-red-800 animate-in slide-in-from-top-2">
+                    <AlertCircle size={16} className="shrink-0" />
+                    <span className="font-bold leading-relaxed">{translationError}</span>
+                </div>
+            )}
+
             {pendingMaterial && !saveSuccess && (
                 <MaterialReviewPanel
                     source={pendingMaterial.source}
@@ -775,8 +902,7 @@ export default function MaterialImportMode() {
                     audioBlob={pendingMaterial.audioBlob}
                     fileName={pendingMaterial.fileName}
                     initialSentences={pendingMaterial.sentences}
-                    
-                    
+                    isSaving={loadingState === 'translating'}
                     onSave={confirmAndSaveMaterial}
                     onCancel={handleCancelReview}
                 />
