@@ -1,1 +1,0 @@
-// Moved to src/components/PersonalMode.tsx

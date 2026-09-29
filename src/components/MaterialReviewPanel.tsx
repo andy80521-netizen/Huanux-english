@@ -81,6 +81,14 @@ export default function MaterialReviewPanel({
     };
 
     const updateSentence = (id: string, field: keyof ReviewSentence, value: any) => {
+        if (field === 'startTime' || field === 'endTime') {
+            setTimeAdjustWarnings(prev => {
+                if (!prev[id]) return prev;
+                const updated = { ...prev };
+                delete updated[id];
+                return updated;
+            });
+        }
         setSentences(prev => prev.map(s => s.internalId === id ? { ...s, [field]: value } : s));
     };
 
@@ -105,7 +113,10 @@ export default function MaterialReviewPanel({
         const newStart = field === 'startTime' ? newVal : sentence.startTime;
         const newEnd = field === 'endTime' ? newVal : sentence.endTime;
 
-        if (newStart >= newEnd) {
+        const oldGap = sentence.startTime - sentence.endTime;
+        const newGap = newStart - newEnd;
+        // 調整後仍不合理，且沒有比原本改善時才擋下（原本合理、調整後變不合理，也屬於這種情況）
+        if (newStart >= newEnd && newGap >= oldGap) {
             setTimeAdjustWarnings(prev => ({
                 ...prev,
                 [id]: '此調整會使開始時間大於或等於結束時間，已取消'
