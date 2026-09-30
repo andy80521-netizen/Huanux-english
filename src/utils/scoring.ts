@@ -81,3 +81,37 @@ export const calculateFinalScores = (userText: string, targetText: string, durat
     const totalScore = Math.round((pronunciationScore + fluencyScore + stressScore) / 3);
     return { pronunciation: pronunciationScore, fluency: fluencyScore, stress: stressScore, total: totalScore };
 };
+
+export const calculateShadowingScores = (userText: string, targetText: string, userSpeechSec: number, originalSec: number) => {
+    if (!userText || userText.trim().length === 0) {
+        return { pronunciation: 0, fluency: 0, stress: 0, total: 0 };
+    }
+
+    const rawSimilarity = calculateSimilarity(userText, targetText);
+
+    let pronunciationScore = rawSimilarity;
+    if (rawSimilarity > 0) {
+        pronunciationScore = Math.min(100, Math.round(rawSimilarity + (100 - rawSimilarity) * 0.5));
+    }
+
+    const targetWordCount = targetText.split(/\s+/).length;
+    const userWordCount = userText.split(/\s+/).length;
+
+    let fluencyScore = 100;
+    if (targetWordCount <= 1 || originalSec <= 0) {
+        fluencyScore = pronunciationScore > 60 ? 100 : 50;
+    } else {
+        // 跟讀流暢度：使用者實際講話時間 ÷ 原音長度，90%～130% 為滿分
+        const ratio = userSpeechSec / originalSec;
+        if (ratio < 0.9) fluencyScore = 100 - (0.9 - ratio) * 200;
+        else if (ratio > 1.3) fluencyScore = 100 - (ratio - 1.3) * 150;
+        fluencyScore = Math.round(fluencyScore * Math.min(1, userWordCount / targetWordCount));
+    }
+    fluencyScore = Math.max(0, Math.min(100, fluencyScore));
+
+    let stressScore = Math.round(pronunciationScore * 0.7 + fluencyScore * 0.3);
+    if (pronunciationScore > 80) stressScore = Math.min(100, stressScore + 5);
+
+    const totalScore = Math.round((pronunciationScore + fluencyScore + stressScore) / 3);
+    return { pronunciation: pronunciationScore, fluency: fluencyScore, stress: stressScore, total: totalScore };
+};

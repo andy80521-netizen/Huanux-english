@@ -3,10 +3,25 @@ import LanguageModelListView from './LanguageModelListView';
 import LanguageModelDetailView from './LanguageModelDetailView';
 import TodayReviewView from './TodayReviewView';
 
+export interface PatternFilterState {
+    search: string;
+    category: 'all' | 'structural' | 'phrase' | 'collocation';
+    primaryCategory: string;
+    situationTag: string | null;
+}
+
+const defaultFilters: PatternFilterState = {
+    search: '',
+    category: 'all',
+    primaryCategory: 'all',
+    situationTag: null
+};
+
 export default function LanguageModelMode() {
     const [currentView, setCurrentView] = useState<'list' | 'detail'>('list');
     const [activeTab, setActiveTab] = useState<'review' | 'library'>('review');
     const [selectedPatternId, setSelectedPatternId] = useState<string | null>(null);
+    const [filters, setFilters] = useState<PatternFilterState>(defaultFilters);
 
     if (currentView === 'detail' && selectedPatternId) {
         return (
@@ -52,7 +67,9 @@ export default function LanguageModelMode() {
                         onPatternClick={(id) => {
                             setSelectedPatternId(id);
                             setCurrentView('detail');
-                        }} 
+                        }}
+                        filters={filters}
+                        onFiltersChange={setFilters}
                     />
                 )}
             </div>
