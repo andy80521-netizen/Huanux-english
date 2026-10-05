@@ -93,6 +93,22 @@ function calculateMasteryAfterAttempt(
   }
 }
 
+// 依 v1 規格：mastery 越高，越常出現難度高的題型（情境任務、圖片）
+const pickPromptTypeByMastery = (available: PromptType[], mastery: number): PromptType => {
+    let weights: Record<string, number>;
+    if (mastery < 400) weights = { qaQuestion: 70, situationalPrompt: 20, imageUrl: 10 };
+    else if (mastery < 700) weights = { qaQuestion: 40, situationalPrompt: 35, imageUrl: 25 };
+    else weights = { qaQuestion: 15, situationalPrompt: 40, imageUrl: 45 };
+
+    const total = available.reduce((sum, t) => sum + (weights[t] || 0), 0);
+    let r = Math.random() * total;
+    for (const t of available) {
+        r -= weights[t] || 0;
+        if (r < 0) return t;
+    }
+    return available[available.length - 1];
+};
+
 export default function PatternPracticeSessionView({ pattern, sentenceIndex, groupIndex, onBack, onNext, isLastSentence }: Props) {
     const [sessionState, setSessionState] = useState<SessionState>('idle');
     const [activePromptType, setActivePromptType] = useState<PromptType | null>(null);
@@ -128,8 +144,7 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
             setActivePromptType(null);
         } else {
             setIsPromptReady(true);
-            const randomIndex = Math.floor(Math.random() * availablePrompts.length);
-            setActivePromptType(availablePrompts[randomIndex]);
+            setActivePromptType(pickPromptTypeByMastery(availablePrompts, sentenceObj.mastery || 0));
         }
         setCurrentMastery(sentenceObj.mastery || 0);
     };

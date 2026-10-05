@@ -15,6 +15,33 @@ const cleanAndParseJSON = (text: string) => {
     }
 };
 
+// 主要情境大類清單（v1 規格書第 2 節），萃取句型時要求 primaryCategory 從中選一個大類
+const PRIMARY_CATEGORY_GUIDE = `主要情境分類（primaryCategory 只能填以下 13 個大類名稱之一，不要加【】符號；冒號後面的細項只是幫助你判斷歸類的參考，不要填細項）：
+- 餐飲消費：餐廳用餐、咖啡/手搖飲料店點餐、超市/雜貨店採購、外送/外帶點餐
+- 交通票務：買票(電影/演唱會/車票/機票)、大眾運輸問路搭乘、計程車/共乘叫車、租車/加油站
+- 旅遊住宿：機場通關/登機、飯店入住退房、旅遊景點介紹/導覽、觀光諮詢/問路
+- 職場工作：辦公室日常溝通(開會/交辦/回報)、倉庫/物流現場作業溝通、求職面試、電話/視訊會議、跟主管同事協調排班或請假、職場衝突/意見不合處理
+- 電話客服：電話諮詢/客服申訴、預約掛號(醫療/美容/維修)、銀行/電信/保險客服對話
+- 消費購物：商品退換貨、議價/詢問折扣、網路購物客訴/查詢訂單、消費者權益爭議
+- 行銷商務：行銷話術/推銷產品、業務開發/陌生開發、簡報/提案表達、商務書信/email往來語氣
+- 醫療健康：診所/醫院問診、藥局購買藥品說明症狀、健身房/運動教練溝通
+- 政府行政：政府機關辦事(申請文件/簽證/稅務諮詢)、銀行開戶/金融事務
+- 社交人際：朋友聚會邀約/婉拒、感謝/道歉/安慰、抱怨/委婉表達不滿、打招呼/寒暄/告別、約會/聯誼
+- 時事議題：社會事件說明/新聞轉述、時事評論/表達立場、環保/公共議題討論
+- 教育學習：課堂討論/發言、跟老師教授溝通(請假/問問題)、語言交換/學習夥伴對話
+- 居家生活：租屋/房東溝通、鄰居互動、居家維修/水電叫工
+只有在以上 13 類都明顯不適合時，才可以自訂一個新的大類名稱（4 個字，風格比照上面）。`;
+
+// 清洗 primaryCategory：去除【】與空白，空值改為「未分類」
+const normalizePrimaryCategories = (items: any) => {
+    if (!Array.isArray(items)) return items;
+    return items.map((item: any) => {
+        const raw = typeof item?.primaryCategory === 'string' ? item.primaryCategory : '';
+        const cleaned = raw.replace(/[【】]/g, '').trim();
+        return { ...item, primaryCategory: cleaned || '未分類' };
+    });
+};
+
 export async function splitTextToSentences(sourceText: string): Promise<{ text: string; translation: string }[]> {
     const response = await fetch('/.netlify/functions/split-text', {
         method: 'POST',
@@ -195,9 +222,11 @@ export async function extractPatternsFromSentence(
 - text (句型/片語本身，英文)
 - meaningZh (中文語意說明)
 - usageContext (使用時機說明)
-- primaryCategory (場景分類, 你可以直接沿用規格書裡提到的主要情境分類邏輯,自行判斷合理值)
+- primaryCategory (主要情境大類，依下方「主要情境分類」規則填寫)
 - situationTags (情緒/溝通功能標籤陣列，例如 ["劃清界線", "委婉拒絕"])
 - seedExamples (至少5個, 明確由你生成的示範例句，不是從原句摘錄，格式 {en: string, zh: string} 陣列)
+
+${PRIMARY_CATEGORY_GUIDE}
 
 請只回傳 JSON 陣列，不要有其他文字。
 格式範例：
@@ -232,7 +261,7 @@ export async function extractPatternsFromSentence(
     }
 
     try {
-        return cleanAndParseJSON(text);
+        return normalizePrimaryCategories(cleanAndParseJSON(text));
     } catch (e: any) {
         throw new Error("解析語言模型句型失敗：" + e.message);
     }
@@ -388,9 +417,11 @@ export async function extractPatternsFromText(
 - text (句型/片語本身，英文)
 - meaningZh (中文語意說明)
 - usageContext (使用時機說明)
-- primaryCategory (場景分類, 自行判斷合理的情境分類)
+- primaryCategory (主要情境大類，依下方「主要情境分類」規則填寫)
 - situationTags (情緒/溝通功能標籤陣列，例如 ["強調", "轉折"])
 - seedExamples (至少5個, 明確由你生成的示範例句，格式 {en: string, zh: string} 陣列)
+
+${PRIMARY_CATEGORY_GUIDE}
 
 請只回傳 JSON 陣列，不要有其他文字。
 格式範例：
@@ -424,7 +455,7 @@ ${sourceText}
     }
 
     try {
-        return cleanAndParseJSON(text);
+        return normalizePrimaryCategories(cleanAndParseJSON(text));
     } catch (e: any) {
         throw new Error("解析語言模型句型失敗：" + e.message);
     }

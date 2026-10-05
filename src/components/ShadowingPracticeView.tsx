@@ -228,6 +228,10 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
         
         // Stop audio when it reaches the sentence endTime
         if (audioRef.current.currentTime >= sentence.endTime && sentence.endTime > 0) {
+            // 防止重複進入：pause() 後瀏覽器可能再觸發一次 timeupdate，此時畫面狀態尚未更新，
+            // 若不擋下會建立第二個倒數計時器，且先建立的那個永遠不會被清除
+            if (isBufferPhaseRef.current) return;
+
             audioRef.current.pause();
             
             // Switch to buffer state but keep recording
@@ -236,6 +240,7 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
             setPracticeState('buffer');
             setBufferCount(6);
             
+            if (timerRef.current) clearInterval(timerRef.current);
             timerRef.current = setInterval(() => {
                 setBufferCount((prev) => {
                     if (prev <= 1) {

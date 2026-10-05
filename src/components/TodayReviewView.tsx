@@ -3,6 +3,7 @@ import { collection, onSnapshot } from 'firebase/firestore';
 import { auth, db, appId } from '../firebase';
 import { LanguagePattern, PatternExampleSentence } from '../types';
 import { isSydneyDateReached } from '../utils/sydneyTime';
+import { interleaveByKey } from '../utils/interleave';
 import PatternPracticeSessionView from './PatternPracticeSessionView';
 import { Sparkles, CalendarCheck, Target } from 'lucide-react';
 
@@ -89,11 +90,13 @@ export default function TodayReviewView() {
     }
 
     const startSession = (startIndex: number) => {
-        // Capture snapshot
-        setSessionQueue([...reviewItems]);
-        setCompletedKeys(new Set());
-        
         const startingItem = reviewItems[startIndex];
+        const rest = reviewItems.filter((_, i) => i !== startIndex);
+        // 點選的題目排第一題，其餘跨句型交錯混合（v1 交錯練習）
+        const queue = [startingItem, ...interleaveByKey(rest, item => item.pattern.id, startingItem.pattern.id)];
+        setSessionQueue(queue);
+        setCompletedKeys(new Set());
+
         const key = `${startingItem.pattern.id}-${startingItem.sentence.id}`;
         setActiveItemKey(key);
     };
