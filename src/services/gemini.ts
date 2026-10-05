@@ -2,7 +2,9 @@ import { storage, appId } from '../firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { GoogleGenAI } from '@google/genai';
 import { LanguagePattern } from '../types';
+import { callWithModelFallback } from '../utils/geminiFallback';
 const TEXT_MODEL = 'gemini-3.6-flash';
+const TEXT_MODELS = [TEXT_MODEL, 'gemini-3.5-flash']; // 主要模型忙碌時改用備用模型
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
@@ -247,13 +249,13 @@ ${PRIMARY_CATEGORY_GUIDE}
 中文: ${sentenceTranslation}
 `;
 
-    const response = await ai.models.generateContent({
-        model: TEXT_MODEL,
+    const response = await callWithModelFallback(TEXT_MODELS, (model) => ai.models.generateContent({
+        model,
         contents: prompt,
         config: {
             temperature: 0.2,
         }
-    });
+    }));
 
     const text = response.text;
     if (!text) {
@@ -314,13 +316,13 @@ export async function checkSentenceQuality(
 }
 `;
 
-    const response = await ai.models.generateContent({
-        model: TEXT_MODEL,
+    const response = await callWithModelFallback(TEXT_MODELS, (model) => ai.models.generateContent({
+        model,
         contents: prompt,
         config: {
             temperature: 0.2,
         }
-    });
+    }));
 
     const text = response.text;
     if (!text) {
@@ -350,13 +352,13 @@ export async function generatePracticePrompts(
   "situationalPrompt": "..."
 }`;
 
-    const response = await ai.models.generateContent({
-        model: TEXT_MODEL,
+    const response = await callWithModelFallback(TEXT_MODELS, (model) => ai.models.generateContent({
+        model,
         contents: prompt,
         config: {
             temperature: 0.3,
         }
-    });
+    }));
 
     const text = response.text;
     if (!text) {
@@ -441,13 +443,13 @@ ${PRIMARY_CATEGORY_GUIDE}
 ${sourceText}
 `;
 
-    const response = await ai.models.generateContent({
-        model: TEXT_MODEL,
+    const response = await callWithModelFallback(TEXT_MODELS, (model) => ai.models.generateContent({
+        model,
         contents: prompt,
         config: {
             temperature: 0.2,
         }
-    });
+    }));
 
     const text = response.text;
     if (!text) {

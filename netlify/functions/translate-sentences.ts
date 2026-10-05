@@ -1,5 +1,6 @@
 import type { Handler } from '@netlify/functions';
 import { GoogleGenAI } from '@google/genai';
+import { callWithModelFallback } from '../shared/geminiFallback';
 
 const headers = {
     'Access-Control-Allow-Origin': '*',
@@ -44,7 +45,7 @@ export const handler: Handler = async (event, context) => {
         }
 
         const ai = new GoogleGenAI({ apiKey });
-        const TEXT_MODEL = 'gemini-3.6-flash';
+        const TEXT_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash'];
 
         const prompt = `請將以下英文句子陣列逐句翻譯成繁體中文。
 請只回傳 JSON 格式的字串陣列，不要包含任何 markdown 標記、\`\`\`json 標籤或其他文字。
@@ -54,14 +55,14 @@ export const handler: Handler = async (event, context) => {
 輸入英文句子陣列：
 ${JSON.stringify(sentences, null, 2)}`;
 
-        const response = await ai.models.generateContent({
-            model: TEXT_MODEL,
+        const response = await callWithModelFallback(TEXT_MODELS, (model) => ai.models.generateContent({
+            model,
             contents: prompt,
             config: {
                 temperature: 0.1,
                 responseMimeType: "application/json",
             }
-        });
+        }));
 
         if (!response.text) {
             throw new Error("Gemini API 回傳空內容");
