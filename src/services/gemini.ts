@@ -1,8 +1,8 @@
-import { storage, appId } from '../firebase';
+import { storage, appId, auth } from '../firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { GoogleGenAI } from '@google/genai';
 import { LanguagePattern } from '../types';
-import { callWithModelFallback } from '../utils/geminiFallback';
+import { callWithModelFallback, isRetryableGeminiError } from '../utils/geminiFallback';
 const TEXT_MODEL = 'gemini-3.6-flash';
 const TEXT_MODELS = [TEXT_MODEL, 'gemini-3.5-flash']; // 主要模型忙碌時改用備用模型
 
@@ -177,38 +177,67 @@ export async function generateSpeechForSentences(
     return { audioBlob, sentencesWithTiming };
 }
 
+// 把錄音檔轉成 base64（不含 data URL 前綴）
+const fileToBase64 = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+        reader.onerror = () => reject(new Error('讀取錄音檔失敗'));
+        reader.readAsDataURL(file);
+    });
 
-
+// 第三層：透過後端 Function 呼叫 Whisper（需登入）
+async function transcribeWithWhisper(audioFile: File): Promise<string> {
+    const idToken = await auth.currentUser?.getIdToken();
+    if (!idToken) throw new Error('請先登入');
+    const audioBase64 = await fileToBase64(audioFile);
+    const response = await fetch('/.netlify/functions/transcribe-recording', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
+        body: JSON.stringify({ audioBase64, mimeType: audioFile.type || 'audio/webm' })
+    });
+    if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || `HTTP ${response.status}`);
+    }
+    const data = await response.json();
+    if (typeof data?.text !== 'string') throw new Error('Whisper 回傳格式錯誤');
+    return data.text.trim();
+}
 
 export async function transcribeRecording(audioFile: File): Promise<string> {
-    try {
-        const uploadResult = await uploadFileToGemini(audioFile);
-        
-        const prompt = "請把這段音檔裡使用者說的英文內容逐字轉錄出來,只回傳轉錄後的純文字,不要有任何其他說明文字、不要有引號、不要有markdown格式";
-        
-        const response = await ai.models.generateContent({
-            model: TEXT_MODEL,
-            contents: [
-                prompt,
-                {
-                    fileData: {
-                        fileUri: uploadResult.uri,
-                        mimeType: uploadResult.mimeType
-                    }
-                }
-            ],
-            config: {
-                temperature: 0.1,
+    // 測試用開關：瀏覽器 localStorage 設定 huanux_force_whisper = '1' 時，直接使用 Whisper
+    let forceWhisper = false;
+    try { forceWhisper = localStorage.getItem('huanux_force_whisper') === '1'; } catch {}
+
+    if (!forceWhisper) {
+        // 第一、二層：Gemini 主要模型 → 備用模型（共用同一次上傳的檔案，不重複上傳）
+        try {
+            const uploadResult = await uploadFileToGemini(audioFile);
+            const prompt = "請把這段音檔裡使用者說的英文內容逐字轉錄出來,只回傳轉錄後的純文字,不要有任何其他說明文字、不要有引號、不要有markdown格式";
+            const response = await callWithModelFallback(TEXT_MODELS, (model) => ai.models.generateContent({
+                model,
+                contents: [
+                    prompt,
+                    { fileData: { fileUri: uploadResult.uri, mimeType: uploadResult.mimeType } }
+                ],
+                config: { temperature: 0.1 }
+            }));
+            if (!response.text) throw new Error("Gemini API 回傳空內容");
+            return response.text.trim();
+        } catch (e: any) {
+            // 只有「忙碌」類錯誤（含上傳檔案時遇到的忙碌）才改用 Whisper，其他錯誤直接回報
+            if (!e?.isAllModelsBusy && !isRetryableGeminiError(e)) {
+                throw new Error(`語音轉文字失敗: ${e.message}`);
             }
-        });
-        
-        if (!response.text) {
-            throw new Error("Gemini API 回傳空內容");
+            console.warn('[模型備援] Gemini 主要與備用模型皆忙碌，改用 Whisper', e?.message);
         }
-        
-        return response.text.trim();
+    }
+
+    try {
+        return await transcribeWithWhisper(audioFile);
     } catch (e: any) {
-        throw new Error(`語音轉文字失敗: ${e.message}`);
+        throw new Error(`語音轉文字失敗：AI 服務暫時忙碌，請稍後再試（${e.message}）`);
     }
 }
 
