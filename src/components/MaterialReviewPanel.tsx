@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Play, Pause, Save, X, AlertCircle, Trash2, RotateCcw, ChevronDown, ChevronUp } from 'lucide-react';
 
-import { MaterialSentence } from '../types';
+import { MaterialSentence, CoverStyle } from '../types';
 
 export type ReviewSentence = Pick<MaterialSentence, 'text' | 'translation' | 'startTime' | 'endTime' | 'lowConfidence' | 'needsReview'>;
 
@@ -12,7 +12,7 @@ export interface MaterialReviewPanelProps {
     fileName: string;
     initialSentences: ReviewSentence[];
     isSaving?: boolean;
-    onSave: (sentences: ReviewSentence[]) => void;
+    onSave: (sentences: ReviewSentence[], coverChoice: CoverStyle | 'none') => void;
     onCancel: () => void;
 }
 
@@ -44,6 +44,26 @@ export default function MaterialReviewPanel({
     const [isDeletedExpanded, setIsDeletedExpanded] = useState(false);
     const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
     const [timeAdjustWarnings, setTimeAdjustWarnings] = useState<Record<string, string>>({});
+    const [coverChoice, setCoverChoice] = useState<CoverStyle | 'none'>(() => {
+        try {
+            const saved = localStorage.getItem('huanux_cover_style');
+            if (saved === 'photo' || saved === 'anime' || saved === 'none') {
+                return saved;
+            }
+        } catch (e) {
+            console.warn('讀取封面風格偏好失敗:', e);
+        }
+        return 'photo';
+    });
+
+    const handleCoverChoiceChange = (choice: CoverStyle | 'none') => {
+        setCoverChoice(choice);
+        try {
+            localStorage.setItem('huanux_cover_style', choice);
+        } catch (e) {
+            console.warn('儲存封面風格偏好失敗:', e);
+        }
+    };
 
     useEffect(() => {
         const fileOrBlob = audioFile || audioBlob;
@@ -162,7 +182,7 @@ export default function MaterialReviewPanel({
             lowConfidence: s.lowConfidence,
             needsReview: s.needsReview
         }));
-        onSave(cleanSentences);
+        onSave(cleanSentences, coverChoice);
     };
 
     return (
@@ -173,6 +193,44 @@ export default function MaterialReviewPanel({
                     <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
                         檔案：{fileName}（保留 {activeSentences.length} 句{deletedSentences.length > 0 ? `，已刪除 ${deletedSentences.length} 句` : ''}）
                     </p>
+                    <div className="mt-3 flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-bold text-slate-600 dark:text-slate-300">封面風格：</span>
+                        <div className="inline-flex rounded-lg p-0.5 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                            <button
+                                type="button"
+                                onClick={() => handleCoverChoiceChange('photo')}
+                                className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all ${
+                                    coverChoice === 'photo'
+                                        ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                                }`}
+                            >
+                                寫實攝影
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => handleCoverChoiceChange('anime')}
+                                className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all ${
+                                    coverChoice === 'anime'
+                                        ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                                }`}
+                            >
+                                日系動漫
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => handleCoverChoiceChange('none')}
+                                className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all ${
+                                    coverChoice === 'none'
+                                        ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                                }`}
+                            >
+                                不產生封面
+                            </button>
+                        </div>
+                    </div>
                 </div>
                 <div className="flex flex-col items-end gap-2">
                     <div className="flex gap-3">

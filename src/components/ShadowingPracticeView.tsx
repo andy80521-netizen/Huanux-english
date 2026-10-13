@@ -6,8 +6,9 @@ import { calculateShadowingScores } from '../utils/scoring';
 import { getSupportedMimeType } from '../utils/mediaRecorder';
 import { auth, db, appId } from '../firebase';
 import { doc, updateDoc } from 'firebase/firestore';
+import { SILENT_AUDIO } from '../utils';
 
-type PracticeState = 'idle' | 'recording' | 'buffer' | 'finished' | 'scoring' | 'scored';
+type PracticeState = 'idle' | 'recording' | 'buffer' | 'finished' | 'scoring' | 'scored' | 'scoreError';
 
 interface ShadowingPracticeViewProps {
     material: Material;
@@ -19,6 +20,9 @@ interface ShadowingPracticeViewProps {
 
 export default function ShadowingPracticeView({ material, sentenceIndex, onBack, onNext, isLastSentence }: ShadowingPracticeViewProps) {
     const sentence = material.sentences[sentenceIndex];
+    // 標題的「第幾句／總句數」只計算未刪除的句子
+    const activeIndices = material.sentences.map((s, i) => (s.deleted ? -1 : i)).filter(i => i >= 0);
+    const displayPosition = activeIndices.indexOf(sentenceIndex) + 1;
     
     const [practiceState, setPracticeState] = useState<PracticeState>('idle');
     const [error, setError] = useState<string | null>(null);
@@ -34,6 +38,9 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
     const isBufferPhaseRef = useRef<boolean>(false);
     
     const audioRef = useRef<HTMLAudioElement>(null);
+    const recordedAudioRef = useRef<HTMLAudioElement>(null);
+    const playbackUrlRef = useRef<string | null>(null);
+    const lastRecordingRef = useRef<{ blob: Blob; speechSec: number } | null>(null);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const streamRef = useRef<MediaStream | null>(null);
     const audioContextRef = useRef<AudioContext | null>(null);
@@ -89,6 +96,15 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
 
     // Reset state when sentence changes
     useEffect(() => {
+        if (recordedAudioRef.current) {
+            recordedAudioRef.current.pause();
+            recordedAudioRef.current.currentTime = 0;
+        }
+        if (playbackUrlRef.current) {
+            URL.revokeObjectURL(playbackUrlRef.current);
+            playbackUrlRef.current = null;
+        }
+        lastRecordingRef.current = null;
         abortRecording();
         setPracticeState('idle');
         setError(null);
@@ -109,6 +125,13 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
     // Cleanup on unmount
     useEffect(() => {
         return () => {
+            if (recordedAudioRef.current) {
+                recordedAudioRef.current.pause();
+            }
+            if (playbackUrlRef.current) {
+                URL.revokeObjectURL(playbackUrlRef.current);
+                playbackUrlRef.current = null;
+            }
             abortRecording();
             if (recordedBlobUrl) URL.revokeObjectURL(recordedBlobUrl);
         };
@@ -147,6 +170,12 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
     };
 
     const handleStart = async () => {
+        // iPhone 只允許「使用者點擊當下」啟動播放，所以必須在任何 await 之前先解鎖錄音播放器
+        if (recordedAudioRef.current) {
+            recordedAudioRef.current.src = SILENT_AUDIO;
+            recordedAudioRef.current.play().then(() => recordedAudioRef.current?.pause()).catch(() => {});
+        }
+
         setError(null);
         cleanupAudio();
         try {
@@ -192,7 +221,9 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                 const blob = new Blob(audioChunksRef.current, { type: mediaRecorder.mimeType || 'audio/webm' });
                 const url = URL.createObjectURL(blob);
                 setRecordedBlobUrl(url);
-                setPracticeState('finished');
+
+                lastRecordingRef.current = { blob, speechSec };
+                runScoring(blob, speechSec);
             };
 
             // Set up audio to play exactly at startTime
@@ -254,6 +285,15 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
     };
 
     const handleRetry = () => {
+        if (recordedAudioRef.current) {
+            recordedAudioRef.current.pause();
+            recordedAudioRef.current.currentTime = 0;
+        }
+        if (playbackUrlRef.current) {
+            URL.revokeObjectURL(playbackUrlRef.current);
+            playbackUrlRef.current = null;
+        }
+        lastRecordingRef.current = null;
         stopRecordingSafely();
         cleanupAudio();
         setPracticeState('idle');
@@ -269,23 +309,19 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
         setError(null);
     };
 
-    const handleScore = async () => {
-        if (!recordedBlobUrl || audioChunksRef.current.length === 0) return;
-        
+    const runScoring = async (blob: Blob, speechSec: number) => {
         setPracticeState('scoring');
         setError(null);
         
         try {
-            const mimeType = mediaRecorderRef.current?.mimeType || 'audio/webm';
-            const blob = new Blob(audioChunksRef.current, { type: mimeType });
+            const mimeType = blob.type || 'audio/webm';
             const file = new File([blob], 'recording', { type: mimeType });
             
             const transcribedText = await transcribeRecording(file);
-            
             setUserText(transcribedText);
             
             const originalSec = Math.max(0, sentence.endTime - sentence.startTime);
-            const scores = calculateShadowingScores(transcribedText, sentence.text, userSpeechSec, originalSec);
+            const scores = calculateShadowingScores(transcribedText, sentence.text, speechSec, originalSec);
             setScoreResult(scores);
             
             // Save to Firestore
@@ -310,11 +346,30 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
             });
             
             setPracticeState('scored');
+
+            // 評分完成後自動播放剛剛的錄音
+            if (recordedAudioRef.current) {
+                if (playbackUrlRef.current) {
+                    URL.revokeObjectURL(playbackUrlRef.current);
+                }
+                const url = URL.createObjectURL(blob);
+                playbackUrlRef.current = url;
+                recordedAudioRef.current.src = url;
+                recordedAudioRef.current.currentTime = 0;
+                recordedAudioRef.current.play().catch(() => {});
+            }
             
         } catch (err: any) {
             console.error("Scoring error:", err);
             setError(err.message || "評分過程中發生錯誤，請重試。");
-            setPracticeState('finished');
+            setPracticeState('scoreError');
+        }
+    };
+
+    const handleReplayRecording = () => {
+        if (recordedAudioRef.current) {
+            recordedAudioRef.current.currentTime = 0;
+            recordedAudioRef.current.play().catch(() => {});
         }
     };
 
@@ -328,7 +383,7 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                     <ChevronLeft size={24} />
                 </button>
                 <h2 className="text-2xl font-black text-slate-800 dark:text-white line-clamp-1 flex-1">
-                    跟讀練習 ({sentenceIndex + 1}/{material.sentences.length})
+                    跟讀練習 ({displayPosition}/{activeIndices.length})
                 </h2>
             </div>
 
@@ -336,6 +391,11 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                 ref={audioRef} 
                 src={material.audioUrl} 
                 onTimeUpdate={handleTimeUpdate}
+            />
+            <audio
+                ref={recordedAudioRef}
+                className="hidden"
+                preload="auto"
             />
 
             {error && (
@@ -385,16 +445,18 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                         </div>
                     )}
                     
-                    {(practiceState === 'finished' || practiceState === 'scoring') && recordedBlobUrl && (
-                        <div className="w-full px-4">
-                            <p className="text-slate-500 font-bold mb-3">錄音完成，請試聽</p>
-                            <audio src={recordedBlobUrl} controls className="w-full h-12 outline-none mb-4" />
-                            {practiceState === 'scoring' && (
-                                <div className="flex items-center justify-center gap-3 text-indigo-600 dark:text-indigo-400 font-bold">
-                                    <Loader2 size={20} className="animate-spin" />
-                                    <span>AI 評分中，請稍候...</span>
-                                </div>
-                            )}
+                    {practiceState === 'scoring' && (
+                        <div className="flex flex-col items-center justify-center gap-3 text-indigo-600 dark:text-indigo-400 font-bold py-6">
+                            <Loader2 size={32} className="animate-spin" />
+                            <span className="text-base">AI 評分中，請稍候...</span>
+                        </div>
+                    )}
+
+                    {practiceState === 'scoreError' && (
+                        <div className="w-full text-center py-4">
+                            <p className="text-sm font-bold text-slate-500 dark:text-slate-400">
+                                評分失敗，可以重試評分或重新錄一次
+                            </p>
                         </div>
                     )}
 
@@ -428,6 +490,16 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                                     {userText || "(未偵測到語音)"}
                                 </p>
                             </div>
+
+                            <div className="flex justify-center pt-2">
+                                <button
+                                    onClick={handleReplayRecording}
+                                    className="px-5 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold rounded-xl shadow-sm transition-all flex items-center gap-2 text-sm cursor-pointer"
+                                >
+                                    <RotateCcw size={16} />
+                                    重播我的錄音
+                                </button>
+                            </div>
                         </div>
                     )}
                 </div>
@@ -452,7 +524,7 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                         </div>
                     )}
 
-                    {practiceState === 'finished' && (
+                    {practiceState === 'scoreError' && (
                         <div className="flex flex-col sm:flex-row gap-4">
                             <button 
                                 onClick={handleRetry}
@@ -462,11 +534,15 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                                 重新錄一次
                             </button>
                             <button 
-                                onClick={handleScore}
+                                onClick={() => {
+                                    if (lastRecordingRef.current) {
+                                        runScoring(lastRecordingRef.current.blob, lastRecordingRef.current.speechSec);
+                                    }
+                                }}
                                 className="flex-1 py-4 bg-indigo-600 text-white font-bold rounded-2xl hover:bg-indigo-700 transition-all flex items-center justify-center gap-2"
                             >
                                 <Send size={20} />
-                                送出評分
+                                重試評分
                             </button>
                         </div>
                     )}

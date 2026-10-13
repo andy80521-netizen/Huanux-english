@@ -3,7 +3,7 @@ import { Material } from '../types';
 import { auth, db, storage, appId } from '../firebase';
 import { collection, query, onSnapshot, deleteDoc, doc, orderBy } from 'firebase/firestore';
 import { ref, deleteObject } from 'firebase/storage';
-import { Plus, Trash2, AlertTriangle, BookOpen, AlertCircle, User } from 'lucide-react';
+import { Plus, Trash2, AlertTriangle, BookOpen, AlertCircle, User, Loader2 } from 'lucide-react';
 
 const ConfirmDialog: React.FC<{
   isOpen: boolean;
@@ -87,10 +87,12 @@ export default function MaterialListView({ onAddClick, onMaterialClick }: { onAd
         
         setError(null);
         try {
+            const targetMaterial = materials.find(m => m.id === deleteModal.materialId);
+
             // Delete Firestore doc
             await deleteDoc(doc(db, `artifacts/${appId}/users/${uid}/materials`, deleteModal.materialId));
             
-            // Delete Storage file
+            // Delete Storage file (mp3)
             const storageRef = ref(storage, `artifacts/${appId}/users/${uid}/materials/${deleteModal.materialId}.mp3`);
             try {
                 await deleteObject(storageRef);
@@ -98,6 +100,18 @@ export default function MaterialListView({ onAddClick, onMaterialClick }: { onAd
                 // If the file doesn't exist, we can ignore the storage error
                 if (storageErr.code !== 'storage/object-not-found') {
                     console.error("Storage delete error:", storageErr);
+                }
+            }
+
+            // Delete cover image if exists
+            if (targetMaterial?.coverPath) {
+                const coverStorageRef = ref(storage, targetMaterial.coverPath);
+                try {
+                    await deleteObject(coverStorageRef);
+                } catch (coverErr: any) {
+                    if (coverErr.code !== 'storage/object-not-found') {
+                        console.error("Cover delete error:", coverErr);
+                    }
                 }
             }
         } catch (err: any) {
@@ -170,9 +184,31 @@ export default function MaterialListView({ onAddClick, onMaterialClick }: { onAd
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {materials.map((m) => {
-                        const completedCount = m.sentences.filter(s => s.mastery >= 1000).length;
+                        const activeSentences = m.sentences.filter(s => !s.deleted);
+                        const completedCount = activeSentences.filter(s => s.mastery >= 1000).length;
                         return (
-                            <div key={m.id} className="bg-white dark:bg-slate-900 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-slate-800 hover:shadow-md transition-shadow flex flex-col group cursor-pointer" onClick={() => onMaterialClick(m)}>
+                            <div key={m.id} className="bg-white dark:bg-slate-900 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-slate-800 hover:shadow-md transition-shadow flex flex-col group cursor-pointer overflow-hidden" onClick={() => onMaterialClick(m)}>
+                                {/* 16:9 封面區 */}
+                                <div className="aspect-video w-full rounded-xl overflow-hidden mb-4 bg-slate-100 dark:bg-slate-800 relative flex items-center justify-center">
+                                    {m.coverStatus === 'done' && m.coverUrl ? (
+                                        <img
+                                            src={m.coverUrl}
+                                            alt={m.title}
+                                            loading="lazy"
+                                            className="w-full h-full object-cover"
+                                        />
+                                    ) : m.coverStatus === 'generating' && m.coverRequestedAt && (Date.now() - m.coverRequestedAt < 5 * 60 * 1000) ? (
+                                        <div className="flex flex-col items-center justify-center gap-2 text-indigo-500 dark:text-indigo-400">
+                                            <Loader2 size={24} className="animate-spin" />
+                                            <span className="text-xs font-bold text-slate-500 dark:text-slate-400">封面產生中</span>
+                                        </div>
+                                    ) : (
+                                        <div className="w-full h-full bg-gradient-to-br from-indigo-50 to-slate-100 dark:from-slate-850 dark:to-slate-800 flex items-center justify-center text-slate-300 dark:text-slate-600">
+                                            <BookOpen size={36} />
+                                        </div>
+                                    )}
+                                </div>
+
                                 <div className="flex justify-between items-start mb-4">
                                     <h3 className="text-lg font-bold text-slate-800 dark:text-white line-clamp-2 pr-4">{m.title}</h3>
                                     <button 
@@ -189,7 +225,7 @@ export default function MaterialListView({ onAddClick, onMaterialClick }: { onAd
                                         {new Date(m.createdAt).toLocaleDateString()}
                                     </div>
                                     <div className="bg-slate-100 dark:bg-slate-800 px-3 py-1 rounded-full font-bold text-slate-700 dark:text-slate-300 text-xs">
-                                        進度 {completedCount}/{m.sentences.length} 句
+                                        進度 {completedCount}/{activeSentences.length} 句
                                     </div>
                                 </div>
                             </div>

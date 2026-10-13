@@ -1,10 +1,21 @@
 import { storage, appId, auth } from '../firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 import { LanguagePattern } from '../types';
 import { callWithModelFallback, isRetryableGeminiError } from '../utils/geminiFallback';
+// 測試用開關：localStorage 設定 huanux_force_fallback = '1' 並重新整理頁面後，略過所有主要模型、直接使用備用模型
+const withTestFallback = (models: string[]): string[] => {
+    try {
+        if (localStorage.getItem('huanux_force_fallback') === '1') {
+            const rest = models.filter(m => m !== models[0]);
+            return rest.length > 0 ? rest : models;
+        }
+    } catch {}
+    return models;
+};
+
 const TEXT_MODEL = 'gemini-3.6-flash';
-const TEXT_MODELS = [TEXT_MODEL, 'gemini-3.5-flash']; // 主要模型忙碌時改用備用模型
+const TEXT_MODELS = withTestFallback([TEXT_MODEL, 'gemini-3.5-flash']); // 主要模型忙碌時改用備用模型
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
@@ -74,6 +85,44 @@ export async function uploadFileToGemini(file: File) {
 
 const TTS_MODEL = 'gemini-3.1-flash-tts-preview'; // 獨立常數，之後要換模型只改這裡
 
+// 主要模型忙碌時：等 2 秒再試主要模型一次（盡量維持同一份教材聲音一致），仍失敗才改用備用模型
+const TTS_MODELS = withTestFallback([TTS_MODEL, TTS_MODEL, 'gemini-3.8-flash-lite-tts']);
+
+// 解析 TTS 回傳的音訊：同時支援「無檔頭的純 PCM」與「帶 WAV 檔頭」兩種格式，統一轉成純 PCM
+const parseTtsAudio = (base64Data: string, mimeType: string | undefined) => {
+    const binaryString = atob(base64Data);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let j = 0; j < binaryString.length; j++) bytes[j] = binaryString.charCodeAt(j);
+
+    const isWav = bytes.length > 12 &&
+        String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3]) === 'RIFF' &&
+        String.fromCharCode(bytes[8], bytes[9], bytes[10], bytes[11]) === 'WAVE';
+
+    if (isWav) {
+        const view = new DataView(bytes.buffer);
+        let offset = 12;
+        let sampleRate = 0, numChannels = 0, bitsPerSample = 0;
+        while (offset + 8 <= bytes.length) {
+            const chunkId = String.fromCharCode(bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]);
+            const chunkSize = view.getUint32(offset + 4, true);
+            if (chunkId === 'fmt ') {
+                numChannels = view.getUint16(offset + 10, true);
+                sampleRate = view.getUint32(offset + 12, true);
+                bitsPerSample = view.getUint16(offset + 22, true);
+            } else if (chunkId === 'data') {
+                const start = offset + 8;
+                const end = Math.min(start + chunkSize, bytes.length);
+                return { pcm: bytes.slice(start, end), sampleRate, numChannels, bitsPerSample };
+            }
+            offset += 8 + chunkSize + (chunkSize % 2);
+        }
+        throw new Error('WAV 格式解析失敗：找不到音訊資料');
+    }
+
+    const rateMatch = /rate=(\d+)/i.exec(mimeType || '');
+    return { pcm: bytes, sampleRate: rateMatch ? Number(rateMatch[1]) : 24000, numChannels: 1, bitsPerSample: 16 };
+};
+
 export async function generateSpeechForSentences(
   sentences: { text: string }[],
   onProgress?: (current: number, total: number) => void
@@ -87,8 +136,8 @@ export async function generateSpeechForSentences(
         const sentence = sentences[i];
         
         try {
-            const response = await ai.models.generateContent({
-                model: TTS_MODEL,
+            const response = await callWithModelFallback(TTS_MODELS, (model) => ai.models.generateContent({
+                model,
                 contents: sentence.text,
                 config: {
                     responseModalities: ["AUDIO"],
@@ -100,7 +149,7 @@ export async function generateSpeechForSentences(
                         }
                     }
                 }
-            });
+            }), { delayMs: 2000 });
 
             const part = response.candidates?.[0]?.content?.parts?.[0];
             const base64Data = part?.inlineData?.data;
@@ -108,13 +157,12 @@ export async function generateSpeechForSentences(
                 throw new Error("沒有回傳音訊資料");
             }
 
-            // Decode base64 to Uint8Array
-            const binaryString = atob(base64Data);
-            const len = binaryString.length;
-            const bytes = new Uint8Array(len);
-            for (let j = 0; j < len; j++) {
-                bytes[j] = binaryString.charCodeAt(j);
+            const audio = parseTtsAudio(base64Data, part?.inlineData?.mimeType);
+            // 所有句子必須是相同格式才能串接；下方 WAV 檔頭固定為 24kHz、單聲道、16-bit
+            if (audio.sampleRate !== 24000 || audio.numChannels !== 1 || audio.bitsPerSample !== 16) {
+                throw new Error(`語音格式不相容（${audio.sampleRate}Hz / ${audio.numChannels} 聲道 / ${audio.bitsPerSample}-bit），無法串接`);
             }
+            const bytes = audio.pcm;
 
             const duration = bytes.length / 48000;
             const startTime = currentOffsetSeconds;
@@ -211,31 +259,38 @@ export async function transcribeRecording(audioFile: File): Promise<string> {
     try { forceWhisper = localStorage.getItem('huanux_force_whisper') === '1'; } catch {}
 
     if (!forceWhisper) {
-        // 第一、二層：Gemini 主要模型 → 備用模型（共用同一次上傳的檔案，不重複上傳）
+        // 第一、二層：Gemini 主要模型 → 備用模型
+        // 錄音直接以 inlineData 夾帶在請求中（不再先上傳檔案），並關閉思考功能以降低延遲
+        const t0 = performance.now();
         try {
-            const uploadResult = await uploadFileToGemini(audioFile);
+            const audioBase64 = await fileToBase64(audioFile);
+            const mimeType = (audioFile.type || 'audio/webm').split(';')[0];
             const prompt = "請把這段音檔裡使用者說的英文內容逐字轉錄出來,只回傳轉錄後的純文字,不要有任何其他說明文字、不要有引號、不要有markdown格式";
             const response = await callWithModelFallback(TEXT_MODELS, (model) => ai.models.generateContent({
                 model,
                 contents: [
                     prompt,
-                    { fileData: { fileUri: uploadResult.uri, mimeType: uploadResult.mimeType } }
+                    { inlineData: { mimeType, data: audioBase64 } }
                 ],
-                config: { temperature: 0.1 }
+                config: {
+                    temperature: 0.1,
+                    thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL }
+                }
             }));
             if (!response.text) throw new Error("Gemini API 回傳空內容");
+            console.log(`[計時] Gemini 語音轉文字完成：${Math.round(performance.now() - t0)} ms`);
             return response.text.trim();
         } catch (e: any) {
-            // 只有「忙碌」類錯誤（含上傳檔案時遇到的忙碌）才改用 Whisper，其他錯誤直接回報
-            if (!e?.isAllModelsBusy && !isRetryableGeminiError(e)) {
-                throw new Error(`語音轉文字失敗: ${e.message}`);
-            }
-            console.warn('[模型備援] Gemini 主要與備用模型皆忙碌，改用 Whisper', e?.message);
+            // 任何錯誤都改用 Whisper（Gemini 官方未保證支援 webm/mp4 格式，Whisper 則明確支援）
+            console.warn(`[模型備援] Gemini 語音轉文字失敗（${Math.round(performance.now() - t0)} ms），改用 Whisper`, e?.message);
         }
     }
 
+    const t1 = performance.now();
     try {
-        return await transcribeWithWhisper(audioFile);
+        const text = await transcribeWithWhisper(audioFile);
+        console.log(`[計時] Whisper 語音轉文字完成：${Math.round(performance.now() - t1)} ms`);
+        return text;
     } catch (e: any) {
         throw new Error(`語音轉文字失敗：AI 服務暫時忙碌，請稍後再試（${e.message}）`);
     }
@@ -401,38 +456,36 @@ export async function generatePracticePrompts(
     }
 }
 
+const IMAGE_MODELS = withTestFallback(['gemini-3.1-flash-image', 'gemini-3.1-flash-lite-image']);
+
 export async function generatePracticeImage(
   sentenceText: string,
   uid: string
 ): Promise<string> {
     const prompt = `Generate an image that visually represents this sentence: "${sentenceText}". The image should help the user recall this specific situation.`;
 
-    // 備註：在實際測試時，使用 image model (例如 gemini-3.1-flash-image) 會遇到 
-    // "Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 0"
-    // 這表示免費層級 (Free Tier) 對於圖片生成的配額目前為 0。
-    // 這裡先實作標準的呼叫流程。
-    const response = await ai.models.generateContent({
-        model: 'gemini-3.1-flash-image', 
+    // 依官方文件，這系列圖片模型不支援 responseMimeType，因此不設定
+    const response = await callWithModelFallback(IMAGE_MODELS, (model) => ai.models.generateContent({
+        model,
         contents: prompt,
-        config: {
-            responseMimeType: "image/jpeg"
-        }
-    });
+    }));
 
-    const candidate = response.candidates?.[0];
-    const inlineData = candidate?.content?.parts?.[0]?.inlineData;
+    const parts = response.candidates?.[0]?.content?.parts || [];
+    const inlineData = parts.find((p: any) => p?.inlineData?.data)?.inlineData;
 
-    if (!inlineData) {
+    if (!inlineData || !inlineData.data) {
         throw new Error("Gemini API 未回傳圖片資料");
     }
 
     const imageBytes = Uint8Array.from(atob(inlineData.data), c => c.charCodeAt(0));
-    
-    // 使用 timestamp 作為檔名的一部分
-    const filename = `img_${Date.now()}.jpg`;
+
+    // 依模型實際回傳的格式決定副檔名與 contentType
+    const contentType = inlineData.mimeType || 'image/png';
+    const ext = contentType.includes('jpeg') || contentType.includes('jpg') ? 'jpg' : contentType.includes('webp') ? 'webp' : 'png';
+    const filename = `img_${Date.now()}.${ext}`;
     const imageRef = ref(storage, `artifacts/${appId}/users/${uid}/patternImages/${filename}`);
-    
-    await uploadBytes(imageRef, imageBytes, { contentType: 'image/jpeg' });
+
+    await uploadBytes(imageRef, imageBytes, { contentType });
     const downloadUrl = await getDownloadURL(imageRef);
     
     return downloadUrl;

@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { Material } from '../types';
-import { ChevronLeft, Play, Pause, CheckCircle2, Mic, Loader2, Sparkles } from 'lucide-react';
+import { ChevronLeft, Play, Pause, CheckCircle2, Mic, Loader2, Sparkles, Trash2, RotateCcw, ChevronDown, ChevronUp } from 'lucide-react';
 import { auth, db, appId } from '../firebase';
 import { doc, onSnapshot, collection, setDoc, updateDoc } from 'firebase/firestore';
 import ShadowingPracticeView from './ShadowingPracticeView';
@@ -30,6 +30,7 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
     const [practiceIndex, setPracticeIndex] = useState<number | null>(null);
     const [extractingIndex, setExtractingIndex] = useState<number | null>(null);
     const [extractMessage, setExtractMessage] = useState<{ text: string, isError: boolean } | null>(null);
+    const [showDeleted, setShowDeleted] = useState(false);
 
     if (!material) {
         return (
@@ -40,14 +41,23 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
         );
     }
 
+    // 實際位置 vs 顯示序號：寫入、播放、萃取一律用句子在陣列中的實際位置；導覽與顯示只看未刪除的句子
+    const activeIndices = material.sentences.map((s, i) => (s.deleted ? -1 : i)).filter(i => i >= 0);
+    const deletedIndices = material.sentences.map((s, i) => (s.deleted ? i : -1)).filter(i => i >= 0);
+    const lastActiveIndex = activeIndices[activeIndices.length - 1];
+
     if (practiceIndex !== null) {
         return (
             <ShadowingPracticeView 
                 material={material} 
                 sentenceIndex={practiceIndex} 
                 onBack={() => setPracticeIndex(null)} 
-                onNext={() => setPracticeIndex(prev => prev !== null && prev < material.sentences.length - 1 ? prev + 1 : prev)}
-                isLastSentence={practiceIndex === material.sentences.length - 1}
+                onNext={() => setPracticeIndex(prev => {
+                    if (prev === null) return prev;
+                    const next = activeIndices.find(i => i > prev);
+                    return next !== undefined ? next : prev;
+                })}
+                isLastSentence={practiceIndex === lastActiveIndex}
             />
         );
     }
@@ -122,6 +132,38 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
         }
     };
 
+    const handleDeleteSentence = async (index: number) => {
+        const uid = auth.currentUser?.uid;
+        if (!uid || activeIndices.length <= 1) return;
+        if (playingIndex === index) handlePause();
+        try {
+            const updatedSentences = material.sentences.map((s, i) => (i === index ? { ...s, deleted: true } : s));
+            await updateDoc(doc(db, `artifacts/${appId}/users/${uid}/materials`, material.id), { sentences: updatedSentences });
+        } catch (err: any) {
+            console.error(err);
+            setExtractMessage({ text: err.message || '刪除失敗', isError: true });
+            setTimeout(() => setExtractMessage(null), 3000);
+        }
+    };
+
+    const handleRestoreSentence = async (index: number) => {
+        const uid = auth.currentUser?.uid;
+        if (!uid) return;
+        try {
+            // Firestore 不接受寫入 undefined，所以復原時把 deleted 欄位整個移除
+            const updatedSentences = material.sentences.map((s, i) => {
+                if (i !== index) return s;
+                const { deleted, ...rest } = s;
+                return rest;
+            });
+            await updateDoc(doc(db, `artifacts/${appId}/users/${uid}/materials`, material.id), { sentences: updatedSentences });
+        } catch (err: any) {
+            console.error(err);
+            setExtractMessage({ text: err.message || '復原失敗', isError: true });
+            setTimeout(() => setExtractMessage(null), 3000);
+        }
+    };
+
     return (
         <div className="flex flex-col h-full bg-slate-50 dark:bg-slate-950 p-6 overflow-y-auto pb-20">
             <div className="flex items-center gap-4 mb-8">
@@ -154,6 +196,7 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
 
             <div className="space-y-4">
                 {material.sentences.map((s, i) => {
+                    if (s.deleted) return null;
                     const isCompleted = s.mastery >= 1000;
                     return (
                         <div key={s.id} className="p-5 rounded-2xl bg-white dark:bg-slate-900 shadow-sm border border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row gap-4 items-start">
@@ -211,11 +254,64 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
                                 >
                                     {playingIndex === i ? <Pause size={20} className="fill-current" /> : <Play size={20} className="fill-current ml-1" />}
                                 </button>
+                                <button
+                                    onClick={() => handleDeleteSentence(i)}
+                                    disabled={activeIndices.length <= 1}
+                                    title={activeIndices.length <= 1 ? "至少需保留 1 句" : "刪除句子"}
+                                    className="shrink-0 w-12 h-12 rounded-xl flex items-center justify-center transition-all shadow-sm text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/30 disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-red-500"
+                                >
+                                    <Trash2 size={20} />
+                                </button>
                             </div>
                         </div>
                     );
                 })}
             </div>
+
+            {/* 已刪除（N）區塊 */}
+            {deletedIndices.length > 0 && (
+                <div className="mt-8 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden bg-slate-50/50 dark:bg-slate-900/50">
+                    <button
+                        onClick={() => setShowDeleted(!showDeleted)}
+                        className="w-full px-4 py-3 bg-slate-100 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 font-bold flex items-center justify-between hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors text-sm"
+                    >
+                        <span className="flex items-center gap-2">
+                            <Trash2 size={16} className="text-slate-400" />
+                            已刪除（{deletedIndices.length}）
+                        </span>
+                        {showDeleted ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                    </button>
+
+                    {showDeleted && (
+                        <div className="p-4 space-y-3 divide-y divide-slate-200 dark:divide-slate-800">
+                            {deletedIndices.map((i) => {
+                                const s = material.sentences[i];
+                                return (
+                                    <div key={s.id || i} className="pt-3 first:pt-0 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                                        <div className="flex-1 space-y-1">
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-xs font-bold text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full">
+                                                    Mastery: {s.mastery}
+                                                </span>
+                                            </div>
+                                            <p className="text-sm text-slate-600 dark:text-slate-400 font-medium line-through opacity-75">
+                                                {s.text}
+                                            </p>
+                                        </div>
+                                        <button
+                                            onClick={() => handleRestoreSentence(i)}
+                                            className="self-end md:self-center px-3 py-1.5 bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-950 font-bold text-xs flex items-center gap-1.5 transition-colors shrink-0"
+                                        >
+                                            <RotateCcw size={14} />
+                                            復原
+                                        </button>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
+            )}
         </div>
     );
 }

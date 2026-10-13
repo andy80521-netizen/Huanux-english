@@ -7,7 +7,8 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { INITIAL_COURSES, INITIAL_DATA, VocabItem } from '../constants';
 import { doc, setDoc, deleteDoc, collection, onSnapshot, query, orderBy, getDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
-import { Material } from '../types';
+import { Material, CoverStyle } from '../types';
+import { startCoverGeneration, buildCoverExcerpt } from '../services/cover';
 import MaterialReviewPanel, { ReviewSentence } from './MaterialReviewPanel';
 import MaterialListView from './MaterialListView';
 import MaterialDetailView from './MaterialDetailView';
@@ -498,7 +499,7 @@ export default function MaterialImportMode() {
         }
     };
 
-    const confirmAndSaveMaterial = async (finalSentences: ReviewSentence[]) => {
+    const confirmAndSaveMaterial = async (finalSentences: ReviewSentence[], coverChoice: CoverStyle | 'none' = 'none') => {
         if (!pendingMaterial) return;
         const uid = auth.currentUser?.uid;
         if (!uid) {
@@ -544,10 +545,24 @@ export default function MaterialImportMode() {
                             mastery: 0
                         })),
                         createdAt: Date.now(),
-                        graduated: false
+                        graduated: false,
+                        ...(coverChoice !== 'none' ? {
+                            coverStyle: coverChoice,
+                            coverStatus: 'generating' as const,
+                            coverRequestedAt: Date.now()
+                        } : {})
                     };
 
                     await setDoc(materialRef, materialDoc);
+
+                    if (coverChoice !== 'none') {
+                        startCoverGeneration(
+                            pendingMaterial.materialId,
+                            coverChoice,
+                            pendingMaterial.fileName,
+                            buildCoverExcerpt(finalSentences)
+                        );
+                    }
 
                     try {
                         const taskDocRef = doc(db, 'artifacts', appId, 'users', uid, 'transcriptionJobs', pendingMaterial.materialId);
@@ -608,10 +623,25 @@ export default function MaterialImportMode() {
                     mastery: 0
                 })),
                 createdAt: Date.now(),
-                graduated: false
+                graduated: false,
+                ...(coverChoice !== 'none' ? {
+                    coverStyle: coverChoice,
+                    coverStatus: 'generating' as const,
+                    coverRequestedAt: Date.now()
+                } : {})
             };
 
             await setDoc(materialRef, materialDoc);
+
+            if (coverChoice !== 'none') {
+                startCoverGeneration(
+                    materialId,
+                    coverChoice,
+                    pendingMaterial.fileName,
+                    buildCoverExcerpt(finalSentences)
+                );
+            }
+
             setSaveSuccess(true);
             setPendingMaterial(null);
             setResults([]);

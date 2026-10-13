@@ -10,7 +10,10 @@ export interface MaterialSentence {
   mastery: number;           // 沿用現有 mastery 累加機制
   lastScores?: { pronunciation: number; fluency: number; stress: number; total: number };
   extracted?: boolean;  // 是否已萃取過語言模型句型
+  deleted?: boolean;         // 已存檔教材的句子標記刪除（可復原），練習、進度、列表皆略過
 }
+
+export type CoverStyle = 'photo' | 'anime';
 
 export interface Material {
   id: string;
@@ -23,6 +26,12 @@ export interface Material {
   createdAt: number;
   graduated: boolean;        // 是否已萃取語言模型
   graduatedAt?: number;
+  coverUrl?: string;          // 封面下載網址
+  coverPath?: string;         // 封面在 Storage 的路徑（刪除時使用）
+  coverStyle?: CoverStyle;
+  coverStatus?: 'generating' | 'done' | 'error';
+  coverRequestedAt?: number;  // 開始產生的時間（判斷是否卡住）
+  coverError?: string;
 }
 
 // ===== 語言模型 =====

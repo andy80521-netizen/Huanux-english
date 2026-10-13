@@ -7,6 +7,7 @@ import { auth, db, appId } from '../firebase';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { Mic, Loader2, Play, RefreshCw, ChevronRight, Check, ChevronLeft } from 'lucide-react';
 import { isSydneyDateReached, addSydneyCalendarDays, getSydneyCalendarDaysDiff } from '../utils/sydneyTime';
+import { SILENT_AUDIO } from '../utils';
 
 interface Props {
   pattern: LanguagePattern;
@@ -17,7 +18,7 @@ interface Props {
   isLastSentence: boolean;
 }
 
-type SessionState = 'idle' | 'recording' | 'scoring' | 'scored';
+type SessionState = 'idle' | 'recording' | 'scoring' | 'scored' | 'scoreError';
 
 type PromptType = 'qaQuestion' | 'situationalPrompt' | 'imageUrl';
 
@@ -128,6 +129,9 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
     const requestAnimationFrameRef = useRef<number>(0);
     const audioChunksRef = useRef<Blob[]>([]);
     const recordingStartTimeRef = useRef<number>(0);
+    const recordedAudioRef = useRef<HTMLAudioElement>(null);
+    const playbackUrlRef = useRef<string | null>(null);
+    const lastRecordingRef = useRef<{ blob: Blob; durationSec: number } | null>(null);
 
     const sentences = pattern.exampleSentences || [];
     const sentenceObj = sentences[sentenceIndex];
@@ -150,13 +154,22 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
     };
 
     useEffect(() => {
+        if (recordedAudioRef.current) {
+            recordedAudioRef.current.pause();
+            recordedAudioRef.current.currentTime = 0;
+        }
+        lastRecordingRef.current = null;
+        if (playbackUrlRef.current) {
+            URL.revokeObjectURL(playbackUrlRef.current);
+            playbackUrlRef.current = null;
+        }
         setSessionState('idle');
         setScoreResult(null);
         setUserText('');
         setErrorMsg(null);
         setTierBlockInfo(null);
         initPrompt();
-    }, [sentenceIndex]);
+    }, [pattern.id, sentenceIndex]);
 
     const cleanupAudio = () => {
         if (requestAnimationFrameRef.current) {
@@ -182,7 +195,19 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
     };
 
     useEffect(() => {
-        return cleanupAudio;
+        return () => {
+            // 離開頁面時若仍在錄音，先移除 onstop 再停止，避免離開後仍在背景評分並寫入分數
+            if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+                mediaRecorderRef.current.onstop = null;
+                mediaRecorderRef.current.stop();
+            }
+            recordedAudioRef.current?.pause();
+            if (playbackUrlRef.current) {
+                URL.revokeObjectURL(playbackUrlRef.current);
+                playbackUrlRef.current = null;
+            }
+            cleanupAudio();
+        };
     }, []);
 
     const monitorVolume = () => {
@@ -216,7 +241,86 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
         requestAnimationFrameRef.current = requestAnimationFrame(monitorVolume);
     };
 
+    const runScoring = async (blob: Blob, durationSec: number) => {
+        setSessionState('scoring');
+        setErrorMsg(null);
+        
+        const file = new File([blob], 'record.webm', { type: blob.type });
+
+        try {
+            const transcribedText = await transcribeRecording(file);
+            setUserText(transcribedText);
+            const scores = calculateFinalScores(transcribedText, sentenceObj.text, durationSec);
+            setScoreResult(scores);
+
+            if (scores.total >= 70) {
+                const uid = auth.currentUser?.uid;
+                if (uid) {
+                    const docRef = doc(db, `artifacts/${appId}/users/${uid}/languagePatterns`, pattern.id);
+                    const snap = await getDoc(docRef);
+                    if (snap.exists()) {
+                        const data = snap.data();
+                        const latestSentences: PatternExampleSentence[] = data.exampleSentences || [];
+                        const targetIndex = latestSentences.findIndex(s => s.id === sentenceObj.id);
+                        if (targetIndex >= 0) {
+                            const sentenceData = latestSentences[targetIndex];
+                            const oldMastery = sentenceData.mastery || 0;
+                            const oldNextAvailableAt = sentenceData.nextAvailableAt;
+                            const now = Date.now();
+                            
+                            const { newMastery, newNextAvailableAt, isBlockedByTier } = calculateMasteryAfterAttempt(
+                                oldMastery,
+                                oldNextAvailableAt,
+                                scores.total,
+                                now
+                            );
+                            
+                            sentenceData.mastery = newMastery;
+                            const updatePayload: any = { exampleSentences: latestSentences };
+                            
+                            if (newNextAvailableAt !== undefined) {
+                                sentenceData.nextAvailableAt = newNextAvailableAt;
+                            }
+                            
+                            await updateDoc(docRef, updatePayload);
+                            setCurrentMastery(newMastery);
+                            
+                            if (isBlockedByTier) {
+                                const targetDate = newNextAvailableAt || oldNextAvailableAt || now;
+                                const waitDays = getSydneyCalendarDaysDiff(now, targetDate);
+                                setTierBlockInfo({ blocked: true, waitDays: waitDays > 0 ? waitDays : 1 });
+                            } else {
+                                setTierBlockInfo(null);
+                            }
+                        }
+                    }
+                }
+            }
+            setSessionState('scored');
+
+            if (recordedAudioRef.current) {
+                if (playbackUrlRef.current) {
+                    URL.revokeObjectURL(playbackUrlRef.current);
+                }
+                const url = URL.createObjectURL(blob);
+                playbackUrlRef.current = url;
+                recordedAudioRef.current.src = url;
+                recordedAudioRef.current.currentTime = 0;
+                recordedAudioRef.current.play().catch(() => {});
+            }
+        } catch (err: any) {
+            console.error("Scoring error:", err);
+            setErrorMsg("語音辨識或評分失敗，可以重試評分或重新錄一次");
+            setSessionState('scoreError');
+        }
+    };
+
     const startRecording = async () => {
+        // iPhone 只允許「使用者點擊當下」啟動播放，所以必須在任何 await 之前先解鎖錄音播放器
+        if (recordedAudioRef.current) {
+            recordedAudioRef.current.src = SILENT_AUDIO;
+            recordedAudioRef.current.play().then(() => recordedAudioRef.current?.pause()).catch(() => {});
+        }
         setErrorMsg(null);
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
@@ -245,69 +349,12 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
                 }
             };
 
-            mediaRecorder.onstop = async () => {
+            mediaRecorder.onstop = () => {
                 cleanupAudio();
                 const durationSec = (Date.now() - recordingStartTimeRef.current) / 1000;
-                setSessionState('scoring');
-                
                 const blob = new Blob(audioChunksRef.current, { type: mediaRecorder.mimeType || 'audio/webm' });
-                const file = new File([blob], 'record.webm', { type: blob.type });
-
-                try {
-                    const transcribedText = await transcribeRecording(file);
-                    setUserText(transcribedText);
-                    const scores = calculateFinalScores(transcribedText, sentenceObj.text, durationSec);
-                    setScoreResult(scores);
-
-                    if (scores.total >= 70) {
-                        const uid = auth.currentUser?.uid;
-                        if (uid) {
-                            const docRef = doc(db, `artifacts/${appId}/users/${uid}/languagePatterns`, pattern.id);
-                            const snap = await getDoc(docRef);
-                            if (snap.exists()) {
-                                const data = snap.data();
-                                const latestSentences: PatternExampleSentence[] = data.exampleSentences || [];
-                                const targetIndex = latestSentences.findIndex(s => s.id === sentenceObj.id);
-                                if (targetIndex >= 0) {
-                                    const sentenceData = latestSentences[targetIndex];
-                                    const oldMastery = sentenceData.mastery || 0;
-                                    const oldNextAvailableAt = sentenceData.nextAvailableAt;
-                                    const now = Date.now();
-                                    
-                                    const { newMastery, newNextAvailableAt, isBlockedByTier } = calculateMasteryAfterAttempt(
-                                        oldMastery,
-                                        oldNextAvailableAt,
-                                        scores.total,
-                                        now
-                                    );
-                                    
-                                    sentenceData.mastery = newMastery;
-                                    const updatePayload: any = { exampleSentences: latestSentences };
-                                    
-                                    if (newNextAvailableAt !== undefined) {
-                                        sentenceData.nextAvailableAt = newNextAvailableAt;
-                                    }
-                                    
-                                    await updateDoc(docRef, updatePayload);
-                                    setCurrentMastery(newMastery);
-                                    
-                                    if (isBlockedByTier) {
-                                        const targetDate = newNextAvailableAt || oldNextAvailableAt || now;
-                                        const waitDays = getSydneyCalendarDaysDiff(now, targetDate);
-                                        setTierBlockInfo({ blocked: true, waitDays: waitDays > 0 ? waitDays : 1 });
-                                    } else {
-                                        setTierBlockInfo(null);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    setSessionState('scored');
-                } catch (err: any) {
-                    console.error("Scoring error:", err);
-                    setErrorMsg("語音辨識或評分失敗，請重試");
-                    setSessionState('idle');
-                }
+                lastRecordingRef.current = { blob, durationSec };
+                runScoring(blob, durationSec);
             };
 
             mediaRecorder.start();
@@ -322,7 +369,23 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
         }
     };
 
+    const handleReplayRecording = () => {
+        if (recordedAudioRef.current) {
+            recordedAudioRef.current.currentTime = 0;
+            recordedAudioRef.current.play().catch(() => {});
+        }
+    };
+
     const handleRetry = () => {
+        if (recordedAudioRef.current) {
+            recordedAudioRef.current.pause();
+        }
+        lastRecordingRef.current = null;
+        if (playbackUrlRef.current) {
+            URL.revokeObjectURL(playbackUrlRef.current);
+            playbackUrlRef.current = null;
+        }
+        setErrorMsg(null);
         setScoreResult(null);
         setUserText('');
         setTierBlockInfo(null);
@@ -332,6 +395,7 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
 
     return (
         <div className="flex flex-col h-full bg-slate-50 dark:bg-slate-950 p-6 overflow-y-auto pb-20">
+            <audio ref={recordedAudioRef} className="hidden" preload="auto" />
             <div className="flex items-center gap-4 mb-8">
                 <button 
                     onClick={onBack}
@@ -398,6 +462,29 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
                         </div>
                     )}
 
+                    {sessionState === 'scoreError' && (
+                        <div className="flex flex-col sm:flex-row gap-3 mt-4">
+                            <button
+                                onClick={handleRetry}
+                                className="flex-1 py-4 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-xl font-bold hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors flex items-center justify-center gap-2"
+                            >
+                                <RefreshCw size={18} />
+                                重新錄一次
+                            </button>
+                            <button
+                                onClick={() => {
+                                    if (lastRecordingRef.current) {
+                                        runScoring(lastRecordingRef.current.blob, lastRecordingRef.current.durationSec);
+                                    }
+                                }}
+                                className="flex-1 py-4 bg-indigo-600 text-white rounded-xl font-bold shadow-md hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2"
+                            >
+                                <RefreshCw size={18} />
+                                重試評分
+                            </button>
+                        </div>
+                    )}
+
                     {sessionState === 'recording' && (
                         <div className="flex flex-col items-center justify-center mt-4 gap-4">
                             <div className="w-20 h-20 bg-red-500 text-white rounded-full shadow-lg animate-pulse flex items-center justify-center">
@@ -451,6 +538,13 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
                                     <p className="text-xs font-bold text-slate-500 mb-1">您的發音 (語音辨識)</p>
                                     <p className="font-bold text-slate-800 dark:text-slate-200">{userText}</p>
                                 </div>
+                                <button
+                                    onClick={handleReplayRecording}
+                                    className="w-full py-4 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-xl font-bold hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors flex items-center justify-center gap-2"
+                                >
+                                    <Play size={18} />
+                                    重播我的錄音
+                                </button>
                             </div>
 
                             <div className="flex items-center justify-between mb-2 px-2">
