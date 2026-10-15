@@ -190,7 +190,7 @@ export default function MaterialListView({ onAddClick, onMaterialClick }: { onAd
                             <div key={m.id} className="bg-white dark:bg-slate-900 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-slate-800 hover:shadow-md transition-shadow flex flex-col group cursor-pointer overflow-hidden" onClick={() => onMaterialClick(m)}>
                                 {/* 16:9 封面區 */}
                                 <div className="aspect-video w-full rounded-xl overflow-hidden mb-4 bg-slate-100 dark:bg-slate-800 relative flex items-center justify-center">
-                                    {m.coverStatus === 'done' && m.coverUrl ? (
+                                    {m.coverUrl && m.coverStatus !== 'generating' ? (
                                         <img
                                             src={m.coverUrl}
                                             alt={m.title}

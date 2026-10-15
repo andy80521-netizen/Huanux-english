@@ -27,8 +27,38 @@ export async function callWithModelFallback<T>(
             if (i < models.length - 1) await sleep(delayMs);
         }
     }
-    const busyError: any = new Error('AI 服務暫時忙碌，請稍後再試');
+    let code: number | undefined;
+    const rawCode = Number(lastError?.status ?? lastError?.statusCode ?? lastError?.code ?? lastError?.error?.code);
+    if ([429, 500, 502, 503, 504].includes(rawCode)) {
+        code = rawCode;
+    } else {
+        const msg = String(lastError?.message || '');
+        const match = msg.match(/\b(429|500|502|503|504)\b/);
+        if (match) {
+            code = Number(match[1]);
+        } else if (/RESOURCE_EXHAUSTED|quota/i.test(msg)) {
+            code = 429;
+        }
+    }
+
+    let errorDesc = '';
+    if (code === 429) {
+        errorDesc = '429 請求過多或額度用完';
+    } else if (code === 503) {
+        errorDesc = '503 伺服器忙碌';
+    } else if (code !== undefined) {
+        errorDesc = String(code);
+    }
+
+    const message = errorDesc
+        ? `AI 服務暫時忙碌，請稍後再試（${errorDesc}）`
+        : 'AI 服務暫時忙碌，請稍後再試';
+
+    const busyError: any = new Error(message);
     busyError.isAllModelsBusy = true;
+    if (code !== undefined) {
+        busyError.statusCode = code;
+    }
     busyError.cause = lastError;
     throw busyError;
 }

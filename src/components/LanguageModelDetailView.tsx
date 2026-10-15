@@ -1,15 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { LanguagePattern } from '../types';
 import { auth, db, appId } from '../firebase';
-import { doc, onSnapshot } from 'firebase/firestore';
-import { ChevronLeft, Loader2, Sparkles, BookOpen, Quote, PenTool } from 'lucide-react';
+import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
+import { ChevronLeft, Loader2, Sparkles, BookOpen, Quote, PenTool, RefreshCw } from 'lucide-react';
 import LanguageModelPracticeView from './LanguageModelPracticeView';
 import GroupSelectionView from './GroupSelectionView';
+import { regenerateSeedExamples } from '../services/gemini';
+import ConfirmDialog from './ConfirmDialog';
 
 export default function LanguageModelDetailView({ patternId, onBack }: { patternId: string, onBack: () => void }) {
     const [pattern, setPattern] = useState<LanguagePattern | null>(null);
     const [showGroupSelection, setShowGroupSelection] = useState(false);
     const [selectedGroupIndex, setSelectedGroupIndex] = useState<number | null>(null);
+    const [regenerating, setRegenerating] = useState(false);
+    const [regenerateError, setRegenerateError] = useState<string | null>(null);
+    const [showRegenerateConfirm, setShowRegenerateConfirm] = useState(false);
 
     useEffect(() => {
         const uid = auth.currentUser?.uid;
@@ -51,6 +56,38 @@ export default function LanguageModelDetailView({ patternId, onBack }: { pattern
         'structural': '結構句型',
         'phrase': '片語',
         'collocation': '語組'
+    };
+
+    const doRegenerate = async () => {
+        const uid = auth.currentUser?.uid;
+        if (!uid || regenerating) return;
+
+        setShowRegenerateConfirm(false);
+        setRegenerating(true);
+        setRegenerateError(null);
+
+        try {
+            const avoidSentences = [...(pattern.seedExamples || []).map(e => e.en), ...(pattern.exampleSentences || []).map(s => s.text)]
+                .map(s => (s || '').trim()).filter(Boolean);
+            const examples = await regenerateSeedExamples(
+                { text: pattern.text, meaningZh: pattern.meaningZh, usageContext: pattern.usageContext, category: pattern.category },
+                avoidSentences
+            );
+            await updateDoc(doc(db, `artifacts/${appId}/users/${uid}/languagePatterns`, pattern.id), { seedExamples: examples });
+        } catch (err: any) {
+            console.error('重新產生例句失敗:', err);
+            setRegenerateError(err.message || '重新產生失敗，請稍後再試');
+        } finally {
+            setRegenerating(false);
+        }
+    };
+
+    const handleRegenerateClick = () => {
+        if (pattern.seedExamples && pattern.seedExamples.length > 0) {
+            setShowRegenerateConfirm(true);
+        } else {
+            doRegenerate();
+        }
     };
 
     return (
@@ -127,12 +164,38 @@ export default function LanguageModelDetailView({ patternId, onBack }: { pattern
                     開始造句練習
                 </button>
                 
-            {pattern.seedExamples && pattern.seedExamples.length > 0 && (
-                <div>
-                    <h3 className="text-lg font-black text-slate-800 dark:text-white mb-4 flex items-center gap-2">
+            <div className="space-y-4">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <h3 className="text-lg font-black text-slate-800 dark:text-white flex items-center gap-2">
                         <Quote size={20} className="text-indigo-500" />
                         示範例句
                     </h3>
+                    <button
+                        onClick={handleRegenerateClick}
+                        disabled={regenerating}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-slate-800 border border-indigo-200 dark:border-indigo-800/60 rounded-xl transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        {regenerating ? (
+                            <>
+                                <Loader2 size={14} className="animate-spin" />
+                                <span>產生中…</span>
+                            </>
+                        ) : (
+                            <>
+                                <RefreshCw size={14} />
+                                <span>重新產生</span>
+                            </>
+                        )}
+                    </button>
+                </div>
+
+                {regenerateError && (
+                    <div className="p-3 bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-800 rounded-xl text-red-600 dark:text-red-400 text-sm font-bold">
+                        {regenerateError}
+                    </div>
+                )}
+
+                {pattern.seedExamples && pattern.seedExamples.length > 0 ? (
                     <div className="space-y-3">
                         {pattern.seedExamples.map((ex, idx) => (
                             <div key={idx} className="bg-white dark:bg-slate-900 rounded-xl p-4 shadow-sm border border-slate-200 dark:border-slate-800">
@@ -141,8 +204,22 @@ export default function LanguageModelDetailView({ patternId, onBack }: { pattern
                             </div>
                         ))}
                     </div>
-                </div>
-            )}
+                ) : (
+                    <p className="text-sm font-bold text-slate-400 dark:text-slate-500 py-4 text-center">
+                        目前沒有示範例句，可以按「重新產生」建立
+                    </p>
+                )}
+            </div>
+
+            <ConfirmDialog
+                isOpen={showRegenerateConfirm}
+                title="重新產生例句？"
+                message={`目前的 ${pattern.seedExamples?.length || 0} 句示範例句會被新的取代。\n已經加入造句的句子不受影響。`}
+                confirmText="重新產生"
+                cancelText="取消"
+                onConfirm={doRegenerate}
+                onCancel={() => setShowRegenerateConfirm(false)}
+            />
         </div>
     );
 }

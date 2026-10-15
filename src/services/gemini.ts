@@ -594,3 +594,59 @@ export async function translateSentences(
     return allTranslations;
 }
 
+export async function regenerateSeedExamples(
+  pattern: { text: string; meaningZh: string; usageContext: string; category: string },
+  avoidSentences: string[]
+): Promise<{ en: string; zh: string }[]> {
+  const avoidListText = avoidSentences.length > 0
+    ? avoidSentences.map(s => `- ${s}`).join('\n')
+    : '無';
+
+  const prompt = `依下列句型產生 5 個全新的示範例句，自然道地、貼近日常生活或職場情境，每句 8～20 個英文字，每句都必須明確使用這個句型，並附上自然的中文翻譯。
+句型：${pattern.text}
+類型：${pattern.category}
+語意：${pattern.meaningZh}
+使用時機：${pattern.usageContext}
+以下句子不可重複，也不可只做小幅改寫：
+${avoidListText}
+只回傳 JSON 陣列，格式 [{"en": "...", "zh": "..."}]，不要有其他文字。`;
+
+  const response = await callWithModelFallback(TEXT_MODELS, (model) =>
+    ai.models.generateContent({
+      model,
+      contents: prompt,
+      config: { temperature: 0.8 }
+    })
+  );
+
+  const text = response.text;
+  if (!text) {
+    throw new Error('無法從 Gemini 取得內容');
+  }
+
+  const parsed = cleanAndParseJSON(text);
+  if (!Array.isArray(parsed)) {
+    throw new Error('產生的例句格式不正確，請再試一次');
+  }
+
+  const validExamples = parsed
+    .filter(
+      (item: any) =>
+        item &&
+        typeof item.en === 'string' &&
+        typeof item.zh === 'string' &&
+        item.en.trim() !== '' &&
+        item.zh.trim() !== ''
+    )
+    .map((item: any) => ({
+      en: item.en.trim(),
+      zh: item.zh.trim()
+    }));
+
+  if (validExamples.length < 3) {
+    throw new Error('產生的例句格式不正確，請再試一次');
+  }
+
+  return validExamples;
+}
+
