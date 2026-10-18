@@ -4,8 +4,8 @@ import { getSupportedMimeType } from '../utils/mediaRecorder';
 import { transcribeRecording } from '../services/gemini';
 import { calculateFinalScores } from '../utils/scoring';
 import { generateAndSavePracticePrompts } from '../services/practicePrompts';
-import { auth, db, appId } from '../firebase';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { auth } from '../firebase';
+import { updatePatternSentences } from '../services/sentenceWrites';
 import { Mic, Loader2, Play, RefreshCw, ChevronRight, Check, ChevronLeft } from 'lucide-react';
 import { isSydneyDateReached, addSydneyCalendarDays, getSydneyCalendarDaysDiff } from '../utils/sydneyTime';
 import { SILENT_AUDIO } from '../utils';
@@ -288,42 +288,27 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
             if (scores.total >= 70) {
                 const uid = auth.currentUser?.uid;
                 if (uid) {
-                    const docRef = doc(db, `artifacts/${appId}/users/${uid}/languagePatterns`, pattern.id);
-                    const snap = await getDoc(docRef);
-                    if (snap.exists()) {
-                        const data = snap.data();
-                        const latestSentences: PatternExampleSentence[] = data.exampleSentences || [];
-                        const targetIndex = latestSentences.findIndex(s => s.id === sentenceObj.id);
-                        if (targetIndex >= 0) {
-                            const sentenceData = latestSentences[targetIndex];
-                            const oldMastery = sentenceData.mastery || 0;
-                            const oldNextAvailableAt = sentenceData.nextAvailableAt;
-                            const now = Date.now();
-                            
-                            const { newMastery, newNextAvailableAt, isBlockedByTier } = calculateMasteryAfterAttempt(
-                                oldMastery,
-                                oldNextAvailableAt,
-                                scores.total,
-                                now
-                            );
-                            
-                            sentenceData.mastery = newMastery;
-                            const updatePayload: any = { exampleSentences: latestSentences };
-                            
-                            if (newNextAvailableAt !== undefined) {
-                                sentenceData.nextAvailableAt = newNextAvailableAt;
-                            }
-                            
-                            await updateDoc(docRef, updatePayload);
-                            setCurrentMastery(newMastery);
-                            
-                            if (isBlockedByTier) {
-                                const targetDate = newNextAvailableAt || oldNextAvailableAt || now;
-                                const waitDays = getSydneyCalendarDaysDiff(now, targetDate);
-                                setTierBlockInfo({ blocked: true, waitDays: waitDays > 0 ? waitDays : 1 });
-                            } else {
-                                setTierBlockInfo(null);
-                            }
+                    const now = Date.now();
+                    let outcome: { newMastery: number; newNextAvailableAt?: number; isBlockedByTier: boolean; oldNextAvailableAt?: number } | null = null;
+                    await updatePatternSentences(pattern.id, (sentences) => {
+                        const idx = sentences.findIndex(s => s.id === sentenceObj.id);
+                        if (idx < 0) return null;
+                        const s = sentences[idx];
+                        const oldMastery = s.mastery || 0;
+                        const oldNextAvailableAt = s.nextAvailableAt;
+                        const r = calculateMasteryAfterAttempt(oldMastery, oldNextAvailableAt, scores.total, now);
+                        sentences[idx] = { ...s, mastery: r.newMastery, ...(r.newNextAvailableAt !== undefined ? { nextAvailableAt: r.newNextAvailableAt } : {}) };
+                        outcome = { newMastery: r.newMastery, newNextAvailableAt: r.newNextAvailableAt, isBlockedByTier: r.isBlockedByTier, oldNextAvailableAt };
+                        return sentences;
+                    });
+                    if (outcome) {
+                        setCurrentMastery(outcome.newMastery);
+                        if (outcome.isBlockedByTier) {
+                            const targetDate = outcome.newNextAvailableAt || outcome.oldNextAvailableAt || now;
+                            const waitDays = getSydneyCalendarDaysDiff(now, targetDate);
+                            setTierBlockInfo({ blocked: true, waitDays: waitDays > 0 ? waitDays : 1 });
+                        } else {
+                            setTierBlockInfo(null);
                         }
                     }
                 }

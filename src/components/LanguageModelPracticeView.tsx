@@ -2,10 +2,12 @@ import { checkAndUpdateUnlockedGroups } from '../utils/groupUnlock';
 import React, { useState, useEffect } from 'react';
 import { LanguagePattern, PatternExampleSentence } from '../types';
 import { auth, db, appId } from '../firebase';
-import { doc, updateDoc, getDoc } from 'firebase/firestore';
+import { doc, updateDoc } from 'firebase/firestore';
 import { ChevronLeft, Loader2, Send, CheckCircle2, XCircle, Sparkles, Check, Edit3, Play, Plus } from 'lucide-react';
 import PatternPracticeSessionView from './PatternPracticeSessionView';
-import { checkSentenceQuality, generatePracticePrompts, generatePracticeImage } from '../services/gemini';
+import { checkSentenceQuality } from '../services/gemini';
+import { updatePatternSentences } from '../services/sentenceWrites';
+import { generateAndSavePracticePrompts } from '../services/practicePrompts';
 
 interface Props {
     pattern: LanguagePattern;
@@ -172,39 +174,8 @@ export default function LanguageModelPracticeView({ pattern, groupIndex, onBack 
     const generatePromptsInBackground = (docRef: any, sentenceId: string, sentenceText: string, uid: string) => {
         (async () => {
             try {
-                console.log("開始背景生成出題提示...");
-                const prompts = await generatePracticePrompts(sentenceText, pattern.text);
-                
-                let imageUrl = '';
-                try {
-                    console.log("開始背景生成情境圖片...");
-                    imageUrl = await generatePracticeImage(sentenceText, uid);
-                } catch (imgErr) {
-                    console.error("背景圖片生成失敗 (可能因免費額度限制):", imgErr);
-                }
-
-                // 重新取得最新文件以避免 race condition
-                const snap = await getDoc(docRef);
-                if (snap.exists()) {
-                    const data = snap.data();
-                    const latestSentences: PatternExampleSentence[] = data.exampleSentences || [];
-                    const targetIndex = latestSentences.findIndex(s => s.id === sentenceId);
-                    
-                    if (targetIndex >= 0) {
-                        latestSentences[targetIndex] = {
-                            ...latestSentences[targetIndex],
-                            qaQuestion: prompts.qaQuestion,
-                            situationalPrompt: prompts.situationalPrompt,
-                            ...(imageUrl ? { imageUrl } : {})
-                        };
-                        
-                        await updateDoc(docRef, {
-                            exampleSentences: latestSentences
-                        });
-                        console.log("背景出題內容生成並儲存完成");
-                    }
-                }
-
+                await generateAndSavePracticePrompts(pattern.id, sentenceId, sentenceText, pattern.text);
+                console.log("背景出題內容生成並儲存完成");
             } catch (bgErr) {
                 console.error("背景生成出題內容失敗:", bgErr);
             }
@@ -225,9 +196,6 @@ export default function LanguageModelPracticeView({ pattern, groupIndex, onBack 
 
         try {
             const sentenceId = `p_${groupIndex}_${currentIndex}`;
-            const updatedSentences = [...(pattern.exampleSentences || [])];
-            const existingIndex = updatedSentences.findIndex(s => s.id === sentenceId);
-            
             const newSentenceObj: PatternExampleSentence = {
                 id: sentenceId,
                 text: trimmed,
@@ -245,17 +213,13 @@ export default function LanguageModelPracticeView({ pattern, groupIndex, onBack 
                 attemptCount: attemptCountForCurrent,
             };
 
-            if (existingIndex >= 0) {
-                updatedSentences[existingIndex] = newSentenceObj;
-            } else {
-                updatedSentences.push(newSentenceObj);
-            }
-
-            const docRef = doc(db, `artifacts/${appId}/users/${uid}/languagePatterns`, pattern.id);
-            await updateDoc(docRef, {
-                exampleSentences: updatedSentences
+            await updatePatternSentences(pattern.id, (sentences) => {
+                const i = sentences.findIndex(s => s.id === sentenceId);
+                if (i >= 0) sentences[i] = newSentenceObj; else sentences.push(newSentenceObj);
+                return sentences;
             });
 
+            const docRef = doc(db, `artifacts/${appId}/users/${uid}/languagePatterns`, pattern.id);
             setInputText('');
             setCheckResult(null);
 
@@ -294,20 +258,13 @@ export default function LanguageModelPracticeView({ pattern, groupIndex, onBack 
                 attemptCount: 0
             };
 
-            const updatedSentences = [...(pattern.exampleSentences || [])];
-            const existingIndex = updatedSentences.findIndex(s => s.id === sentenceId);
-
-            if (existingIndex >= 0) {
-                updatedSentences[existingIndex] = newSentenceObj;
-            } else {
-                updatedSentences.push(newSentenceObj);
-            }
-
-            const docRef = doc(db, `artifacts/${appId}/users/${uid}/languagePatterns`, pattern.id);
-            await updateDoc(docRef, {
-                exampleSentences: updatedSentences
+            await updatePatternSentences(pattern.id, (sentences) => {
+                const i = sentences.findIndex(s => s.id === sentenceId);
+                if (i >= 0) sentences[i] = newSentenceObj; else sentences.push(newSentenceObj);
+                return sentences;
             });
 
+            const docRef = doc(db, `artifacts/${appId}/users/${uid}/languagePatterns`, pattern.id);
             generatePromptsInBackground(docRef, sentenceId, text, uid);
         } catch (err: any) {
             console.error(err);
