@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { LanguagePattern } from '../types';
 import { auth, db, appId } from '../firebase';
-import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
-import { ChevronLeft, Loader2, Sparkles, BookOpen, Quote, PenTool, RefreshCw } from 'lucide-react';
+import { doc, onSnapshot, updateDoc, deleteDoc } from 'firebase/firestore';
+import { ChevronLeft, Loader2, Sparkles, BookOpen, Quote, PenTool, RefreshCw, Trash2 } from 'lucide-react';
 import LanguageModelPracticeView from './LanguageModelPracticeView';
 import GroupSelectionView from './GroupSelectionView';
 import { regenerateSeedExamples } from '../services/gemini';
@@ -15,6 +15,9 @@ export default function LanguageModelDetailView({ patternId, onBack }: { pattern
     const [regenerating, setRegenerating] = useState(false);
     const [regenerateError, setRegenerateError] = useState<string | null>(null);
     const [showRegenerateConfirm, setShowRegenerateConfirm] = useState(false);
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+    const [deleting, setDeleting] = useState(false);
+    const [deleteError, setDeleteError] = useState<string | null>(null);
 
     useEffect(() => {
         const uid = auth.currentUser?.uid;
@@ -90,6 +93,24 @@ export default function LanguageModelDetailView({ patternId, onBack }: { pattern
         }
     };
 
+    const handleDeletePattern = async () => {
+        const uid = auth.currentUser?.uid;
+        if (!uid || deleting) return;
+
+        setShowDeleteConfirm(false);
+        setDeleting(true);
+        setDeleteError(null);
+
+        try {
+            await deleteDoc(doc(db, `artifacts/${appId}/users/${uid}/languagePatterns`, pattern.id));
+            onBack();
+        } catch (err: any) {
+            console.error('刪除句型失敗:', err);
+            setDeleteError(err.message || '刪除失敗，請稍後再試');
+            setDeleting(false);
+        }
+    };
+
     return (
         <div className="flex flex-col h-full bg-slate-50 dark:bg-slate-950 p-6 overflow-y-auto pb-20">
             <div className="flex items-center gap-4 mb-8">
@@ -107,7 +128,21 @@ export default function LanguageModelDetailView({ patternId, onBack }: { pattern
                         {pattern.primaryCategory}
                     </span>
                 </div>
+                <button
+                    onClick={() => setShowDeleteConfirm(true)}
+                    disabled={deleting}
+                    className="p-2 bg-white dark:bg-slate-900 text-red-500 hover:text-red-600 dark:text-red-400 dark:hover:text-red-300 rounded-full shadow-sm hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                    title="刪除句型"
+                >
+                    {deleting ? <Loader2 size={24} className="animate-spin" /> : <Trash2 size={24} />}
+                </button>
             </div>
+
+            {deleteError && (
+                <div className="p-3 bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-800 rounded-xl text-red-600 dark:text-red-400 text-sm font-bold mb-6">
+                    {deleteError}
+                </div>
+            )}
 
             <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-800 mb-6">
                 <h2 className="text-3xl sm:text-4xl font-black text-slate-800 dark:text-white mb-6 leading-tight">
@@ -219,6 +254,16 @@ export default function LanguageModelDetailView({ patternId, onBack }: { pattern
                 cancelText="取消"
                 onConfirm={doRegenerate}
                 onCancel={() => setShowRegenerateConfirm(false)}
+            />
+
+            <ConfirmDialog
+                isOpen={showDeleteConfirm}
+                title="刪除這個句型？"
+                message={`「${pattern.text}」\n這個句型的 ${(pattern.exampleSentences || []).length} 句造句與所有練習進度會一起刪除，無法復原。`}
+                confirmText="刪除"
+                cancelText="取消"
+                onConfirm={handleDeletePattern}
+                onCancel={() => setShowDeleteConfirm(false)}
             />
         </div>
     );

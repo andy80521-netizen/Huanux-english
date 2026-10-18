@@ -65,8 +65,9 @@ export default function GroupSelectionView({ pattern, onBack, onSelectGroup }: P
               </div>
               
               {unlocked ? (
-                <div className="text-sm font-bold text-slate-500">
-                  已完成：<span className={completedCount === 10 ? 'text-emerald-500' : 'text-indigo-500'}>{completedCount}</span> / 10 句
+                <div className="text-sm font-bold text-slate-500 space-y-0.5">
+                  <div>已造句：{groupSentences.filter(s => s.checked).length} / 10</div>
+                  <div>已精熟：<span className={completedCount === 10 ? 'text-emerald-500' : 'text-indigo-500'}>{completedCount}</span> / 10</div>
                 </div>
               ) : (
                 <div className="text-sm font-bold text-slate-400">

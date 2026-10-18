@@ -424,30 +424,54 @@ export default function LanguageModelListView({ onPatternClick, filters, onFilte
                             </div>
                             
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                {grouped[primaryCategory].map(pattern => (
-                                    <div 
-                                        key={pattern.id}
-                                        onClick={() => onPatternClick(pattern.id)}
-                                        className="bg-white dark:bg-slate-900 rounded-xl p-4 shadow-sm border border-slate-200 dark:border-slate-800 hover:shadow-md hover:border-indigo-200 dark:hover:border-indigo-800 transition-all cursor-pointer group flex flex-col"
-                                    >
-                                        <div className="flex items-start justify-between mb-2">
-                                            <h4 className="text-lg font-black text-slate-800 dark:text-slate-100 flex-1 pr-2 leading-tight">
-                                                {pattern.text}
-                                            </h4>
-                                            <ChevronRight size={18} className="text-slate-300 group-hover:text-indigo-500 transition-colors shrink-0 mt-1" />
-                                        </div>
-                                        <div className="flex flex-wrap items-center gap-2 mt-auto pt-4">
-                                            <span className="text-[10px] font-bold bg-indigo-50 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400 px-2 py-1 rounded-md">
-                                                {categoryLabels[pattern.category] || pattern.category}
-                                            </span>
-                                            {pattern.sourceLabel && (
-                                                <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-md truncate max-w-[150px]">
-                                                    來自: {pattern.sourceLabel}
-                                                </span>
+                                {grouped[primaryCategory].map(pattern => {
+                                    const all = pattern.exampleSentences || [];
+                                    const createdCount = all.filter(s => s.checked).length;
+                                    const masteredCount = all.filter(s => s.checked && (s.mastery || 0) >= 1000).length;
+
+                                    return (
+                                        <div 
+                                            key={pattern.id}
+                                            onClick={() => onPatternClick(pattern.id)}
+                                            className="bg-white dark:bg-slate-900 rounded-xl p-4 shadow-sm border border-slate-200 dark:border-slate-800 hover:shadow-md hover:border-indigo-200 dark:hover:border-indigo-800 transition-all cursor-pointer group flex flex-col"
+                                        >
+                                            <div className="flex items-start justify-between mb-1">
+                                                <h4 className="text-lg font-black text-slate-800 dark:text-slate-100 flex-1 pr-2 leading-tight">
+                                                    {pattern.text}
+                                                </h4>
+                                                <ChevronRight size={18} className="text-slate-300 group-hover:text-indigo-500 transition-colors shrink-0 mt-1" />
+                                            </div>
+                                            {pattern.meaningZh && (
+                                                <p className="text-sm text-slate-500 dark:text-slate-400 line-clamp-1 mb-2">
+                                                    {pattern.meaningZh}
+                                                </p>
                                             )}
+
+                                            <div className="mt-auto pt-3">
+                                                <div className="text-xs text-slate-500 dark:text-slate-400 mb-1.5 font-bold">
+                                                    已造句 {createdCount}/100・已精熟 {masteredCount}/100
+                                                </div>
+                                                <div className="w-full h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                                                    <div 
+                                                        className="h-full bg-indigo-500 rounded-full transition-all duration-300"
+                                                        style={{ width: `${Math.min(100, Math.max(0, masteredCount))}%` }}
+                                                    />
+                                                </div>
+                                            </div>
+
+                                            <div className="flex flex-wrap items-center gap-2 pt-3">
+                                                <span className="text-[10px] font-bold bg-indigo-50 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400 px-2 py-1 rounded-md">
+                                                    {categoryLabels[pattern.category] || pattern.category}
+                                                </span>
+                                                {pattern.sourceLabel && (
+                                                    <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-md truncate max-w-[150px]">
+                                                        來自: {pattern.sourceLabel}
+                                                    </span>
+                                                )}
+                                            </div>
                                         </div>
-                                    </div>
-                                ))}
+                                    );
+                                })}
                             </div>
                         </div>
                     ))}
