@@ -17,6 +17,7 @@ interface Props {
   onBack: () => void;
   onNext: () => void;
   isLastSentence: boolean;
+  progressLabel?: string;
 }
 
 type SessionState = 'idle' | 'recording' | 'scoring' | 'scored' | 'scoreError';
@@ -111,7 +112,7 @@ const pickPromptTypeByMastery = (available: PromptType[], mastery: number): Prom
     return available[available.length - 1];
 };
 
-export default function PatternPracticeSessionView({ pattern, sentenceIndex, groupIndex, onBack, onNext, isLastSentence }: Props) {
+export default function PatternPracticeSessionView({ pattern, sentenceIndex, groupIndex, onBack, onNext, isLastSentence, progressLabel }: Props) {
     const [sessionState, setSessionState] = useState<SessionState>('idle');
     const [activePromptType, setActivePromptType] = useState<PromptType | null>(null);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -424,6 +425,11 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
                     <h2 className="text-xl font-black text-slate-800 dark:text-white line-clamp-1">
                         念出來練習
                     </h2>
+                    {progressLabel && (
+                        <p className="text-sm text-slate-500 dark:text-slate-400">
+                            {progressLabel}
+                        </p>
+                    )}
                 </div>
             </div>
 

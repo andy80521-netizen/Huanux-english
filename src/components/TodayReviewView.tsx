@@ -3,13 +3,20 @@ import { collection, onSnapshot } from 'firebase/firestore';
 import { auth, db, appId } from '../firebase';
 import { LanguagePattern, PatternExampleSentence } from '../types';
 import { isSydneyDateReached } from '../utils/sydneyTime';
-import { interleaveByKey } from '../utils/interleave';
 import PatternPracticeSessionView from './PatternPracticeSessionView';
-import { Sparkles, CalendarCheck, Target } from 'lucide-react';
+import { Sparkles, CalendarCheck, Target, CheckCircle2 } from 'lucide-react';
 
 interface ReviewItem {
     pattern: LanguagePattern;
     sentence: PatternExampleSentence;
+}
+
+interface ReviewGroup {
+    key: string;
+    pattern: LanguagePattern;
+    groupIndex: number;
+    items: ReviewItem[];
+    avgMastery: number;
 }
 
 export default function TodayReviewView() {
@@ -21,6 +28,9 @@ export default function TodayReviewView() {
     const [sessionQueue, setSessionQueue] = useState<ReviewItem[] | null>(null);
     const [completedKeys, setCompletedKeys] = useState<Set<string>>(new Set());
     const [activeItemKey, setActiveItemKey] = useState<string | null>(null);
+    const [startMasteryMap, setStartMasteryMap] = useState<Record<string, number>>({});
+    const [activeGroup, setActiveGroup] = useState<{ pattern: LanguagePattern; groupIndex: number } | null>(null);
+    const [isSummary, setIsSummary] = useState(false);
 
     useEffect(() => {
         const unsubscribeAuth = auth.onAuthStateChanged((u) => {
@@ -73,6 +83,46 @@ export default function TodayReviewView() {
         return items;
     }, [patterns]);
 
+    const reviewGroups = useMemo(() => {
+        const map = new Map<string, { pattern: LanguagePattern; groupIndex: number; items: ReviewItem[] }>();
+
+        reviewItems.forEach((item) => {
+            const gIdx = item.sentence.groupIndex ?? 0;
+            const key = `${item.pattern.id}::${gIdx}`;
+            if (!map.has(key)) {
+                map.set(key, { pattern: item.pattern, groupIndex: gIdx, items: [] });
+            }
+            map.get(key)!.items.push(item);
+        });
+
+        const groups: ReviewGroup[] = Array.from(map.entries()).map(([key, data]) => {
+            // items（依 sentence.id 結尾數字由小到大排序，例如 p_0_2 的 2）
+            const sortedItems = [...data.items].sort((a, b) => {
+                const numA = parseInt(a.sentence.id.split('_').pop() || '0', 10);
+                const numB = parseInt(b.sentence.id.split('_').pop() || '0', 10);
+                return (isNaN(numA) ? 0 : numA) - (isNaN(numB) ? 0 : numB);
+            });
+            const totalMastery = sortedItems.reduce((acc, it) => acc + (it.sentence.mastery || 0), 0);
+            const avgMastery = sortedItems.length > 0 ? Math.round(totalMastery / sortedItems.length) : 0;
+            return {
+                key,
+                pattern: data.pattern,
+                groupIndex: data.groupIndex,
+                items: sortedItems,
+                avgMastery
+            };
+        });
+
+        // 組的排序：先依 pattern.text（localeCompare），再依 groupIndex
+        groups.sort((a, b) => {
+            const cmp = (a.pattern.text || '').localeCompare(b.pattern.text || '');
+            if (cmp !== 0) return cmp;
+            return a.groupIndex - b.groupIndex;
+        });
+
+        return groups;
+    }, [reviewItems]);
+
     if (!user) {
         return (
             <div className="flex flex-col items-center justify-center h-full bg-slate-50 dark:bg-slate-950 text-slate-500 font-bold">
@@ -89,22 +139,30 @@ export default function TodayReviewView() {
         );
     }
 
-    const startSession = (startIndex: number) => {
-        const startingItem = reviewItems[startIndex];
-        const rest = reviewItems.filter((_, i) => i !== startIndex);
-        // 點選的題目排第一題，其餘跨句型交錯混合（v1 交錯練習）
-        const queue = [startingItem, ...interleaveByKey(rest, item => item.pattern.id, startingItem.pattern.id)];
+    const startSession = (group: ReviewGroup) => {
+        const queue = group.items;
+        if (queue.length === 0) return;
         setSessionQueue(queue);
         setCompletedKeys(new Set());
-
-        const key = `${startingItem.pattern.id}-${startingItem.sentence.id}`;
-        setActiveItemKey(key);
+        const initialMastery: Record<string, number> = {};
+        queue.forEach((it) => {
+            const key = `${it.pattern.id}::${it.sentence.id}`;
+            initialMastery[key] = it.sentence.mastery || 0;
+        });
+        setStartMasteryMap(initialMastery);
+        setActiveGroup({ pattern: group.pattern, groupIndex: group.groupIndex });
+        setIsSummary(false);
+        const firstKey = `${queue[0].pattern.id}::${queue[0].sentence.id}`;
+        setActiveItemKey(firstKey);
     };
 
     const handleBackFromSession = () => {
         setSessionQueue(null);
         setCompletedKeys(new Set());
         setActiveItemKey(null);
+        setStartMasteryMap({});
+        setActiveGroup(null);
+        setIsSummary(false);
     };
 
     const handleNextInSession = () => {
@@ -116,20 +174,82 @@ export default function TodayReviewView() {
         
         // Find next uncompleted item in queue
         const nextItem = sessionQueue.find(item => {
-            const key = `${item.pattern.id}-${item.sentence.id}`;
+            const key = `${item.pattern.id}::${item.sentence.id}`;
             return !newCompleted.has(key);
         });
         
         if (nextItem) {
-            setActiveItemKey(`${nextItem.pattern.id}-${nextItem.sentence.id}`);
+            setActiveItemKey(`${nextItem.pattern.id}::${nextItem.sentence.id}`);
         } else {
-            // Queue finished
-            handleBackFromSession();
+            // Queue finished -> enter summary mode
+            setActiveItemKey(null);
+            setIsSummary(true);
         }
     };
 
+    if (isSummary && activeGroup) {
+        let totalMasteryDiff = 0;
+        let masteredCount = 0;
+
+        completedKeys.forEach(key => {
+            const [pId, sId] = key.split('::');
+            const p = patterns.find(item => item.id === pId);
+            const s = p?.exampleSentences?.find(item => item.id === sId);
+            const latestMastery = s?.mastery || 0;
+            const startMastery = startMasteryMap[key] ?? 0;
+
+            totalMasteryDiff += (latestMastery - startMastery);
+            if (startMastery < 1000 && latestMastery === 1000) {
+                masteredCount += 1;
+            }
+        });
+
+        const diffDisplay = totalMasteryDiff >= 0 ? `+${totalMasteryDiff}` : `${totalMasteryDiff}`;
+
+        return (
+            <div className="flex flex-col items-center justify-center h-full bg-slate-50 dark:bg-slate-950 p-6 overflow-y-auto">
+                <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl p-8 border border-slate-200 dark:border-slate-800 shadow-xl text-center space-y-6">
+                    <div className="w-16 h-16 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 rounded-2xl flex items-center justify-center mx-auto shadow-inner">
+                        <CheckCircle2 size={36} />
+                    </div>
+
+                    <div>
+                        <h2 className="text-2xl font-black text-slate-800 dark:text-white">
+                            本組練習完成
+                        </h2>
+                        <p className="text-sm font-bold text-slate-500 dark:text-slate-400 mt-1">
+                            {activeGroup.pattern.text}・第 {activeGroup.groupIndex + 1} 組
+                        </p>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-3 pt-2">
+                        <div className="bg-slate-50 dark:bg-slate-800/60 rounded-2xl p-4 border border-slate-100 dark:border-slate-800">
+                            <div className="text-xs font-bold text-slate-500 dark:text-slate-400 mb-1">練習句數</div>
+                            <div className="text-xl font-black text-slate-800 dark:text-white">{completedKeys.size}</div>
+                        </div>
+                        <div className="bg-indigo-50 dark:bg-indigo-950/40 rounded-2xl p-4 border border-indigo-100 dark:border-indigo-900/50">
+                            <div className="text-xs font-bold text-indigo-600 dark:text-indigo-400 mb-1">熟練度合計</div>
+                            <div className="text-xl font-black text-indigo-600 dark:text-indigo-400">{diffDisplay}</div>
+                        </div>
+                        <div className="bg-amber-50 dark:bg-amber-950/40 rounded-2xl p-4 border border-amber-100 dark:border-amber-900/50">
+                            <div className="text-xs font-bold text-amber-600 dark:text-amber-400 mb-1">本次精熟</div>
+                            <div className="text-xl font-black text-amber-600 dark:text-amber-400">{masteredCount}</div>
+                        </div>
+                    </div>
+
+                    <button
+                        onClick={handleBackFromSession}
+                        className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-bold rounded-2xl shadow-lg shadow-indigo-200 dark:shadow-none transition-all cursor-pointer"
+                    >
+                        返回今日複習
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
     if (sessionQueue && activeItemKey) {
-        const [targetPatternId, targetSentenceId] = activeItemKey.split('-');
+        const [targetPatternId, targetSentenceId] = activeItemKey.split('::');
         
         // Fetch from LATEST patterns source of truth, not snapshot
         const latestPattern = patterns.find(p => p.id === targetPatternId);
@@ -148,7 +268,7 @@ export default function TodayReviewView() {
         
         // Check if this is the last uncompleted item in the snapshot queue
         const remainingUncompleted = sessionQueue.filter(item => {
-            const key = `${item.pattern.id}-${item.sentence.id}`;
+            const key = `${item.pattern.id}::${item.sentence.id}`;
             return key !== activeItemKey && !completedKeys.has(key);
         });
         const isLastSentence = remainingUncompleted.length === 0;
@@ -157,9 +277,11 @@ export default function TodayReviewView() {
             <PatternPracticeSessionView
                 pattern={latestPattern}
                 sentenceIndex={latestSentenceIndex}
+                groupIndex={activeGroup?.groupIndex}
                 onBack={handleBackFromSession}
                 onNext={handleNextInSession}
                 isLastSentence={isLastSentence}
+                progressLabel={`第 ${completedKeys.size + 1} / ${sessionQueue.length} 題`}
             />
         );
     }
@@ -180,7 +302,7 @@ export default function TodayReviewView() {
                 </div>
             </div>
 
-            {reviewItems.length === 0 ? (
+            {reviewGroups.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-20 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 text-center shadow-sm">
                     <Sparkles size={48} className="text-amber-400 mb-4" />
                     <h3 className="text-lg font-black text-slate-700 dark:text-slate-200 mb-2">今天沒有可以複習的句子</h3>
@@ -190,23 +312,22 @@ export default function TodayReviewView() {
                 </div>
             ) : (
                 <div className="space-y-4">
-                    {reviewItems.map((item, index) => {
-                        const mastery = item.sentence.mastery || 0;
+                    {reviewGroups.map((group) => {
                         return (
                             <div 
-                                key={`${item.pattern.id}-${item.sentence.id}`}
-                                onClick={() => startSession(index)}
+                                key={group.key}
+                                onClick={() => startSession(group)}
                                 className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200 dark:border-slate-800 shadow-sm cursor-pointer hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors group"
                             >
-                                <div className="text-xs font-bold text-indigo-500 mb-2 truncate">
-                                    來自句型：{item.pattern.text}
+                                <div className="text-xs font-bold text-indigo-500 dark:text-indigo-400 mb-2 truncate">
+                                    來自句型：{group.pattern.text}
                                 </div>
                                 <div className="text-lg font-bold text-slate-800 dark:text-slate-100 mb-4">
-                                    {item.sentence.text}
+                                    第 {group.groupIndex + 1} 組・待練 {group.items.length} 句
                                 </div>
-                                <div className="flex items-center gap-2 text-xs font-bold text-slate-500">
+                                <div className="flex items-center gap-2 text-xs font-bold text-slate-500 dark:text-slate-400">
                                     <Target size={14} className="text-amber-500" />
-                                    熟練度: {mastery} / 1000
+                                    平均熟練度：{group.avgMastery} / 1000
                                 </div>
                             </div>
                         );
