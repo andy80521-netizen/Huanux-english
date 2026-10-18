@@ -1,10 +1,4 @@
-export async function verifyRealUser(req: Request): Promise<{ uid: string } | { error: string; status: number }> {
-    const authHeader = req.headers.get('Authorization') || '';
-    const idToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
-    if (!idToken) {
-        return { error: '未登入', status: 401 };
-    }
-
+export async function verifyRealUserToken(idToken: string): Promise<{ uid: string } | { error: string; status: number }> {
     const apiKey = process.env.VITE_FB_API_KEY;
     if (!apiKey) {
         return { error: '登入驗證失敗，請重新登入', status: 401 };
@@ -32,4 +26,13 @@ export async function verifyRealUser(req: Request): Promise<{ uid: string } | { 
     } catch {
         return { error: '登入驗證失敗，請重新登入', status: 401 };
     }
+}
+
+export async function verifyRealUser(req: Request): Promise<{ uid: string } | { error: string; status: number }> {
+    const authHeader = req.headers.get('Authorization') || '';
+    const idToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+    if (!idToken) {
+        return { error: '未登入', status: 401 };
+    }
+    return verifyRealUserToken(idToken);
 }

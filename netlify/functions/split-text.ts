@@ -1,10 +1,10 @@
 import type { Handler } from '@netlify/functions';
-import { GoogleGenAI } from '@google/genai';
-import { callWithModelFallback } from '../shared/geminiFallback';
+import { verifyRealUserToken } from '../shared/auth';
+import { callGeminiFreeThenPaid } from '../shared/aiKeys';
 
 const headers = {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Access-Control-Allow-Methods': 'POST, OPTIONS'
 };
 
@@ -27,21 +27,22 @@ export const handler: Handler = async (event, context) => {
         return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method Not Allowed' }) };
     }
 
+    const authHeader = event.headers.authorization || event.headers.Authorization || '';
+    const idToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+    if (!idToken) {
+        return { statusCode: 401, headers, body: JSON.stringify({ error: '未登入' }) };
+    }
+    const authResult = await verifyRealUserToken(idToken);
+    if ('error' in authResult) {
+        return { statusCode: authResult.status, headers, body: JSON.stringify({ error: authResult.error }) };
+    }
+
     try {
         const { sourceText } = JSON.parse(event.body || '{}');
 
         if (!sourceText) {
             return { statusCode: 400, headers, body: JSON.stringify({ error: 'Missing sourceText' }) };
         }
-
-        const apiKey = process.env.GEMINI_API_KEY;
-        if (!apiKey) {
-             console.error('GEMINI_API_KEY is missing');
-             return { statusCode: 500, headers, body: JSON.stringify({ error: 'Server misconfiguration: API Key missing' }) };
-        }
-
-        const ai = new GoogleGenAI({ apiKey });
-        const TEXT_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash'];
 
         const prompt = `請將以下英文文本逐句斷句，並提供每一句的繁體中文翻譯。
 請只回傳 JSON 格式的陣列，不要包含任何 markdown 標記、\`\`\`json 標籤或其他文字。
@@ -51,7 +52,7 @@ text 欄位必須是原文逐字內容，絕對不可改寫、不可濃縮摘要
 原文內容：
 ${sourceText}`;
 
-        const response = await callWithModelFallback(TEXT_MODELS, (model) => ai.models.generateContent({
+        const response = await callGeminiFreeThenPaid('splitText', (ai, model) => ai.models.generateContent({
             model,
             contents: prompt,
             config: {

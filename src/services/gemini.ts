@@ -56,10 +56,14 @@ const normalizePrimaryCategories = (items: any) => {
 };
 
 export async function splitTextToSentences(sourceText: string): Promise<{ text: string; translation: string }[]> {
+    const idToken = await auth.currentUser?.getIdToken();
+    if (!idToken) throw new Error('請先登入');
+
     const response = await fetch('/.netlify/functions/split-text', {
         method: 'POST',
         headers: {
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${idToken}`
         },
         body: JSON.stringify({ sourceText })
     });
@@ -265,21 +269,10 @@ export async function transcribeRecording(audioFile: File): Promise<string> {
         try {
             const audioBase64 = await fileToBase64(audioFile);
             const mimeType = (audioFile.type || 'audio/webm').split(';')[0];
-            const prompt = "請把這段音檔裡使用者說的英文內容逐字轉錄出來,只回傳轉錄後的純文字,不要有任何其他說明文字、不要有引號、不要有markdown格式";
-            const response = await callWithModelFallback(TEXT_MODELS, (model) => ai.models.generateContent({
-                model,
-                contents: [
-                    prompt,
-                    { inlineData: { mimeType, data: audioBase64 } }
-                ],
-                config: {
-                    temperature: 0.1,
-                    thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL }
-                }
-            }));
-            if (!response.text) throw new Error("Gemini API 回傳空內容");
+            const data = await callAiText<{ text: string }>('transcribe', { audioBase64, mimeType });
+            if (!data?.text) throw new Error("Gemini API 回傳空內容");
             console.log(`[計時] Gemini 語音轉文字完成：${Math.round(performance.now() - t0)} ms`);
-            return response.text.trim();
+            return data.text;
         } catch (e: any) {
             // 任何錯誤都改用 Whisper（Gemini 官方未保證支援 webm/mp4 格式，Whisper 則明確支援）
             console.warn(`[模型備援] Gemini 語音轉文字失敗（${Math.round(performance.now() - t0)} ms），改用 Whisper`, e?.message);
@@ -301,56 +294,11 @@ export async function extractPatternsFromSentence(
     sentenceText: string,
     sentenceTranslation: string
   ): Promise<Omit<LanguagePattern, 'id' | 'sourceMaterialId' | 'sourceLabel' | 'exampleSentences' | 'unlockedGroups'>[]> {
-    const prompt = `這是使用者既有的雙語分析框架(結構句型Structural Patterns / 片語Phrases / 語組Collocations三分類)。
-輸入只有這一句英文+中文翻譯,請從這句話裡拆解出可能不只一個的句型/片語/語組(例如一句話裡可能同時有一個結構句型跟一個片語,都要各自拆出來)。
-每個萃取出來的項目要包含:
-- category (三選一: "structural", "phrase", "collocation")
-- text (句型/片語本身，英文)
-- meaningZh (中文語意說明)
-- usageContext (使用時機說明)
-- primaryCategory (主要情境大類，依下方「主要情境分類」規則填寫)
-- situationTags (情緒/溝通功能標籤陣列，例如 ["劃清界線", "委婉拒絕"])
-- seedExamples (至少5個, 明確由你生成的示範例句，不是從原句摘錄，格式 {en: string, zh: string} 陣列)
-
-${PRIMARY_CATEGORY_GUIDE}
-
-請只回傳 JSON 陣列，不要有其他文字。
-格式範例：
-[
-  {
-    "category": "structural",
-    "text": "...",
-    "meaningZh": "...",
-    "usageContext": "...",
-    "primaryCategory": "...",
-    "situationTags": ["..."],
-    "seedExamples": [{"en": "...", "zh": "..."}]
-  }
-]
-
-輸入句子：
-英文: ${sentenceText}
-中文: ${sentenceTranslation}
-`;
-
-    const response = await callWithModelFallback(TEXT_MODELS, (model) => ai.models.generateContent({
-        model,
-        contents: prompt,
-        config: {
-            temperature: 0.2,
-        }
-    }));
-
-    const text = response.text;
-    if (!text) {
-        throw new Error("無法從 Gemini 取得內容");
-    }
-
-    try {
-        return normalizePrimaryCategories(cleanAndParseJSON(text));
-    } catch (e: any) {
-        throw new Error("解析語言模型句型失敗：" + e.message);
-    }
+    const data = await callAiText<{ patterns: any[] }>('extractFromSentence', {
+        sentenceText,
+        sentenceTranslation: (sentenceTranslation || '').slice(0, 1000)
+    });
+    return data.patterns;
 }
 
 
@@ -414,55 +362,11 @@ export async function generatePracticeImage(
 export async function extractPatternsFromText(
     sourceText: string
   ): Promise<Omit<LanguagePattern, 'id' | 'sourceMaterialId' | 'sourceLabel' | 'exampleSentences' | 'unlockedGroups'>[]> {
-    const prompt = `這是使用者既有的雙語分析框架(結構句型Structural Patterns / 片語Phrases / 語組Collocations三分類)。
-輸入為一段完整的英文段落, 請從這段文字裡找出所有值得萃取的句型/片語/語組。請考慮跨句子的語境關聯, 不要逐句機械式拆解。
-每個萃取出來的項目要包含:
-- category (三選一: "structural", "phrase", "collocation")
-- text (句型/片語本身，英文)
-- meaningZh (中文語意說明)
-- usageContext (使用時機說明)
-- primaryCategory (主要情境大類，依下方「主要情境分類」規則填寫)
-- situationTags (情緒/溝通功能標籤陣列，例如 ["強調", "轉折"])
-- seedExamples (至少5個, 明確由你生成的示範例句，格式 {en: string, zh: string} 陣列)
-
-${PRIMARY_CATEGORY_GUIDE}
-
-請只回傳 JSON 陣列，不要有其他文字。
-格式範例：
-[
-  {
-    "category": "structural",
-    "text": "...",
-    "meaningZh": "...",
-    "usageContext": "...",
-    "primaryCategory": "...",
-    "situationTags": ["..."],
-    "seedExamples": [{"en": "...", "zh": "..."}]
-  }
-]
-
-輸入文字：
-${sourceText}
-`;
-
-    const response = await callWithModelFallback(TEXT_MODELS, (model) => ai.models.generateContent({
-        model,
-        contents: prompt,
-        config: {
-            temperature: 0.2,
-        }
-    }));
-
-    const text = response.text;
-    if (!text) {
-        throw new Error("無法從 Gemini 取得內容");
+    if (sourceText.length > 30000) {
+        throw new Error('文字太長（超過 30000 字），請分段匯入');
     }
-
-    try {
-        return normalizePrimaryCategories(cleanAndParseJSON(text));
-    } catch (e: any) {
-        throw new Error("解析語言模型句型失敗：" + e.message);
-    }
+    const data = await callAiText<{ patterns: any[] }>('extractFromText', { sourceText });
+    return data.patterns;
 }
 
 
@@ -475,6 +379,9 @@ export async function translateSentences(
     if (sentences.length === 0) {
         return [];
     }
+
+    const idToken = await auth.currentUser?.getIdToken();
+    if (!idToken) throw new Error('請先登入');
 
     const BATCH_SIZE = 30;
     const allTranslations: string[] = [];
@@ -490,7 +397,8 @@ export async function translateSentences(
         const response = await fetch('/.netlify/functions/translate-sentences', {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${idToken}`
             },
             body: JSON.stringify({ sentences: batch })
         });

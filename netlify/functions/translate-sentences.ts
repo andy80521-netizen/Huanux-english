@@ -1,10 +1,10 @@
 import type { Handler } from '@netlify/functions';
-import { GoogleGenAI } from '@google/genai';
-import { callWithModelFallback } from '../shared/geminiFallback';
+import { verifyRealUserToken } from '../shared/auth';
+import { callGeminiFreeThenPaid } from '../shared/aiKeys';
 
 const headers = {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Access-Control-Allow-Methods': 'POST, OPTIONS'
 };
 
@@ -27,6 +27,16 @@ export const handler: Handler = async (event, context) => {
         return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method Not Allowed' }) };
     }
 
+    const authHeader = event.headers.authorization || event.headers.Authorization || '';
+    const idToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+    if (!idToken) {
+        return { statusCode: 401, headers, body: JSON.stringify({ error: '未登入' }) };
+    }
+    const authResult = await verifyRealUserToken(idToken);
+    if ('error' in authResult) {
+        return { statusCode: authResult.status, headers, body: JSON.stringify({ error: authResult.error }) };
+    }
+
     try {
         const { sentences } = JSON.parse(event.body || '{}');
 
@@ -38,15 +48,6 @@ export const handler: Handler = async (event, context) => {
             };
         }
 
-        const apiKey = process.env.GEMINI_API_KEY;
-        if (!apiKey) {
-            console.error('GEMINI_API_KEY is missing');
-            return { statusCode: 500, headers, body: JSON.stringify({ error: 'Server misconfiguration: API Key missing' }) };
-        }
-
-        const ai = new GoogleGenAI({ apiKey });
-        const TEXT_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash'];
-
         const prompt = `請將以下英文句子陣列逐句翻譯成繁體中文。
 請只回傳 JSON 格式的字串陣列，不要包含任何 markdown 標記、\`\`\`json 標籤或其他文字。
 回傳的句數與順序必須與輸入完全一致，不得合併、不得拆分、亦不得改寫。
@@ -55,7 +56,7 @@ export const handler: Handler = async (event, context) => {
 輸入英文句子陣列：
 ${JSON.stringify(sentences, null, 2)}`;
 
-        const response = await callWithModelFallback(TEXT_MODELS, (model) => ai.models.generateContent({
+        const response = await callGeminiFreeThenPaid('translateSentences', (ai, model) => ai.models.generateContent({
             model,
             contents: prompt,
             config: {
