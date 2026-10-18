@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { LanguagePattern } from '../types';
 import { auth, db, appId } from '../firebase';
-import { doc, onSnapshot, updateDoc, deleteDoc } from 'firebase/firestore';
+import { doc, onSnapshot, deleteDoc } from 'firebase/firestore';
 import { ChevronLeft, Loader2, Sparkles, BookOpen, Quote, PenTool, RefreshCw, Trash2 } from 'lucide-react';
 import LanguageModelPracticeView from './LanguageModelPracticeView';
 import GroupSelectionView from './GroupSelectionView';
-import { regenerateSeedExamples } from '../services/gemini';
+import { regenerateAndSaveSeedExamples } from '../services/seedExamples';
 import ConfirmDialog from './ConfirmDialog';
 
 export default function LanguageModelDetailView({ patternId, onBack }: { patternId: string, onBack: () => void }) {
@@ -70,13 +70,7 @@ export default function LanguageModelDetailView({ patternId, onBack }: { pattern
         setRegenerateError(null);
 
         try {
-            const avoidSentences = [...(pattern.seedExamples || []).map(e => e.en), ...(pattern.exampleSentences || []).map(s => s.text)]
-                .map(s => (s || '').trim()).filter(Boolean);
-            const examples = await regenerateSeedExamples(
-                { text: pattern.text, meaningZh: pattern.meaningZh, usageContext: pattern.usageContext, category: pattern.category },
-                avoidSentences
-            );
-            await updateDoc(doc(db, `artifacts/${appId}/users/${uid}/languagePatterns`, pattern.id), { seedExamples: examples });
+            await regenerateAndSaveSeedExamples(pattern);
         } catch (err: any) {
             console.error('重新產生例句失敗:', err);
             setRegenerateError(err.message || '重新產生失敗，請稍後再試');

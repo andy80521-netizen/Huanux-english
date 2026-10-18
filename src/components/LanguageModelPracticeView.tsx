@@ -3,11 +3,13 @@ import React, { useState, useEffect } from 'react';
 import { LanguagePattern, PatternExampleSentence } from '../types';
 import { auth, db, appId } from '../firebase';
 import { doc, updateDoc } from 'firebase/firestore';
-import { ChevronLeft, Loader2, Send, CheckCircle2, XCircle, Sparkles, Check, Edit3, Play, Plus } from 'lucide-react';
+import { ChevronLeft, Loader2, Send, CheckCircle2, XCircle, Sparkles, Check, Edit3, Play, Plus, RefreshCw } from 'lucide-react';
 import PatternPracticeSessionView from './PatternPracticeSessionView';
 import { checkSentenceQuality } from '../services/gemini';
 import { updatePatternSentences } from '../services/sentenceWrites';
 import { generateAndSavePracticePrompts } from '../services/practicePrompts';
+import { regenerateAndSaveSeedExamples } from '../services/seedExamples';
+import ConfirmDialog from './ConfirmDialog';
 
 interface Props {
     pattern: LanguagePattern;
@@ -34,6 +36,9 @@ export default function LanguageModelPracticeView({ pattern, groupIndex, onBack 
     const [isPracticing, setIsPracticing] = useState(false);
     const [practiceTargetIndex, setPracticeTargetIndex] = useState(-1);
     const [addingSeed, setAddingSeed] = useState(false);
+    const [regeneratingSeeds, setRegeneratingSeeds] = useState(false);
+    const [regenerateSeedsError, setRegenerateSeedsError] = useState<string | null>(null);
+    const [showRegenerateSeedsConfirm, setShowRegenerateSeedsConfirm] = useState(false);
 
     // Filter sentences for group 0
     const groupSentences = (pattern.exampleSentences || []).filter(s => s.groupIndex === groupIndex);
@@ -232,7 +237,7 @@ export default function LanguageModelPracticeView({ pattern, groupIndex, onBack 
     };
 
     const handleAddSeed = async (ex: { en: string; zh: string }) => {
-        if (isFinished || addingSeed || isChecking) return;
+        if (isFinished || addingSeed || isChecking || regeneratingSeeds) return;
         const uid = auth.currentUser?.uid;
         if (!uid) return;
 
@@ -271,6 +276,29 @@ export default function LanguageModelPracticeView({ pattern, groupIndex, onBack 
             setErrorMsg(err.message || '加入失敗，請稍後再試');
         } finally {
             setAddingSeed(false);
+        }
+    };
+
+    const doRegenerateSeeds = async () => {
+        if (regeneratingSeeds) return;
+        setShowRegenerateSeedsConfirm(false);
+        setRegeneratingSeeds(true);
+        setRegenerateSeedsError(null);
+        try {
+            await regenerateAndSaveSeedExamples(pattern);
+        } catch (err: any) {
+            console.error('重新產生例句失敗:', err);
+            setRegenerateSeedsError(err.message || '重新產生失敗，請稍後再試');
+        } finally {
+            setRegeneratingSeeds(false);
+        }
+    };
+
+    const handleRegenerateSeedsClick = () => {
+        if (pattern.seedExamples && pattern.seedExamples.length > 0) {
+            setShowRegenerateSeedsConfirm(true);
+        } else {
+            doRegenerateSeeds();
         }
     };
 
@@ -462,68 +490,108 @@ export default function LanguageModelPracticeView({ pattern, groupIndex, onBack 
                     )}
                 </div>
 
-                {pattern.seedExamples && pattern.seedExamples.length > 0 && (
                     <div className="mt-6 bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-800 flex flex-col gap-4">
-                        <div className="flex items-baseline gap-2">
-                            <h3 className="text-base font-black text-slate-800 dark:text-white">
-                                從示範例句加入
-                            </h3>
-                            <span className="text-xs font-bold text-slate-400 dark:text-slate-500">
-                                直接加入本組，不需檢查
-                            </span>
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <div className="flex items-baseline gap-2">
+                                <h3 className="text-base font-black text-slate-800 dark:text-white">
+                                    從示範例句加入
+                                </h3>
+                                <span className="text-xs font-bold text-slate-400 dark:text-slate-500">
+                                    直接加入本組，不需檢查
+                                </span>
+                            </div>
+                            <button
+                                onClick={handleRegenerateSeedsClick}
+                                disabled={regeneratingSeeds || addingSeed || isChecking}
+                                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-slate-800 border border-indigo-200 dark:border-indigo-800/60 rounded-xl transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {regeneratingSeeds ? (
+                                    <>
+                                        <Loader2 size={14} className="animate-spin" />
+                                        <span>產生中…</span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <RefreshCw size={14} />
+                                        <span>重新產生</span>
+                                    </>
+                                )}
+                            </button>
                         </div>
-                        <div className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800">
-                            {pattern.seedExamples.map((ex, idx) => {
-                                const isAdded = (pattern.exampleSentences || []).some(
-                                    s => s.text.trim().toLowerCase() === ex.en.trim().toLowerCase()
-                                );
-                                return (
-                                    <div key={idx} className="py-3 first:pt-0 last:pb-0 flex items-center justify-between gap-4">
-                                        <div className="flex-1 min-w-0 break-words">
-                                            <p className="font-bold text-slate-800 dark:text-slate-100 text-sm sm:text-base">
-                                                {ex.en}
-                                            </p>
-                                            <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 font-medium mt-0.5">
-                                                {ex.zh}
-                                            </p>
+
+                        {regenerateSeedsError && (
+                            <div className="p-3 bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-800 rounded-xl text-red-600 dark:text-red-400 text-sm font-bold">
+                                {regenerateSeedsError}
+                            </div>
+                        )}
+
+                        {pattern.seedExamples && pattern.seedExamples.length > 0 ? (
+                            <div className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800">
+                                {pattern.seedExamples.map((ex, idx) => {
+                                    const isAdded = (pattern.exampleSentences || []).some(
+                                        s => s.text.trim().toLowerCase() === ex.en.trim().toLowerCase()
+                                    );
+                                    return (
+                                        <div key={idx} className="py-3 first:pt-0 last:pb-0 flex items-center justify-between gap-4">
+                                            <div className="flex-1 min-w-0 break-words">
+                                                <p className="font-bold text-slate-800 dark:text-slate-100 text-sm sm:text-base">
+                                                    {ex.en}
+                                                </p>
+                                                <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 font-medium mt-0.5">
+                                                    {ex.zh}
+                                                </p>
+                                            </div>
+                                            <div className="shrink-0">
+                                                {isAdded ? (
+                                                    <button
+                                                        disabled
+                                                        className="px-3 py-2 bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-1.5 cursor-not-allowed"
+                                                    >
+                                                        <Check size={16} />
+                                                        已加入
+                                                    </button>
+                                                ) : (
+                                                    <button
+                                                        onClick={() => handleAddSeed(ex)}
+                                                        disabled={addingSeed || isChecking || regeneratingSeeds}
+                                                        className="px-3 py-2 bg-indigo-50 dark:bg-indigo-900/30 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-1.5 transition-colors disabled:opacity-50"
+                                                    >
+                                                        {addingSeed ? (
+                                                            <>
+                                                                <Loader2 size={16} className="animate-spin" />
+                                                                加入中
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <Plus size={16} />
+                                                                加入
+                                                            </>
+                                                        )}
+                                                    </button>
+                                                )}
+                                            </div>
                                         </div>
-                                        <div className="shrink-0">
-                                            {isAdded ? (
-                                                <button
-                                                    disabled
-                                                    className="px-3 py-2 bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-1.5 cursor-not-allowed"
-                                                >
-                                                    <Check size={16} />
-                                                    已加入
-                                                </button>
-                                            ) : (
-                                                <button
-                                                    onClick={() => handleAddSeed(ex)}
-                                                    disabled={addingSeed || isChecking}
-                                                    className="px-3 py-2 bg-indigo-50 dark:bg-indigo-900/30 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-1.5 transition-colors disabled:opacity-50"
-                                                >
-                                                    {addingSeed ? (
-                                                        <>
-                                                            <Loader2 size={16} className="animate-spin" />
-                                                            加入中
-                                                        </>
-                                                    ) : (
-                                                        <>
-                                                            <Plus size={16} />
-                                                            加入
-                                                        </>
-                                                    )}
-                                                </button>
-                                            )}
-                                        </div>
-                                    </div>
-                                );
-                            })}
-                        </div>
+                                    );
+                                })}
+                            </div>
+                        ) : (
+                            <p className="text-sm font-bold text-slate-400 dark:text-slate-500 py-4 text-center">
+                                目前沒有示範例句，可以按「重新產生」建立
+                            </p>
+                        )}
                     </div>
-                )}
                 </>
             )}
+
+            <ConfirmDialog
+                isOpen={showRegenerateSeedsConfirm}
+                title="重新產生例句？"
+                message={`目前的 ${pattern.seedExamples?.length || 0} 句示範例句會被新的取代。\n已經加入造句的句子不受影響。`}
+                confirmText="重新產生"
+                cancelText="取消"
+                onConfirm={doRegenerateSeeds}
+                onCancel={() => setShowRegenerateSeedsConfirm(false)}
+            />
         </div>
     );
 }
