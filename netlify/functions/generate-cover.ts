@@ -1,6 +1,7 @@
 import { GoogleGenAI } from '@google/genai';
 import { callWithModelFallback } from '../shared/geminiFallback';
 import { generateCloudflareImage } from '../shared/cloudflareImage';
+import { callGeminiFreeThenPaid } from '../shared/aiKeys';
 
 export const config = { background: true };
 
@@ -65,6 +66,29 @@ async function updateFirestore(
     });
 }
 
+async function buildCoverScene(title: string, excerpt: string): Promise<string> {
+    const prompt = `You write prompts for an image generator.
+Read the English lesson below and describe ONE concrete visual scene that best represents its main topic.
+Rules:
+- One sentence in English, 20 to 40 words.
+- Describe only visible things: place, objects, weather, actions, mood.
+- Any people must be generic and anonymous; never name real people.
+- Do not mention text, words, signs, headlines, newspapers, screens, logos, or the lesson itself.
+- Output only the sentence, nothing else.
+
+Lesson title: ${title}
+Lesson excerpt: ${excerpt}`;
+
+    const response = await callGeminiFreeThenPaid('coverScene', (ai, model) =>
+        ai.models.generateContent({ model, contents: prompt })
+    );
+    const scene = (response.text || '').replace(/\s+/g, ' ').trim();
+    if (!scene) {
+        throw new Error('沒有取得場景描述');
+    }
+    return scene.slice(0, 400);
+}
+
 export default async (req: Request) => {
     // Background Function 一律回傳 200
     if (req.method !== 'POST') {
@@ -122,13 +146,22 @@ Wide 16:9 composition with the main subject centered in the frame.`;
 
     const fullPrompt = `${basePrompt}\n${stylePrompt}`;
 
+    let scene = '';
+    try {
+        scene = await buildCoverScene(title, truncatedExcerpt);
+        console.log(`[封面] 場景描述：${scene}`);
+    } catch (sceneErr: any) {
+        console.warn('[封面] 場景描述失敗，改用教材開頭:', sceneErr?.message || sceneErr);
+        scene = truncatedExcerpt.slice(0, 400);
+    }
+
     const cfStyleLead = style === 'photo'
         ? 'A photorealistic documentary photograph, shot on a full-frame DSLR camera with a 35mm lens, natural daylight, realistic lighting and textures, sharp focus, high detail.'
         : 'A high-quality Japanese anime film still, detailed hand-painted background art, soft cinematic lighting, cel-shaded characters, rich atmospheric colors, depth and fine scenery detail.';
 
     const cfPrompt = `${cfStyleLead}
-Scene: ${truncatedExcerpt.slice(0, 400)}
-The main subject is centered in the frame. Any people are generic and anonymous, seen from a distance.`;
+${scene}
+The main subject is centered in the frame.`;
 
     let imageBuffer: Buffer | null = null;
     let mimeType = 'image/jpeg';
