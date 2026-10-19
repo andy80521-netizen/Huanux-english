@@ -1,6 +1,6 @@
 const CF_IMAGE_MODEL = '@cf/black-forest-labs/flux-1-schnell';
 
-export async function generateCloudflareImage(prompt: string): Promise<{ data: Buffer; mimeType: string }> {
+export async function generateCloudflareImage(prompt: string, steps: number = 4): Promise<{ data: Buffer; mimeType: string }> {
     const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
     const token = process.env.CLOUDFLARE_AI_TOKEN;
     if (!accountId || !token) {
@@ -13,7 +13,7 @@ export async function generateCloudflareImage(prompt: string): Promise<{ data: B
             'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ prompt: prompt.slice(0, 2048), steps: 4 })
+        body: JSON.stringify({ prompt: prompt.slice(0, 2048), steps: Math.min(8, Math.max(1, Math.round(steps))) })
     });
 
     const text = await res.text();
