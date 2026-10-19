@@ -8,11 +8,13 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export async function callGeminiFreeThenPaid<T>(
   label: string,
-  call: (ai: GoogleGenAI, model: string) => Promise<T>
+  call: (ai: GoogleGenAI, model: string) => Promise<T>,
+  models?: { free: string[]; paid: string[] }
 ): Promise<T> {
+  // 不指定 models 時使用文字模型清單；語音等其他用途可傳入自己的模型清單
   const groups = [
-    { tier: '免費', apiKey: process.env.GEMINI_API_KEY, models: FREE_MODELS },
-    { tier: '付費', apiKey: process.env.GEMINI_PAID_API_KEY, models: PAID_MODELS }
+    { tier: '免費', apiKey: process.env.GEMINI_API_KEY, models: models?.free ?? FREE_MODELS },
+    { tier: '付費', apiKey: process.env.GEMINI_PAID_API_KEY, models: models?.paid ?? PAID_MODELS }
   ];
 
   for (const group of groups) {
