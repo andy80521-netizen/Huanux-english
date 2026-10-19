@@ -1,5 +1,6 @@
 import { GoogleGenAI } from '@google/genai';
 import { callWithModelFallback } from '../shared/geminiFallback';
+import { generateCloudflareImage } from '../shared/cloudflareImage';
 
 export const config = { background: true };
 
@@ -107,21 +108,13 @@ export default async (req: Request) => {
 
     console.log(`[封面] 開始為教材 ${materialId} 產生封面，風格: ${style}，使用者: ${uid}`);
 
-    // 金鑰檢查
-    const geminiPaidKey = process.env.GEMINI_PAID_API_KEY;
-    if (!geminiPaidKey) {
-        console.error('[封面] 缺少 GEMINI_PAID_API_KEY');
-        await updateFirestore(uid, materialId, idToken, false, { errorMsg: '伺服器缺少 GEMINI_PAID_API_KEY' });
-        return new Response(null, { status: 200 });
-    }
-
     // 組提示詞
     const basePrompt = `Create a cover image for an English listening lesson. Illustrate the main topic or scene of the lesson.
 Lesson title: ${title}
 Lesson excerpt: ${truncatedExcerpt}
 Do not include any text, letters, captions, logos, or watermarks.
 Do not depict any real, identifiable person; if people are needed, show generic anonymous people.
-Wide 16:9 composition.`;
+Wide 16:9 composition with the main subject centered in the frame.`;
 
     const stylePrompt = style === 'photo'
         ? "Style: realistic editorial news photograph, natural lighting, documentary feel."
@@ -129,46 +122,68 @@ Wide 16:9 composition.`;
 
     const fullPrompt = `${basePrompt}\n${stylePrompt}`;
 
-    const ai = new GoogleGenAI({ apiKey: geminiPaidKey });
-
-    let imageBase64 = '';
-    let mimeType = 'image/png';
+    let imageBuffer: Buffer | null = null;
+    let mimeType = 'image/jpeg';
 
     try {
-        const response = await callWithModelFallback(IMAGE_MODELS, async (model) => {
-            console.log(`[封面] 使用模型: ${model}`);
-            return await ai.models.generateContent({
-                model,
-                contents: fullPrompt,
-                config: {
-                    imageConfig: {
-                        aspectRatio: '16:9'
-                    }
-                }
-            });
-        });
+        const cf = await generateCloudflareImage(fullPrompt);
+        imageBuffer = cf.data;
+        mimeType = cf.mimeType;
+        console.log('[封面] Cloudflare 產圖成功');
+    } catch (cfErr: any) {
+        console.warn('[封面] Cloudflare 產圖失敗，改用 Gemini 付費模型:', cfErr?.message || cfErr);
+    }
 
-        const parts = response.candidates?.[0]?.content?.parts || [];
-        const inlinePart = parts.find((p: any) => p?.inlineData?.data);
-        if (!inlinePart || !inlinePart.inlineData?.data) {
-            throw new Error('模型未回傳圖片資料');
+    if (!imageBuffer) {
+        const geminiPaidKey = process.env.GEMINI_PAID_API_KEY;
+        if (!geminiPaidKey) {
+            console.error('[封面] 缺少 GEMINI_PAID_API_KEY');
+            await updateFirestore(uid, materialId, idToken, false, { errorMsg: 'Cloudflare 產圖失敗，且伺服器缺少 GEMINI_PAID_API_KEY' });
+            return new Response(null, { status: 200 });
         }
 
-        imageBase64 = inlinePart.inlineData.data;
-        mimeType = inlinePart.inlineData.mimeType || 'image/png';
-    } catch (genErr: any) {
-        console.error('[封面] 圖片生成失敗:', genErr?.message || genErr);
-        await updateFirestore(uid, materialId, idToken, false, {
-            errorMsg: `圖片生成失敗: ${genErr?.message || '模型忙碌或失敗'}`
-        });
-        return new Response(null, { status: 200 });
+        const ai = new GoogleGenAI({ apiKey: geminiPaidKey });
+
+        try {
+            const response = await callWithModelFallback(IMAGE_MODELS, async (model) => {
+                console.log(`[封面] 使用模型: ${model}`);
+                return await ai.models.generateContent({
+                    model,
+                    contents: fullPrompt,
+                    config: {
+                        imageConfig: {
+                            aspectRatio: '16:9'
+                        }
+                    }
+                });
+            });
+
+            const parts = response.candidates?.[0]?.content?.parts || [];
+            const inlinePart = parts.find((p: any) => p?.inlineData?.data);
+            if (!inlinePart || !inlinePart.inlineData?.data) {
+                throw new Error('模型未回傳圖片資料');
+            }
+
+            imageBuffer = Buffer.from(inlinePart.inlineData.data, 'base64');
+            mimeType = inlinePart.inlineData.mimeType || 'image/png';
+        } catch (genErr: any) {
+            console.error('[封面] 圖片生成失敗:', genErr?.message || genErr);
+            await updateFirestore(uid, materialId, idToken, false, {
+                errorMsg: `圖片生成失敗: ${genErr?.message || '模型忙碌或失敗'}`
+            });
+            return new Response(null, { status: 200 });
+        }
     }
 
     // 上傳 Firebase Storage
+    if (!imageBuffer) {
+        await updateFirestore(uid, materialId, idToken, false, { errorMsg: '產生封面失敗' });
+        return new Response(null, { status: 200 });
+    }
+
     let coverUrl = '';
     try {
         const uploadUrl = `https://firebasestorage.googleapis.com/v0/b/${BUCKET}/o?uploadType=media&name=${encodeURIComponent(storagePath)}`;
-        const imageBuffer = Buffer.from(imageBase64, 'base64');
         const uploadRes = await fetch(uploadUrl, {
             method: 'POST',
             headers: {
