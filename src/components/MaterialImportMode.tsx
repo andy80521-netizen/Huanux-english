@@ -729,7 +729,7 @@ export default function MaterialImportMode() {
             )}
 
             {whisperError && (
-                <div className="mb-6 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm p-4 rounded-xl flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-sm border border-red-100 dark:border-red-800 animate-in slide-in-from-top-2">
+                <div className="mb-6 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm p-4 rounded-xl flex flex-col justify-between gap-3 shadow-sm border border-red-100 dark:border-red-800 animate-in slide-in-from-top-2">
                     <div className="flex items-center gap-2">
                         <AlertCircle size={18} className="shrink-0" />
                         <span className="font-bold leading-relaxed">{whisperError}</span>
@@ -941,12 +941,12 @@ export default function MaterialImportMode() {
             {loadingState === 'idle' && results.length > 0 && !saveSuccess && !pendingMaterial && (
 
                 <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-800">
-                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+                    <div className="flex flex-col justify-between gap-4 mb-6">
                         <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-4">解析結果 (共 {results.length} 句)</h3>
                         <div className="flex gap-2">
                             <button
                                 onClick={handleGenerate}
-                                className="flex-1 md:flex-none px-4 py-2 bg-indigo-600 text-white font-bold rounded-lg shadow-md shadow-indigo-200 dark:shadow-none hover:bg-indigo-700 transition-all flex items-center justify-center gap-2"
+                                className="flex-1 px-4 py-2 bg-indigo-600 text-white font-bold rounded-lg shadow-md shadow-indigo-200 dark:shadow-none hover:bg-indigo-700 transition-all flex items-center justify-center gap-2"
                             >
                                 <Volume2 size={16} />
                                 生成語音，開始跟讀
@@ -954,7 +954,7 @@ export default function MaterialImportMode() {
                             <button
                                 onClick={handleExtractPatterns}
                                 disabled={isExtracting}
-                                className="flex-1 md:flex-none px-4 py-2 bg-slate-100 dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 font-bold rounded-lg flex items-center justify-center gap-2 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-colors disabled:opacity-50"
+                                className="flex-1 px-4 py-2 bg-slate-100 dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 font-bold rounded-lg flex items-center justify-center gap-2 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-colors disabled:opacity-50"
                             >
                                 {isExtracting ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
                                 {isExtracting ? '萃取中...' : '萃取語言模型'}

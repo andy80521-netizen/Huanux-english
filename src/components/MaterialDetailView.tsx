@@ -329,9 +329,9 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
                     if (s.deleted) return null;
                     const isCompleted = s.mastery >= 1000;
                     return (
-                        <div key={s.id} className="p-5 rounded-2xl bg-white dark:bg-slate-900 shadow-sm border border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row gap-4 items-start">
-                            <div className="flex-1 space-y-2">
-                                <div className="flex items-center gap-2 mb-2">
+                        <div key={s.id} className="p-5 rounded-2xl bg-white dark:bg-slate-900 shadow-sm border border-slate-200 dark:border-slate-800 flex flex-col gap-4">
+                            <div className="w-full space-y-2">
+                                <div className="flex flex-wrap items-center gap-2 mb-2">
                                     {s.lowConfidence && (
                                         <span className="text-[10px] font-bold bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full shrink-0">
                                             低信心度
@@ -354,7 +354,7 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
                                 </p>
                             </div>
                             
-                            <div className="flex flex-wrap items-center gap-2 mt-4 sm:mt-0">
+                            <div className="flex flex-wrap items-center gap-2">
                                 {isCompleted && !s.extracted && (
                                     <button
                                         onClick={() => handleExtract(i)}
@@ -453,7 +453,7 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
                                 deletedIndices.map((i) => {
                                     const s = material.sentences[i];
                                     return (
-                                        <div key={s.id || i} className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-850/60 border border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                        <div key={s.id || i} className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-850/60 border border-slate-100 dark:border-slate-800 flex flex-col gap-3">
                                             <div className="flex-1 space-y-1 min-w-0">
                                                 <div className="flex items-center gap-2">
                                                     <span className="text-xs font-bold text-slate-400 bg-slate-200/70 dark:bg-slate-800 px-2 py-0.5 rounded-full">
@@ -471,7 +471,7 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
                                             </div>
                                             <button
                                                 onClick={() => handleRestoreSentence(i)}
-                                                className="self-end sm:self-center px-3 py-1.5 bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-950 font-bold text-xs flex items-center gap-1.5 transition-colors shrink-0 shadow-sm"
+                                                className="self-end px-3 py-1.5 bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-950 font-bold text-xs flex items-center gap-1.5 transition-colors shrink-0 shadow-sm"
                                             >
                                                 <RotateCcw size={14} />
                                                 復原

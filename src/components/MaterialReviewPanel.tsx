@@ -187,7 +187,7 @@ export default function MaterialReviewPanel({
 
     return (
         <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-800">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+            <div className="flex flex-col justify-between gap-4 mb-6">
                 <div>
                     <h3 className="text-xl font-bold text-slate-800 dark:text-white">校對內容</h3>
                     <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
@@ -264,7 +264,7 @@ export default function MaterialReviewPanel({
 
             {/* 捨棄已刪除句子確認對話框（內嵌式） */}
             {showDiscardConfirm && (
-                <div className="mb-6 p-4 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 flex flex-col md:flex-row md:items-center justify-between gap-4 animate-in fade-in">
+                <div className="mb-6 p-4 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 flex flex-col justify-between gap-4 animate-in fade-in">
                     <div className="flex items-center gap-3">
                         <AlertCircle className="text-amber-600 dark:text-amber-400 shrink-0" size={20} />
                         <div>
@@ -336,7 +336,7 @@ export default function MaterialReviewPanel({
                                 </button>
                             </div>
 
-                            <div className="flex flex-col md:flex-row justify-between items-start gap-4">
+                            <div className="flex flex-col items-stretch gap-4">
                                 <div className="flex-1 space-y-2 w-full">
                                     <div>
                                         <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-1">
@@ -376,7 +376,7 @@ export default function MaterialReviewPanel({
                                     )}
                                 </div>
 
-                                <div className="w-full md:w-56 shrink-0 flex flex-col gap-2.5 bg-white dark:bg-slate-850 p-3 rounded-xl border border-slate-200 dark:border-slate-700">
+                                <div className="w-full shrink-0 flex flex-col gap-2.5 bg-white dark:bg-slate-850 p-3 rounded-xl border border-slate-200 dark:border-slate-700">
                                     {/* 開始時間 */}
                                     <div>
                                         <div className="flex justify-between items-center mb-1">
@@ -479,7 +479,7 @@ export default function MaterialReviewPanel({
                     {isDeletedExpanded && (
                         <div className="p-4 space-y-3 divide-y divide-slate-200 dark:divide-slate-800">
                             {deletedSentences.map((s) => (
-                                <div key={s.internalId} className="pt-3 first:pt-0 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                                <div key={s.internalId} className="pt-3 first:pt-0 flex flex-col justify-between gap-3">
                                     <div className="flex-1">
                                         <p className="text-sm text-slate-600 dark:text-slate-300 font-medium line-through opacity-75">
                                             {s.text}
@@ -491,7 +491,7 @@ export default function MaterialReviewPanel({
                                     <button
                                         onClick={() => handleRestore(s.internalId)}
                                         disabled={isSaving}
-                                        className="self-end md:self-center px-3 py-1.5 bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-950 font-bold text-xs flex items-center gap-1.5 transition-colors disabled:opacity-50 shrink-0"
+                                        className="self-end px-3 py-1.5 bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-950 font-bold text-xs flex items-center gap-1.5 transition-colors disabled:opacity-50 shrink-0"
                                     >
                                         <RotateCcw size={14} />
                                         復原

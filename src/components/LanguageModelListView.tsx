@@ -423,7 +423,7 @@ export default function LanguageModelListView({ onPatternClick, filters, onFilte
                                 </span>
                             </div>
                             
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="grid grid-cols-1 gap-4">
                                 {grouped[primaryCategory].map(pattern => {
                                     const all = pattern.exampleSentences || [];
                                     const createdCount = all.filter(s => s.checked).length;

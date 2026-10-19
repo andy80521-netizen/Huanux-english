@@ -182,14 +182,14 @@ export default function MaterialListView({ onAddClick, onMaterialClick }: { onAd
                     </button>
                 </div>
             ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 gap-3">
                     {materials.map((m) => {
                         const activeSentences = m.sentences.filter(s => !s.deleted);
                         const completedCount = activeSentences.filter(s => s.mastery >= 1000).length;
                         return (
-                            <div key={m.id} className="bg-white dark:bg-slate-900 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-slate-800 hover:shadow-md transition-shadow flex flex-col group cursor-pointer overflow-hidden" onClick={() => onMaterialClick(m)}>
-                                {/* 16:9 封面區 */}
-                                <div className="aspect-video w-full rounded-xl overflow-hidden mb-4 bg-slate-100 dark:bg-slate-800 relative flex items-center justify-center">
+                            <div key={m.id} className="bg-white dark:bg-slate-900 rounded-2xl p-3 shadow-sm border border-slate-200 dark:border-slate-800 hover:shadow-md transition-shadow flex gap-3 items-stretch cursor-pointer overflow-hidden" onClick={() => onMaterialClick(m)}>
+                                {/* 16:9 封面縮圖 */}
+                                <div className="w-36 shrink-0 aspect-video self-center rounded-xl overflow-hidden bg-slate-100 dark:bg-slate-800 relative flex items-center justify-center">
                                     {m.coverUrl && m.coverStatus !== 'generating' ? (
                                         <img
                                             src={m.coverUrl}
@@ -198,34 +198,43 @@ export default function MaterialListView({ onAddClick, onMaterialClick }: { onAd
                                             className="w-full h-full object-cover"
                                         />
                                     ) : m.coverStatus === 'generating' && m.coverRequestedAt && (Date.now() - m.coverRequestedAt < 5 * 60 * 1000) ? (
-                                        <div className="flex flex-col items-center justify-center gap-2 text-indigo-500 dark:text-indigo-400">
-                                            <Loader2 size={24} className="animate-spin" />
-                                            <span className="text-xs font-bold text-slate-500 dark:text-slate-400">封面產生中</span>
+                                        <div className="flex flex-col items-center justify-center gap-1 text-indigo-500 dark:text-indigo-400">
+                                            <Loader2 size={20} className="animate-spin" />
+                                            <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400">封面產生中</span>
                                         </div>
                                     ) : (
                                         <div className="w-full h-full bg-gradient-to-br from-indigo-50 to-slate-100 dark:from-slate-850 dark:to-slate-800 flex items-center justify-center text-slate-300 dark:text-slate-600">
-                                            <BookOpen size={36} />
+                                            <BookOpen size={28} />
                                         </div>
                                     )}
                                 </div>
 
-                                <div className="flex justify-between items-start mb-4">
-                                    <h3 className="text-lg font-bold text-slate-800 dark:text-white line-clamp-2 pr-4">{m.title}</h3>
-                                    <button 
-                                        onClick={(e) => { e.stopPropagation(); setDeleteModal({ isOpen: true, materialId: m.id, title: m.title }); }}
-                                        className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors shrink-0 md:opacity-0 group-hover:opacity-100 focus:opacity-100"
-                                        title="刪除教材"
-                                    >
-                                        <Trash2 size={18} />
-                                    </button>
-                                </div>
-                                
-                                <div className="mt-auto pt-4 flex items-center justify-between text-sm">
-                                    <div className="text-slate-500 dark:text-slate-400 font-medium">
-                                        {new Date(m.createdAt).toLocaleDateString()}
+                                <div className="flex-1 min-w-0 flex flex-col justify-between gap-2">
+                                    <div className="flex items-start gap-1">
+                                        <h3 className="flex-1 min-w-0 text-base font-bold text-slate-800 dark:text-white line-clamp-2 leading-snug">{m.title}</h3>
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); setDeleteModal({ isOpen: true, materialId: m.id, title: m.title }); }}
+                                            className="p-1.5 -mr-1 -mt-1 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors shrink-0"
+                                            title="刪除教材"
+                                        >
+                                            <Trash2 size={16} />
+                                        </button>
                                     </div>
-                                    <div className="bg-slate-100 dark:bg-slate-800 px-3 py-1 rounded-full font-bold text-slate-700 dark:text-slate-300 text-xs">
-                                        進度 {completedCount}/{activeSentences.length} 句
+                                    <div>
+                                        <div className="flex items-center justify-between text-xs mb-1">
+                                            <span className="text-slate-400 dark:text-slate-500 font-medium">
+                                                {new Date(m.createdAt).toLocaleDateString()}
+                                            </span>
+                                            <span className="font-bold text-slate-600 dark:text-slate-300">
+                                                進度 {completedCount}/{activeSentences.length} 句
+                                            </span>
+                                        </div>
+                                        <div className="w-full h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                                            <div
+                                                className="h-full bg-indigo-500 rounded-full transition-all duration-300"
+                                                style={{ width: `${activeSentences.length > 0 ? Math.round((completedCount / activeSentences.length) * 100) : 0}%` }}
+                                            />
+                                        </div>
                                     </div>
                                 </div>
                             </div>
