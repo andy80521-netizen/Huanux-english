@@ -9,6 +9,7 @@ import { checkSentenceQuality } from '../services/gemini';
 import { updatePatternSentences } from '../services/sentenceWrites';
 import { generateAndSavePracticePrompts } from '../services/practicePrompts';
 import { regenerateAndSaveSeedExamples } from '../services/seedExamples';
+import { requestPracticeImages } from '../services/practiceImage';
 import ConfirmDialog from './ConfirmDialog';
 
 interface Props {
@@ -177,6 +178,7 @@ export default function LanguageModelPracticeView({ pattern, groupIndex, onBack 
     };
 
     const generatePromptsInBackground = (docRef: any, sentenceId: string, sentenceText: string, uid: string) => {
+        void requestPracticeImages(pattern.id, [sentenceId]);
         (async () => {
             try {
                 await generateAndSavePracticePrompts(pattern.id, sentenceId, sentenceText, pattern.text);

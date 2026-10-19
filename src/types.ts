@@ -59,6 +59,7 @@ export interface PatternExampleSentence {
   qaQuestion?: string;          // 固定的提示Q&A問句
   situationalPrompt?: string;   // 固定的情境任務描述
   imageUrl?: string;            // 固定的情境圖片（Firebase Storage 網址）
+  imageRequestedAt?: number;    // 上次送出產圖請求的時間（6 小時內不重複請求）
 }
 
 export interface LanguagePattern {
