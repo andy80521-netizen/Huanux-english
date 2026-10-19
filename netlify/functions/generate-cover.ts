@@ -123,14 +123,12 @@ Wide 16:9 composition with the main subject centered in the frame.`;
     const fullPrompt = `${basePrompt}\n${stylePrompt}`;
 
     const cfStyleLead = style === 'photo'
-        ? 'A photorealistic documentary news photograph, shot on a full-frame DSLR camera with a 35mm lens, natural daylight, realistic lighting and textures, sharp focus, high detail.'
-        : 'A Japanese anime illustration, clean line art, cel shading, vibrant colors.';
+        ? 'A photorealistic documentary photograph, shot on a full-frame DSLR camera with a 35mm lens, natural daylight, realistic lighting and textures, sharp focus, high detail.'
+        : 'A high-quality Japanese anime film still, detailed hand-painted background art, soft cinematic lighting, cel-shaded characters, rich atmospheric colors, depth and fine scenery detail.';
 
     const cfPrompt = `${cfStyleLead}
-The scene shows the main topic of this English lesson: ${title}. ${truncatedExcerpt.slice(0, 400)}
-The main subject is centered in the frame.
-No text, letters, captions, logos, or watermarks.
-No real, identifiable people; any people are generic and anonymous.`;
+Scene: ${truncatedExcerpt.slice(0, 400)}
+The main subject is centered in the frame. Any people are generic and anonymous, seen from a distance.`;
 
     let imageBuffer: Buffer | null = null;
     let mimeType = 'image/jpeg';
