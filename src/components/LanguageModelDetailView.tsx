@@ -5,6 +5,7 @@ import { doc, onSnapshot, deleteDoc } from 'firebase/firestore';
 import { ChevronLeft, Loader2, Sparkles, BookOpen, Quote, PenTool, RefreshCw, Trash2 } from 'lucide-react';
 import LanguageModelPracticeView from './LanguageModelPracticeView';
 import GroupSelectionView from './GroupSelectionView';
+import GroupDetailView from './GroupDetailView';
 import { regenerateAndSaveSeedExamples } from '../services/seedExamples';
 import ConfirmDialog from './ConfirmDialog';
 
@@ -18,6 +19,7 @@ export default function LanguageModelDetailView({ patternId, onBack }: { pattern
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
     const [deleting, setDeleting] = useState(false);
     const [deleteError, setDeleteError] = useState<string | null>(null);
+    const [viewingGroupIndex, setViewingGroupIndex] = useState<number | null>(null);
 
     useEffect(() => {
         const uid = auth.currentUser?.uid;
@@ -48,11 +50,24 @@ export default function LanguageModelDetailView({ patternId, onBack }: { pattern
         return <LanguageModelPracticeView pattern={pattern} groupIndex={selectedGroupIndex} onBack={() => setSelectedGroupIndex(null)} />;
     }
 
+    if (viewingGroupIndex !== null && pattern) {
+        return <GroupDetailView
+            pattern={pattern}
+            groupIndex={viewingGroupIndex}
+            onBack={() => setViewingGroupIndex(null)}
+            onEnterGroup={() => {
+                setSelectedGroupIndex(viewingGroupIndex);
+                setViewingGroupIndex(null);
+                setShowGroupSelection(false);
+            }}
+        />;
+    }
+
     if (showGroupSelection && pattern) {
         return <GroupSelectionView pattern={pattern} onBack={() => setShowGroupSelection(false)} onSelectGroup={(idx) => {
             setSelectedGroupIndex(idx);
             setShowGroupSelection(false);
-        }} />;
+        }} onViewGroup={(idx) => setViewingGroupIndex(idx)} />;
     }
 
     const categoryLabels: Record<string, string> = {
