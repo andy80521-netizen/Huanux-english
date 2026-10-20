@@ -72,6 +72,7 @@ export interface LanguagePattern {
   situationTags: string[];      // 情緒/溝通功能標籤，例如「劃清界線」「委婉拒絕」
                                  // （跟 primaryCategory 是不同維度，不要合併）
   sourceMaterialId?: string;    // 來自哪篇教材
+  sourceSentenceId?: string;    // 來自教材的哪一句（判斷重逢時排除來源句）
   sourceLabel?: string;         // 來源標籤
   seedExamples: { en: string; zh: string }[]; // Gemini 萃取時附的原始情境例句（至少5個，僅供參考）
   exampleSentences: PatternExampleSentence[]; // 使用者自造的100句（10組x10句）

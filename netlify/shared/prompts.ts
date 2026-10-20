@@ -209,3 +209,34 @@ ${candidateList}
   ]
 }`;
 }
+
+export function buildDetectSightingsPrompt(
+    sentences: string[],
+    patterns: { id: string; text: string; meaningZh: string }[]
+): string {
+    const patternList = patterns.map(p => `[${p.id}] ${p.text}（${p.meaningZh}）`).join('\n');
+    const sentenceList = sentences.map((s, i) => `${i}. ${s}`).join('\n');
+
+    return `你是英文句型偵測助手。下面有一份英文教材的句子，以及使用者已經學過的句型清單。
+請找出每個句子「實際使用到」哪些已學句型。
+
+判斷原則：
+- 句子必須真的用到該句型的結構或固定搭配，只出現相同的單字不算
+- 句型中的佔位詞（例如 [someone]、[verb]、sb、sth、V）可以代入任何合適的詞
+- 時態、人稱、單複數的變化都算有用到（例如 be about to → is about to、was about to）
+- 不確定時不要標
+- 一個句子可以用到多個句型，也可以一個都沒有
+
+已學句型（方括號內是 id）：
+${patternList}
+
+教材句子（前面的數字是 index）：
+${sentenceList}
+
+請只回傳 JSON 物件，不要有其他文字。只列出有用到已學句型的句子，patternIds 只能填上面清單裡的 id：
+{
+  "results": [
+    { "index": 0, "patternIds": ["句型 id"] }
+  ]
+}`;
+}

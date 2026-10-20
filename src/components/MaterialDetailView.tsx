@@ -120,6 +120,7 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
             
             const saveResult = await savePatternsWithDedup(patterns, {
                 sourceMaterialId: material.id,
+                sourceSentenceId: sentence.id,
                 sourceLabel: sentence.text.substring(0, 20) + (sentence.text.length > 20 ? '...' : ''),
                 sourceExample: { en: sentence.text, zh: sentence.translation || '' }
             });

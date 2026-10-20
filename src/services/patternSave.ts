@@ -14,7 +14,7 @@ export interface SavePatternsResult {
 // 萃取後存檔：先與既有句型比對，重複的不建立（改把來源例句加進既有句型），變體／近義建立並互相記錄關係
 export async function savePatternsWithDedup(
   candidates: PatternCandidate[],
-  meta: { sourceMaterialId?: string; sourceLabel: string; sourceExample?: { en: string; zh: string } }
+  meta: { sourceMaterialId?: string; sourceSentenceId?: string; sourceLabel: string; sourceExample?: { en: string; zh: string } }
 ): Promise<SavePatternsResult> {
   const uid = auth.currentUser?.uid;
   if (!uid) throw new Error('請先登入');
@@ -67,6 +67,7 @@ export async function savePatternsWithDedup(
       ...c,
       id: newRef.id,
       ...(meta.sourceMaterialId ? { sourceMaterialId: meta.sourceMaterialId } : {}),
+      ...(meta.sourceSentenceId ? { sourceSentenceId: meta.sourceSentenceId } : {}),
       sourceLabel: meta.sourceLabel,
       exampleSentences: [],
       unlockedGroups: 0,
