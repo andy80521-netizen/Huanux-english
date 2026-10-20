@@ -3,6 +3,7 @@ import { collection, onSnapshot } from 'firebase/firestore';
 import { auth, db, appId } from '../firebase';
 import { LanguagePattern } from '../types';
 import { Trophy, Medal, Star, Sparkles } from 'lucide-react';
+import { getMasteredCount } from '../utils/patternStage';
 
 export default function BadgeMode() {
     const [patterns, setPatterns] = useState<LanguagePattern[]>([]);
@@ -54,13 +55,18 @@ export default function BadgeMode() {
         );
     }
 
-    const MILESTONES = [10, 40, 100];
+    // 三個深度階段：可用（第 1 組全精熟）、熟練、精通
+    const MILESTONES = [
+        { target: 10, label: '可用' },
+        { target: 40, label: '熟練' },
+        { target: 100, label: '精通' }
+    ];
 
     return (
         <div className="flex flex-col h-full bg-slate-50 dark:bg-slate-950 p-6 overflow-y-auto pb-20">
             <div className="mb-8">
                 <h2 className="text-2xl font-black text-slate-900 dark:text-slate-100 tracking-tighter">成就徽章</h2>
-                <p className="text-sm font-bold text-slate-500 mt-2">完成句型造句練習，解鎖里程碑</p>
+                <p className="text-sm font-bold text-slate-500 mt-2">精熟 10 句即「可用」，40 句「熟練」，100 句「精通」</p>
             </div>
 
             {patterns.length === 0 ? (
@@ -74,15 +80,15 @@ export default function BadgeMode() {
             ) : (
                 <div className="space-y-6">
                     {patterns.map(pattern => {
-                        const finishedCount = (pattern.exampleSentences || []).filter(s => (s.mastery || 0) >= 1000).length;
+                        const finishedCount = getMasteredCount(pattern);
                         
                         return (
                             <div key={pattern.id} className="bg-white dark:bg-slate-900 rounded-2xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm">
                                 <h3 className="text-lg font-black text-slate-800 dark:text-slate-100 mb-4 truncate">{pattern.text}</h3>
                                 <p className="text-xs font-bold text-slate-500 mb-6">已精熟句數：<span className="text-indigo-600 dark:text-indigo-400 text-base">{finishedCount}</span></p>
                                 
-                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                                    {MILESTONES.map(target => {
+                                <div className="grid grid-cols-3 gap-3">
+                                    {MILESTONES.map(({ target, label }) => {
                                         const achieved = finishedCount >= target;
                                         const remaining = target - finishedCount;
                                         
@@ -92,7 +98,8 @@ export default function BadgeMode() {
                                                     {target === 10 ? <Medal size={28} /> : target === 40 ? <Star size={28} /> : <Trophy size={28} />}
                                                 </div>
                                                 <div className="text-center z-10">
-                                                    <div className={`font-black text-lg ${achieved ? 'text-indigo-700 dark:text-indigo-300' : 'text-slate-500 dark:text-slate-400'}`}>滿 {target} 句</div>
+                                                    <div className={`font-black text-lg ${achieved ? 'text-indigo-700 dark:text-indigo-300' : 'text-slate-500 dark:text-slate-400'}`}>{label}</div>
+                                                    <div className="text-[11px] font-bold text-slate-400 dark:text-slate-500">{target} 句精熟</div>
                                                     {!achieved && <div className="text-xs font-bold text-slate-400 dark:text-slate-500 mt-1">還差 {remaining} 句</div>}
                                                     {achieved && <div className="text-xs font-black text-indigo-500 dark:text-indigo-400 mt-1 uppercase tracking-widest">Achieved</div>}
                                                 </div>

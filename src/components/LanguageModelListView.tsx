@@ -4,6 +4,7 @@ import { auth, db, appId } from '../firebase';
 import { collection, query, onSnapshot } from 'firebase/firestore';
 import { Sparkles, User, ChevronRight, Search, X, RotateCcw } from 'lucide-react';
 import { PatternFilterState } from './LanguageModelMode';
+import { getPatternStage } from '../utils/patternStage';
 
 interface LanguageModelListViewProps {
     onPatternClick: (id: string) => void;
@@ -460,6 +461,9 @@ export default function LanguageModelListView({ onPatternClick, filters, onFilte
                                             </div>
 
                                             <div className="flex flex-wrap items-center gap-2 pt-3">
+                                                <span className={`text-[10px] font-bold px-2 py-1 rounded-md ${getPatternStage(pattern).className}`}>
+                                                    {getPatternStage(pattern).label}
+                                                </span>
                                                 <span className="text-[10px] font-bold bg-indigo-50 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400 px-2 py-1 rounded-md">
                                                     {categoryLabels[pattern.category] || pattern.category}
                                                 </span>

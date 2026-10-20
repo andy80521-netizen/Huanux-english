@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { LanguagePattern } from '../types';
 import { auth, db, appId } from '../firebase';
-import { doc, onSnapshot, deleteDoc } from 'firebase/firestore';
+import { doc, onSnapshot, deleteDoc, collection, getDocs } from 'firebase/firestore';
 import { ChevronLeft, Loader2, Sparkles, BookOpen, Quote, PenTool, RefreshCw, Trash2 } from 'lucide-react';
 import LanguageModelPracticeView from './LanguageModelPracticeView';
 import GroupSelectionView from './GroupSelectionView';
 import GroupDetailView from './GroupDetailView';
 import { regenerateAndSaveSeedExamples } from '../services/seedExamples';
 import ConfirmDialog from './ConfirmDialog';
+import PatternSightingsSection from './PatternSightingsSection';
+import { getPatternStage } from '../utils/patternStage';
 
 export default function LanguageModelDetailView({ patternId, onBack }: { patternId: string, onBack: () => void }) {
     const [pattern, setPattern] = useState<LanguagePattern | null>(null);
@@ -111,6 +113,9 @@ export default function LanguageModelDetailView({ patternId, onBack }: { pattern
         setDeleteError(null);
 
         try {
+            // 先刪除重逢紀錄子集合（Firestore 刪除文件時不會自動刪除子集合）
+            const sightingsSnap = await getDocs(collection(db, `artifacts/${appId}/users/${uid}/languagePatterns/${pattern.id}/sightings`));
+            await Promise.all(sightingsSnap.docs.map(d => deleteDoc(d.ref)));
             await deleteDoc(doc(db, `artifacts/${appId}/users/${uid}/languagePatterns`, pattern.id));
             onBack();
         } catch (err: any) {
@@ -135,6 +140,9 @@ export default function LanguageModelDetailView({ patternId, onBack }: { pattern
                     </span>
                     <span className="text-[10px] font-bold bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300 px-2 py-0.5 rounded-full shrink-0">
                         {pattern.primaryCategory}
+                    </span>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${getPatternStage(pattern).className}`}>
+                        {getPatternStage(pattern).label}
                     </span>
                 </div>
                 <button
@@ -254,6 +262,8 @@ export default function LanguageModelDetailView({ patternId, onBack }: { pattern
                     </p>
                 )}
             </div>
+
+            <PatternSightingsSection patternId={pattern.id} />
 
             <ConfirmDialog
                 isOpen={showRegenerateConfirm}
