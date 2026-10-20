@@ -436,6 +436,21 @@ async function callAiText<T>(task: string, payload: any): Promise<T> {
     return data as T;
 }
 
+export type PatternRelation = {
+  index: number;
+  relation: 'new' | 'duplicate' | 'variant' | 'synonym';
+  matchId?: string;
+  matchCandidateIndex?: number;
+};
+
+export async function classifyPatterns(
+  candidates: { text: string; meaningZh: string }[],
+  existing: { id: string; text: string; meaningZh: string }[]
+): Promise<PatternRelation[]> {
+    const data = await callAiText<{ results: PatternRelation[] }>('classifyPatterns', { candidates, existing });
+    return data.results;
+}
+
 export async function regenerateSeedExamples(
   pattern: { text: string; meaningZh: string; usageContext: string; category: string },
   avoidSentences: string[]

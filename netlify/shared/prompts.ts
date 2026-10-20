@@ -168,3 +168,44 @@ ${sourceText}
 }
 
 export const TRANSCRIBE_PROMPT = "請把這段音檔裡使用者說的英文內容逐字轉錄出來,只回傳轉錄後的純文字,不要有任何其他說明文字、不要有引號、不要有markdown格式";
+
+export function buildClassifyPatternsPrompt(
+    candidates: { text: string; meaningZh: string }[],
+    existing: { id: string; text: string; meaningZh: string }[]
+): string {
+    const candidateList = candidates.map((c, i) => `${i}. ${c.text}（${c.meaningZh}）`).join('\n');
+    const existingList = existing.length > 0
+        ? existing.map(e => `[${e.id}] ${e.text}（${e.meaningZh}）`).join('\n')
+        : '無';
+
+    return `你是英文句型庫的整理助手。請判斷每個「候選句型」和「既有句型」的關係，並檢查候選句型之間是否互相重複。
+
+關係定義：
+- duplicate（重複）：同一個句型，只是寫法、符號、佔位詞或大小寫不同。例如「be about to do」與「be about to + V」
+- variant（變體）：核心句型相同，但套上了不同的句型框架或固定搭配。例如「be about to」與「What [someone] is about to [verb] is...」
+- synonym（近義）：不同的說法但意思相近、學習時值得互相比較。例如「be about to」與「be on the verge of」
+- new（新的）：與既有句型都沒有上述關係
+
+判斷原則：
+- 只有非常確定是同一個句型時才標 duplicate；不確定時寧可標 variant 或 new
+- duplicate 優先與既有句型比對，填 matchId；若只與排在它前面的候選句型重複，填 matchCandidateIndex
+- variant 與 synonym 只跟既有句型比對，必須填 matchId
+- 有多個符合時，選最接近的一個
+
+既有句型（方括號內是 id）：
+${existingList}
+
+候選句型（前面的數字是 index）：
+${candidateList}
+
+請只回傳 JSON 物件，不要有其他文字。每個候選句型都要有一筆結果。格式範例：
+{
+  "results": [
+    { "index": 0, "relation": "new" },
+    { "index": 1, "relation": "duplicate", "matchId": "既有句型的 id" },
+    { "index": 2, "relation": "duplicate", "matchCandidateIndex": 0 },
+    { "index": 3, "relation": "variant", "matchId": "既有句型的 id" },
+    { "index": 4, "relation": "synonym", "matchId": "既有句型的 id" }
+  ]
+}`;
+}

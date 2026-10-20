@@ -5,6 +5,7 @@ import { auth, db, appId } from '../firebase';
 import { doc, onSnapshot, collection, setDoc, updateDoc } from 'firebase/firestore';
 import ShadowingPracticeView from './ShadowingPracticeView';
 import { extractPatternsFromSentence } from '../services/gemini';
+import { savePatternsWithDedup, formatSaveResult } from '../services/patternSave';
 import { startCoverGeneration, buildCoverExcerpt } from '../services/cover';
 import ConfirmDialog from './ConfirmDialog';
 
@@ -117,19 +118,11 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
         try {
             const patterns = await extractPatternsFromSentence(sentence.text, sentence.translation || '');
             
-            const patternsRef = collection(db, `artifacts/${appId}/users/${uid}/languagePatterns`);
-            const promises = patterns.map(p => {
-                const docRef = doc(patternsRef);
-                return setDoc(docRef, {
-                    ...p,
-                    id: docRef.id,
-                    sourceMaterialId: material.id,
-                    sourceLabel: sentence.text.substring(0, 20) + (sentence.text.length > 20 ? '...' : ''),
-                    exampleSentences: [],
-                    unlockedGroups: 0
-                });
+            const saveResult = await savePatternsWithDedup(patterns, {
+                sourceMaterialId: material.id,
+                sourceLabel: sentence.text.substring(0, 20) + (sentence.text.length > 20 ? '...' : ''),
+                sourceExample: { en: sentence.text, zh: sentence.translation || '' }
             });
-            await Promise.all(promises);
 
             const updatedSentences = [...material.sentences];
             updatedSentences[index] = { ...updatedSentences[index], extracted: true };
@@ -138,8 +131,8 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
                 sentences: updatedSentences
             });
 
-            setExtractMessage({ text: `已成功從這句萃取出 ${patterns.length} 個句型`, isError: false });
-            setTimeout(() => setExtractMessage(null), 3000);
+            setExtractMessage({ text: formatSaveResult(saveResult), isError: false });
+            setTimeout(() => setExtractMessage(null), 6000);
         } catch (err: any) {
             console.error(err);
             setExtractMessage({ text: err.message || '萃取失敗', isError: true });

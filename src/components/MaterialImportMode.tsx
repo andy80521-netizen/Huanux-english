@@ -9,6 +9,7 @@ import { doc, setDoc, deleteDoc, collection, onSnapshot, query, orderBy, getDoc 
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { Material, CoverStyle } from '../types';
 import { startCoverGeneration, buildCoverExcerpt } from '../services/cover';
+import { savePatternsWithDedup, formatSaveResult } from '../services/patternSave';
 import MaterialReviewPanel, { ReviewSentence } from './MaterialReviewPanel';
 import MaterialListView from './MaterialListView';
 import MaterialDetailView from './MaterialDetailView';
@@ -165,19 +166,8 @@ export default function MaterialImportMode() {
             
             const sourceLabel = fullText.length > 20 ? fullText.substring(0, 20) + '...' : fullText;
             
-            const promises = patterns.map(pattern => {
-                const docRef = doc(collection(db, `artifacts/${appId}/users/${auth.currentUser!.uid}/languagePatterns`));
-                return setDoc(docRef, {
-                    ...pattern,
-                    id: docRef.id,
-                    sourceLabel,
-                    exampleSentences: [],
-                    unlockedGroups: 0
-                });
-            });
-
-            await Promise.all(promises);
-            setExtractSuccessMsg(`成功萃取出 ${patterns.length} 個句型！`);
+            const saveResult = await savePatternsWithDedup(patterns, { sourceLabel });
+            setExtractSuccessMsg(formatSaveResult(saveResult));
         } catch (e: any) {
             setError(e.message || '萃取失敗');
         } finally {

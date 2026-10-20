@@ -7,6 +7,7 @@ import {
     buildRegenerateSeedsPrompt,
     buildExtractFromSentencePrompt,
     buildExtractFromTextPrompt,
+    buildClassifyPatternsPrompt,
     normalizePrimaryCategories,
     TRANSCRIBE_PROMPT,
     cleanAndParseJSON
@@ -37,7 +38,8 @@ export default async (req: Request) => {
         'regenerateSeeds',
         'extractFromSentence',
         'extractFromText',
-        'transcribe'
+        'transcribe',
+        'classifyPatterns'
     ];
     if (!task || typeof task !== 'string' || !ALLOWED_TASKS.includes(task)) {
         return json(400, { error: '不支援的工作' });
@@ -189,6 +191,42 @@ export default async (req: Request) => {
             } catch (e: any) {
                 throw new Error('解析語言模型句型失敗：' + e.message);
             }
+        } else if (task === 'classifyPatterns') {
+            const candidates = payload?.candidates;
+            const existing = payload?.existing;
+            if (
+                !Array.isArray(candidates) || candidates.length < 1 || candidates.length > 50 ||
+                !Array.isArray(existing) || existing.length > 2000 ||
+                !candidates.every((c: any) => c && typeof c.text === 'string' && c.text.length >= 1 && c.text.length <= 300 && typeof c.meaningZh === 'string' && c.meaningZh.length <= 500) ||
+                !existing.every((e: any) => e && typeof e.id === 'string' && e.id.length >= 1 && e.id.length <= 100 && typeof e.text === 'string' && e.text.length <= 300 && typeof e.meaningZh === 'string' && e.meaningZh.length <= 500)
+            ) {
+                return json(400, { error: '輸入格式不正確' });
+            }
+            const prompt = buildClassifyPatternsPrompt(candidates, existing);
+            const config = { temperature: 0.1 };
+            const response = await callGeminiFreeThenPaid(task, (ai, model) =>
+                ai.models.generateContent({ model, contents: prompt, config })
+            );
+            const text = response.text;
+            if (!text) {
+                throw new Error('無法從 Gemini 取得內容');
+            }
+            const parsed = cleanAndParseJSON(text);
+            const rawResults = Array.isArray(parsed?.results) ? parsed.results : [];
+            const existingIds = new Set(existing.map((e: any) => e.id));
+            // 逐筆檢查 AI 回傳的關係，對不上的一律視為新的
+            const results = candidates.map((_: any, i: number) => {
+                const r = rawResults.find((x: any) => x && x.index === i);
+                const relation = r?.relation;
+                if ((relation === 'duplicate' || relation === 'variant' || relation === 'synonym') && typeof r.matchId === 'string' && existingIds.has(r.matchId)) {
+                    return { index: i, relation, matchId: r.matchId };
+                }
+                if (relation === 'duplicate' && Number.isInteger(r.matchCandidateIndex) && r.matchCandidateIndex >= 0 && r.matchCandidateIndex < i) {
+                    return { index: i, relation, matchCandidateIndex: r.matchCandidateIndex };
+                }
+                return { index: i, relation: 'new' };
+            });
+            result = { results };
         } else if (task === 'transcribe') {
             if (
                 !payload ||

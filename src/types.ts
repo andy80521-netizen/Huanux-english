@@ -76,4 +76,5 @@ export interface LanguagePattern {
   seedExamples: { en: string; zh: string }[]; // Gemini 萃取時附的原始情境例句（至少5個，僅供參考）
   exampleSentences: PatternExampleSentence[]; // 使用者自造的100句（10組x10句）
   unlockedGroups: number;       // 目前解鎖到第幾組（0-9）
+  related?: { id: string; type: 'variant' | 'synonym' }[]; // 相關句型（變體／近義），萃取時由 AI 比對產生
 }
