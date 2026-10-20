@@ -10,6 +10,7 @@ import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage
 import { Material, CoverStyle } from '../types';
 import { startCoverGeneration, buildCoverExcerpt } from '../services/cover';
 import { savePatternsWithDedup, formatSaveResult } from '../services/patternSave';
+import { requestSightingDetection } from '../services/sightings';
 import MaterialReviewPanel, { ReviewSentence } from './MaterialReviewPanel';
 import MaterialListView from './MaterialListView';
 import MaterialDetailView from './MaterialDetailView';
@@ -554,6 +555,8 @@ export default function MaterialImportMode() {
                         );
                     }
 
+                    void requestSightingDetection(pendingMaterial.materialId);
+
                     try {
                         const taskDocRef = doc(db, 'artifacts', appId, 'users', uid, 'transcriptionJobs', pendingMaterial.materialId);
                         await deleteDoc(taskDocRef);
@@ -631,6 +634,8 @@ export default function MaterialImportMode() {
                     buildCoverExcerpt(finalSentences)
                 );
             }
+
+            void requestSightingDetection(materialId);
 
             setSaveSuccess(true);
             setPendingMaterial(null);

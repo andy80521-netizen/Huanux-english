@@ -4,6 +4,7 @@ import { auth, db, storage, appId } from '../firebase';
 import { collection, query, onSnapshot, deleteDoc, doc, orderBy } from 'firebase/firestore';
 import { ref, deleteObject } from 'firebase/storage';
 import { Plus, Trash2, AlertTriangle, BookOpen, AlertCircle, User, Loader2 } from 'lucide-react';
+import { deleteMaterialSightings } from '../services/sightings';
 
 const ConfirmDialog: React.FC<{
   isOpen: boolean;
@@ -91,6 +92,9 @@ export default function MaterialListView({ onAddClick, onMaterialClick }: { onAd
 
             // Delete Firestore doc
             await deleteDoc(doc(db, `artifacts/${appId}/users/${uid}/materials`, deleteModal.materialId));
+
+            // 刪除這份教材的已學句型比對結果與重逢紀錄
+            await deleteMaterialSightings(deleteModal.materialId);
             
             // Delete Storage file (mp3)
             const storageRef = ref(storage, `artifacts/${appId}/users/${uid}/materials/${deleteModal.materialId}.mp3`);

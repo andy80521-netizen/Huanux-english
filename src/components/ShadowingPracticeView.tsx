@@ -7,6 +7,7 @@ import { getSupportedMimeType } from '../utils/mediaRecorder';
 import { auth, db, appId } from '../firebase';
 import { doc, updateDoc } from 'firebase/firestore';
 import { SILENT_AUDIO } from '../utils';
+import { recordActiveSighting } from '../services/sightings';
 
 type PracticeState = 'idle' | 'recording' | 'buffer' | 'finished' | 'scoring' | 'scored' | 'scoreError';
 
@@ -16,9 +17,10 @@ interface ShadowingPracticeViewProps {
     onBack: () => void;
     onNext: () => void;
     isLastSentence: boolean;
+    sightingPatternIds?: string[];
 }
 
-export default function ShadowingPracticeView({ material, sentenceIndex, onBack, onNext, isLastSentence }: ShadowingPracticeViewProps) {
+export default function ShadowingPracticeView({ material, sentenceIndex, onBack, onNext, isLastSentence, sightingPatternIds }: ShadowingPracticeViewProps) {
     const sentence = material.sentences[sentenceIndex];
     // 標題的「第幾句／總句數」只計算未刪除的句子
     const activeIndices = material.sentences.map((s, i) => (s.deleted ? -1 : i)).filter(i => i >= 0);
@@ -344,6 +346,11 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
             await updateDoc(doc(db, `artifacts/${appId}/users/${uid}/materials`, material.id), {
                 sentences: updatedSentences
             });
+
+            // 這句含有已學句型且達 70 分：記錄一次「親口念過」（不影響任何熟練度）
+            if (scores.total >= 70 && sightingPatternIds && sightingPatternIds.length > 0) {
+                void recordActiveSighting(material.id, sentence.id, sightingPatternIds);
+            }
             
             setPracticeState('scored');
 

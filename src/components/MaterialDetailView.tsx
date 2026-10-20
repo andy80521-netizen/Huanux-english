@@ -1,13 +1,15 @@
 import React, { useRef, useState } from 'react';
 import { Material, CoverStyle } from '../types';
-import { ChevronLeft, Play, Pause, CheckCircle2, Mic, Loader2, Sparkles, Trash2, RotateCcw, BookOpen, X } from 'lucide-react';
+import { ChevronLeft, Play, Pause, CheckCircle2, Mic, Loader2, Sparkles, Trash2, RotateCcw, BookOpen, X, Search } from 'lucide-react';
 import { auth, db, appId } from '../firebase';
-import { doc, onSnapshot, collection, setDoc, updateDoc } from 'firebase/firestore';
+import { doc, onSnapshot, collection, setDoc, updateDoc, getDoc } from 'firebase/firestore';
 import ShadowingPracticeView from './ShadowingPracticeView';
 import { extractPatternsFromSentence } from '../services/gemini';
 import { savePatternsWithDedup, formatSaveResult } from '../services/patternSave';
 import { startCoverGeneration, buildCoverExcerpt } from '../services/cover';
 import ConfirmDialog from './ConfirmDialog';
+import PatternQuickCard from './PatternQuickCard';
+import { requestSightingDetection, MaterialSightings } from '../services/sightings';
 
 export default function MaterialDetailView({ materialId, onBack }: { materialId: string, onBack: () => void }) {
     const [material, setMaterial] = useState<Material | null>(null);
@@ -50,6 +52,47 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
         } catch {}
     };
 
+    const [sightings, setSightings] = useState<MaterialSightings | null>(null);
+    const [patternNames, setPatternNames] = useState<Record<string, string | null>>({});
+    const [quickCardPatternId, setQuickCardPatternId] = useState<string | null>(null);
+
+    // 監聽這份教材的已學句型比對結果
+    React.useEffect(() => {
+        const uid = auth.currentUser?.uid;
+        if (!uid || !materialId) return;
+        const ref = doc(db, `artifacts/${appId}/users/${uid}/materialSightings`, materialId);
+        const unsubscribe = onSnapshot(ref, (snapshot) => {
+            setSightings(snapshot.exists() ? (snapshot.data() as MaterialSightings) : null);
+        }, (error) => {
+            console.error('[監聽來源:MaterialDetailView-materialSightings]', error);
+        });
+        return () => unsubscribe();
+    }, [materialId]);
+
+    // 取得標籤要顯示的句型文字（已刪除的句型記為 null，不顯示標籤）
+    React.useEffect(() => {
+        const uid = auth.currentUser?.uid;
+        if (!uid || !sightings?.bySentence) return;
+        const bySentence = sightings.bySentence;
+        const ids = Array.from(new Set(Object.keys(bySentence).reduce<string[]>((acc, key) => acc.concat(bySentence[key] || []), []))).filter(id => !(id in patternNames));
+        if (ids.length === 0) return;
+        let cancelled = false;
+        Promise.all(ids.map(id =>
+            getDoc(doc(db, `artifacts/${appId}/users/${uid}/languagePatterns`, id))
+                .then(snap => [id, snap.exists() ? String(snap.data().text || '') : null] as const)
+                .catch(() => [id, null] as const)
+        )).then(entries => {
+            if (cancelled) return;
+            setPatternNames(prev => {
+                const next = { ...prev };
+                for (const [id, name] of entries) next[id] = name;
+                return next;
+            });
+        });
+        return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [sightings?.bySentence]);
+
     if (!material) {
         return (
             <div className="flex flex-col h-full bg-slate-50 dark:bg-slate-950 p-6 items-center justify-center">
@@ -76,6 +119,7 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
                     return next !== undefined ? next : prev;
                 })}
                 isLastSentence={practiceIndex === lastActiveIndex}
+                sightingPatternIds={sightings?.bySentence?.[material.sentences[practiceIndex]?.id] || []}
             />
         );
     }
@@ -301,6 +345,38 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
                     </p>
                 )}
             </div>
+
+            {/* 已學句型比對 */}
+            {(() => {
+                const isDetecting = sightings?.status === 'processing' && typeof sightings.requestedAt === 'number' && Date.now() - sightings.requestedAt < 5 * 60 * 1000;
+                const matchedCount = Object.keys(sightings?.bySentence || {}).length;
+                const statusText = isDetecting
+                    ? '比對中，完成後含有已學句型的句子會加上標籤'
+                    : sightings?.status === 'error'
+                        ? `比對失敗：${sightings.error || '請稍後再試'}`
+                        : sightings?.status === 'done'
+                            ? `${matchedCount} 句含有已學句型`
+                            : sightings?.status === 'processing'
+                                ? '上次比對沒有完成，可以重新比對'
+                                : '還沒比對過';
+                return (
+                    <div className="mb-6 p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                            <p className="text-sm font-bold text-slate-700 dark:text-slate-200">已學句型比對</p>
+                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{statusText}</p>
+                        </div>
+                        <button
+                            onClick={() => requestSightingDetection(material.id)}
+                            disabled={isDetecting}
+                            className="shrink-0 px-3 py-2 text-xs font-bold bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-xl hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                        >
+                            {isDetecting ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
+                            {sightings?.status === 'done' ? '重新比對' : '比對已學句型'}
+                        </button>
+                    </div>
+                );
+            })()}
+
             {extractMessage && (
                 <div className={`mb-6 text-sm px-4 py-3 rounded-xl shadow-sm border animate-in slide-in-from-top-2 font-bold text-center ${
                     extractMessage.isError 
@@ -346,6 +422,19 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
                                 <p className="text-slate-500 dark:text-slate-400 text-sm leading-relaxed">
                                     {s.translation}
                                 </p>
+                                {(sightings?.bySentence?.[s.id] || []).filter(pid => patternNames[pid]).length > 0 && (
+                                    <div className="flex flex-wrap gap-1.5 pt-1">
+                                        {(sightings?.bySentence?.[s.id] || []).filter(pid => patternNames[pid]).map(pid => (
+                                            <button
+                                                key={pid}
+                                                onClick={() => setQuickCardPatternId(pid)}
+                                                className="text-[11px] font-bold px-2 py-1 rounded-lg bg-purple-50 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-900/50 transition-colors"
+                                            >
+                                                含句型：{patternNames[pid]}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                             
                             <div className="flex flex-wrap items-center gap-2">
@@ -477,6 +566,10 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
                         </div>
                     </div>
                 </div>
+            )}
+
+            {quickCardPatternId && (
+                <PatternQuickCard patternId={quickCardPatternId} onClose={() => setQuickCardPatternId(null)} />
             )}
         </div>
     );
