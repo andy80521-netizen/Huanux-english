@@ -10,6 +10,7 @@ import { regenerateAndSaveSeedExamples } from '../services/seedExamples';
 import ConfirmDialog from './ConfirmDialog';
 import PatternSightingsSection from './PatternSightingsSection';
 import { getPatternStage } from '../utils/patternStage';
+import { getSydneyDateString } from '../utils/sydneyTime';
 
 export default function LanguageModelDetailView({ patternId, onBack }: { patternId: string, onBack: () => void }) {
     const [pattern, setPattern] = useState<LanguagePattern | null>(null);
@@ -165,6 +166,12 @@ export default function LanguageModelDetailView({ patternId, onBack }: { pattern
                 <h2 className="text-3xl sm:text-4xl font-black text-slate-800 dark:text-white mb-6 leading-tight">
                     {pattern.text}
                 </h2>
+
+                {pattern.maintenance && (
+                    <p className="-mt-3 mb-6 text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                        維持複習：{pattern.maintenance.level > 0 ? `已連續通過 ${pattern.maintenance.level} 次` : pattern.maintenance.lastReviewedAt ? '上次沒有通過' : '尚未開始'}・下次 {getSydneyDateString(pattern.maintenance.dueAt)}
+                    </p>
+                )}
                 
                 <div className="space-y-6">
                     <div>

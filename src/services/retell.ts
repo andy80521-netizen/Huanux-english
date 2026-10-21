@@ -3,6 +3,7 @@ import { db, auth, appId } from '../firebase';
 import { Material, LanguagePattern } from '../types';
 import { segmentMaterial, reviewRetellWithAi, RetellFeedback } from './gemini';
 import { getMasteredCount } from '../utils/patternStage';
+import { postponeMaintenance } from './maintenance';
 
 export interface RetellSegment {
   title: string;
@@ -125,6 +126,7 @@ export async function saveRetell(record: Omit<RetellRecord, 'id'>): Promise<void
         spontaneousUseCount: increment(1),
         lastSpontaneousUseAt: now
       });
+      await postponeMaintenance(usage.id);
     } catch (err) {
       console.warn('[複述] 記錄自發使用失敗:', err);
     }

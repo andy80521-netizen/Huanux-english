@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { auth, db, appId } from '../firebase';
 import { LanguagePattern, PatternExampleSentence } from '../types';
-import { isSydneyDateReached } from '../utils/sydneyTime';
+import { isSydneyDateReached, getSydneyDateString } from '../utils/sydneyTime';
 import PatternPracticeSessionView from './PatternPracticeSessionView';
-import { Sparkles, CalendarCheck, Target, CheckCircle2 } from 'lucide-react';
+import { Sparkles, CalendarCheck, Target, CheckCircle2, ShieldCheck, Loader2, AlertCircle } from 'lucide-react';
+import { needsMaintenanceInit, initMaintenance, isMaintenanceDue, pickMaintenanceSentences, applyMaintenanceResult, MaintenanceOutcome, MAINTENANCE_SIZE } from '../services/maintenance';
 
 interface ReviewItem {
     pattern: LanguagePattern;
@@ -19,6 +20,17 @@ interface ReviewGroup {
     avgMastery: number;
 }
 
+interface MaintenanceItem {
+    pattern: LanguagePattern;
+    sentences: PatternExampleSentence[];
+}
+
+type MaintenanceResultState =
+    | { kind: 'result'; outcome: MaintenanceOutcome }
+    | { kind: 'incomplete' }
+    | { kind: 'already' }
+    | { kind: 'error'; message: string };
+
 export default function TodayReviewView() {
     const [patterns, setPatterns] = useState<LanguagePattern[]>([]);
     const [loading, setLoading] = useState(true);
@@ -31,6 +43,13 @@ export default function TodayReviewView() {
     const [startMasteryMap, setStartMasteryMap] = useState<Record<string, number>>({});
     const [activeGroup, setActiveGroup] = useState<{ pattern: LanguagePattern; groupIndex: number } | null>(null);
     const [isSummary, setIsSummary] = useState(false);
+
+    // 維持複習
+    const [maintenancePattern, setMaintenancePattern] = useState<LanguagePattern | null>(null);
+    const maintenanceScoresRef = useRef<Record<string, number>>({});
+    const [maintenanceSaving, setMaintenanceSaving] = useState(false);
+    const [maintenanceResult, setMaintenanceResult] = useState<MaintenanceResultState | null>(null);
+    const maintenanceInitRequestedRef = useRef<Set<string>>(new Set());
 
     useEffect(() => {
         const unsubscribeAuth = auth.onAuthStateChanged((u) => {
@@ -59,6 +78,28 @@ export default function TodayReviewView() {
         });
         return () => unsubscribe();
     }, [user]);
+
+    // 達到「可用」但還沒有維持複習排程的句型：補設 30 天後到期（舊句型也適用）
+    useEffect(() => {
+        patterns.forEach((p) => {
+            if (!needsMaintenanceInit(p) || maintenanceInitRequestedRef.current.has(p.id)) return;
+            maintenanceInitRequestedRef.current.add(p.id);
+            initMaintenance(p.id).catch((err) => console.warn('[維持複習] 設定排程失敗:', err));
+        });
+    }, [patterns]);
+
+    const maintenanceItems = useMemo(() => {
+        const now = Date.now();
+        const items: MaintenanceItem[] = [];
+        patterns.forEach((pattern) => {
+            if (!isMaintenanceDue(pattern, now)) return;
+            const sentences = pickMaintenanceSentences(pattern, now);
+            if (sentences.length < MAINTENANCE_SIZE) return;
+            items.push({ pattern, sentences });
+        });
+        items.sort((a, b) => (a.pattern.text || '').localeCompare(b.pattern.text || ''));
+        return items;
+    }, [patterns]);
 
     const reviewItems = useMemo(() => {
         const items: ReviewItem[] = [];
@@ -156,6 +197,44 @@ export default function TodayReviewView() {
         setActiveItemKey(firstKey);
     };
 
+    const startMaintenance = (item: MaintenanceItem) => {
+        const queue: ReviewItem[] = item.sentences.map((sentence) => ({ pattern: item.pattern, sentence }));
+        if (queue.length === 0) return;
+        setSessionQueue(queue);
+        setCompletedKeys(new Set());
+        setStartMasteryMap({});
+        setActiveGroup(null);
+        setMaintenancePattern(item.pattern);
+        maintenanceScoresRef.current = {};
+        setMaintenanceResult(null);
+        setMaintenanceSaving(false);
+        setIsSummary(false);
+        setActiveItemKey(`${queue[0].pattern.id}::${queue[0].sentence.id}`);
+    };
+
+    // 三句都做完才結算；任何一句沒有分數（例如跳過）就不計算，下次重做
+    const finishMaintenance = async (pattern: LanguagePattern, queue: ReviewItem[]) => {
+        const scores: Record<string, number> = {};
+        for (const it of queue) {
+            const s = maintenanceScoresRef.current[it.sentence.id];
+            if (typeof s !== 'number') {
+                setMaintenanceResult({ kind: 'incomplete' });
+                return;
+            }
+            scores[it.sentence.id] = s;
+        }
+        setMaintenanceSaving(true);
+        try {
+            const outcome = await applyMaintenanceResult(pattern.id, scores);
+            setMaintenanceResult(outcome ? { kind: 'result', outcome } : { kind: 'already' });
+        } catch (err: any) {
+            console.error('[維持複習] 儲存結果失敗:', err);
+            setMaintenanceResult({ kind: 'error', message: err?.message || '儲存結果失敗' });
+        } finally {
+            setMaintenanceSaving(false);
+        }
+    };
+
     const handleBackFromSession = () => {
         setSessionQueue(null);
         setCompletedKeys(new Set());
@@ -163,6 +242,10 @@ export default function TodayReviewView() {
         setStartMasteryMap({});
         setActiveGroup(null);
         setIsSummary(false);
+        setMaintenancePattern(null);
+        maintenanceScoresRef.current = {};
+        setMaintenanceResult(null);
+        setMaintenanceSaving(false);
     };
 
     const handleNextInSession = () => {
@@ -184,8 +267,65 @@ export default function TodayReviewView() {
             // Queue finished -> enter summary mode
             setActiveItemKey(null);
             setIsSummary(true);
+            if (maintenancePattern) {
+                void finishMaintenance(maintenancePattern, sessionQueue);
+            }
         }
     };
+
+    if (isSummary && maintenancePattern) {
+        const r = maintenanceResult;
+        const passed = r?.kind === 'result' && r.outcome.passed;
+        return (
+            <div className="flex flex-col items-center justify-center h-full bg-slate-50 dark:bg-slate-950 p-6 overflow-y-auto">
+                <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl p-8 border border-slate-200 dark:border-slate-800 shadow-xl text-center space-y-6">
+                    <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mx-auto shadow-inner ${passed ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400' : 'bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400'}`}>
+                        {maintenanceSaving || !r ? <Loader2 size={36} className="animate-spin" /> : passed ? <ShieldCheck size={36} /> : <AlertCircle size={36} />}
+                    </div>
+
+                    <div>
+                        <h2 className="text-2xl font-black text-slate-800 dark:text-white">
+                            {maintenanceSaving || !r ? '儲存結果中…'
+                                : r.kind === 'result' ? (r.outcome.passed ? '維持複習通過' : '這次沒有通過')
+                                : r.kind === 'incomplete' ? '這次不計算'
+                                : r.kind === 'already' ? '已經更新過了'
+                                : '儲存失敗'}
+                        </h2>
+                        <p className="text-sm font-bold text-slate-500 dark:text-slate-400 mt-1">
+                            {maintenancePattern.text}
+                        </p>
+                    </div>
+
+                    {r && !maintenanceSaving && (
+                        <div className="bg-slate-50 dark:bg-slate-800/60 rounded-2xl p-4 border border-slate-100 dark:border-slate-800 text-sm font-bold text-slate-600 dark:text-slate-300 leading-relaxed space-y-1">
+                            {r.kind === 'result' && (
+                                <>
+                                    <p>{MAINTENANCE_SIZE} 句中 {r.outcome.passCount} 句達 70 分</p>
+                                    {r.outcome.passed ? (
+                                        <p>已連續通過 {r.outcome.level} 次</p>
+                                    ) : (
+                                        <p>{r.outcome.failedCount} 句熟練度降為 750，已回到今日複習，今天就可以重新練習</p>
+                                    )}
+                                    <p>下次維持複習：{getSydneyDateString(r.outcome.dueAt)}</p>
+                                </>
+                            )}
+                            {r.kind === 'incomplete' && <p>有題目沒有完成評分，這次的結果不會更新，之後再做一次即可</p>}
+                            {r.kind === 'already' && <p>這個句型的維持複習已經更新過（或已延後），這次不重複計算</p>}
+                            {r.kind === 'error' && <p>{r.message}，請稍後再做一次</p>}
+                        </div>
+                    )}
+
+                    <button
+                        onClick={handleBackFromSession}
+                        disabled={maintenanceSaving}
+                        className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-bold rounded-2xl shadow-lg shadow-indigo-200 dark:shadow-none transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        返回今日複習
+                    </button>
+                </div>
+            </div>
+        );
+    }
 
     if (isSummary && activeGroup) {
         let totalMasteryDiff = 0;
@@ -281,7 +421,12 @@ export default function TodayReviewView() {
                 onBack={handleBackFromSession}
                 onNext={handleNextInSession}
                 isLastSentence={isLastSentence}
-                progressLabel={`第 ${completedKeys.size + 1} / ${sessionQueue.length} 題`}
+                progressLabel={maintenancePattern
+                    ? `維持題・第 ${completedKeys.size + 1} / ${sessionQueue.length} 題`
+                    : `第 ${completedKeys.size + 1} / ${sessionQueue.length} 題`}
+                onScored={maintenancePattern
+                    ? (sentenceId, total) => { maintenanceScoresRef.current[sentenceId] = total; }
+                    : undefined}
             />
         );
     }
@@ -295,14 +440,48 @@ export default function TodayReviewView() {
                 <div>
                     <h2 className="text-2xl font-black text-slate-800 dark:text-white">今日複習</h2>
                     <p className="text-sm font-bold text-slate-500">
-                        {reviewItems.length > 0 
-                            ? `共有 ${reviewItems.length} 個句子等待練習` 
+                        {reviewItems.length > 0 || maintenanceItems.length > 0
+                            ? [
+                                reviewItems.length > 0 ? `共有 ${reviewItems.length} 個句子等待練習` : '',
+                                maintenanceItems.length > 0 ? `${maintenanceItems.length} 個句型要維持複習` : ''
+                            ].filter(Boolean).join('・')
                             : '所有進度已完成'}
                     </p>
                 </div>
             </div>
 
-            {reviewGroups.length === 0 ? (
+            {maintenanceItems.length > 0 && (
+                <div className="mb-6">
+                    <h3 className="text-sm font-black text-slate-500 dark:text-slate-400 mb-3 flex items-center gap-2">
+                        <ShieldCheck size={16} className="text-emerald-500" />
+                        維持複習
+                    </h3>
+                    <div className="space-y-4">
+                        {maintenanceItems.map((item) => (
+                            <div
+                                key={item.pattern.id}
+                                onClick={() => startMaintenance(item)}
+                                className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-emerald-200 dark:border-emerald-900/60 shadow-sm cursor-pointer hover:border-emerald-400 dark:hover:border-emerald-700 transition-colors"
+                            >
+                                <div className="text-xs font-bold text-emerald-600 dark:text-emerald-400 mb-2 truncate">
+                                    句型：{item.pattern.text}
+                                </div>
+                                <div className="text-lg font-bold text-slate-800 dark:text-slate-100 mb-2">
+                                    維持題 {item.sentences.length} 句
+                                </div>
+                                <div className="text-xs font-bold text-slate-500 dark:text-slate-400">
+                                    {(item.pattern.maintenance?.level || 0) > 0
+                                        ? `已連續通過 ${item.pattern.maintenance?.level} 次`
+                                        : item.pattern.maintenance?.lastReviewedAt ? '上次沒有通過' : '第一次維持複習'}
+                                    ・{MAINTENANCE_SIZE} 句中 2 句達 70 分即通過
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {reviewGroups.length === 0 && maintenanceItems.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-20 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 text-center shadow-sm">
                     <Sparkles size={48} className="text-amber-400 mb-4" />
                     <h3 className="text-lg font-black text-slate-700 dark:text-slate-200 mb-2">今天沒有可以複習的句子</h3>

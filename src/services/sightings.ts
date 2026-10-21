@@ -1,6 +1,7 @@
 import { doc, getDoc, setDoc, updateDoc, deleteDoc, increment } from 'firebase/firestore';
 import { db, auth, appId } from '../firebase';
 import { getSydneyDateString } from '../utils/sydneyTime';
+import { postponeMaintenance } from './maintenance';
 
 export interface MaterialSightings {
   status?: 'processing' | 'done' | 'error';
@@ -47,6 +48,7 @@ export async function recordActiveSighting(materialId: string, sentenceId: strin
       const last = snap.data().lastActiveAt;
       if (typeof last === 'number' && getSydneyDateString(last) === today) continue;
       await updateDoc(ref, { activeCount: increment(1), lastActiveAt: Date.now() });
+      await postponeMaintenance(pid);
     } catch (err) {
       console.warn('[重逢] 記錄親口念過失敗:', err);
     }

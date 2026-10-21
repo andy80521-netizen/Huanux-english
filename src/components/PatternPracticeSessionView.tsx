@@ -20,6 +20,7 @@ interface Props {
   onNext: () => void;
   isLastSentence: boolean;
   progressLabel?: string;
+  onScored?: (sentenceId: string, total: number) => void; // 每次評分完成時回報（維持複習用）
 }
 
 type SessionState = 'idle' | 'recording' | 'scoring' | 'scored' | 'scoreError';
@@ -114,7 +115,7 @@ const pickPromptTypeByMastery = (available: PromptType[], mastery: number): Prom
     return available[available.length - 1];
 };
 
-export default function PatternPracticeSessionView({ pattern, sentenceIndex, groupIndex, onBack, onNext, isLastSentence, progressLabel }: Props) {
+export default function PatternPracticeSessionView({ pattern, sentenceIndex, groupIndex, onBack, onNext, isLastSentence, progressLabel, onScored }: Props) {
     const [sessionState, setSessionState] = useState<SessionState>('idle');
     const [activePromptType, setActivePromptType] = useState<PromptType | null>(null);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -381,6 +382,7 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
             setUserText(transcribedText);
             const scores = calculateFinalScores(transcribedText, sentenceObj.text, durationSec);
             setScoreResult(scores);
+            onScored?.(sentenceObj.id, scores.total);
 
             if (scores.total >= 70) {
                 const uid = auth.currentUser?.uid;

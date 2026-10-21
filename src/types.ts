@@ -78,4 +78,5 @@ export interface LanguagePattern {
   exampleSentences: PatternExampleSentence[]; // 使用者自造的100句（10組x10句）
   unlockedGroups: number;       // 目前解鎖到第幾組（0-9）
   related?: { id: string; type: 'variant' | 'synonym' }[]; // 相關句型（變體／近義），萃取時由 AI 比對產生
+  maintenance?: { level: number; dueAt: number; lastReviewedAt?: number }; // 維持複習（精熟 10 句後開始）：level＝連續通過次數，dueAt＝下次到期（雪梨日）
 }
