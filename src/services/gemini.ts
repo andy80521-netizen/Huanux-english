@@ -451,6 +451,29 @@ export async function classifyPatterns(
     return data.results;
 }
 
+export interface RetellFeedback {
+  coverage: { covered: string[]; missed: string[] };
+  corrections: { original: string; better: string; note: string }[];
+  patternUsage: { id: string; status: 'correct' | 'incorrect' | 'unused'; note: string }[];
+  modelAnswer: string;
+  comment: string;
+  contentScore: number;
+  languageScore: number;
+}
+
+export async function segmentMaterial(sentences: string[]): Promise<{ title: string; start: number; end: number }[]> {
+    const data = await callAiText<{ segments: { title: string; start: number; end: number }[] }>('segmentMaterial', { sentences });
+    return data.segments;
+}
+
+export async function reviewRetellWithAi(
+  segmentText: string,
+  transcript: string,
+  targetPatterns: { id: string; text: string; meaningZh: string }[]
+): Promise<RetellFeedback> {
+    return callAiText<RetellFeedback>('reviewRetell', { segmentText, transcript, targetPatterns });
+}
+
 export async function regenerateSeedExamples(
   pattern: { text: string; meaningZh: string; usageContext: string; category: string },
   avoidSentences: string[]

@@ -240,3 +240,66 @@ ${sentenceList}
   ]
 }`;
 }
+
+export function buildSegmentMaterialPrompt(sentences: string[]): string {
+    const sentenceList = sentences.map((s, i) => `${i}. ${s}`).join('\n');
+    const lastIndex = sentences.length - 1;
+
+    return `你是英文教材的編輯。下面是一份英文教材的句子（依序編號）。請依「主題或話題的轉換」把它切成連續的段落，方便學習者一次複述一段。
+
+規則：
+- 每段約 5～12 句；主題很短時可以少於 5 句，但不要少於 3 句（全文不到 3 句時整份就是一段）
+- 段落必須連續、依序、不重疊，並涵蓋全部句子：第一段從 0 開始，最後一段結束在 ${lastIndex}
+- 每段給一個簡短的繁體中文標題（10 個字以內），說明這段在講什麼
+
+句子：
+${sentenceList}
+
+請只回傳 JSON 物件，不要有其他文字。格式範例：
+{
+  "segments": [
+    { "title": "段落標題", "start": 0, "end": 6 }
+  ]
+}`;
+}
+
+export function buildReviewRetellPrompt(
+    segmentText: string,
+    transcript: string,
+    targetPatterns: { id: string; text: string; meaningZh: string }[]
+): string {
+    const patternList = targetPatterns.length > 0
+        ? targetPatterns.map(p => `[${p.id}] ${p.text}（${p.meaningZh}）`).join('\n')
+        : '無';
+
+    return `你是英文口說教練。學習者剛聽完一段英文教材，接著用自己的話、以英文口說複述內容。下面是原文、學習者複述的語音辨識結果，以及系統建議學習者使用的句型。
+請用繁體中文給回饋（英文的原句與改寫保持英文）。
+
+原文：
+${segmentText}
+
+學習者的複述（語音辨識結果，可能有少量辨識錯誤；明顯的辨識錯誤不要當成學習者的錯）：
+${transcript}
+
+建議使用的句型（方括號內是 id）：
+${patternList}
+
+請評估：
+1. coverage：covered 列出學習者有講到的重點（中文，每點一句）；missed 列出原文中重要但沒講到的重點（最多 4 點）
+2. corrections：挑出 2～5 個最值得改進的地方。original 是學習者的原話片段，better 是更自然道地的說法，note 用中文簡短說明原因；學習者講得很好時可以少於 2 個
+3. patternUsage：每個建議句型各一筆。status 為 correct（自然且正確地用到）、incorrect（有嘗試但用錯）或 unused（沒有用到）；note 用中文簡短說明
+4. modelAnswer：用英文寫一段示範複述，80 個字以內，口語自然，盡量自然地用上建議句型
+5. comment：中文整體評語 2～3 句，先肯定做得好的地方，再指出最重要的改進方向
+6. contentScore：內容涵蓋分數 0～100；languageScore：語言自然度與正確性分數 0～100
+
+請只回傳 JSON 物件，不要有其他文字。格式：
+{
+  "coverage": { "covered": ["..."], "missed": ["..."] },
+  "corrections": [ { "original": "...", "better": "...", "note": "..." } ],
+  "patternUsage": [ { "id": "句型 id", "status": "unused", "note": "..." } ],
+  "modelAnswer": "...",
+  "comment": "...",
+  "contentScore": 0,
+  "languageScore": 0
+}`;
+}

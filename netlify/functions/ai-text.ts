@@ -8,6 +8,8 @@ import {
     buildExtractFromSentencePrompt,
     buildExtractFromTextPrompt,
     buildClassifyPatternsPrompt,
+    buildSegmentMaterialPrompt,
+    buildReviewRetellPrompt,
     normalizePrimaryCategories,
     TRANSCRIBE_PROMPT,
     cleanAndParseJSON
@@ -39,7 +41,9 @@ export default async (req: Request) => {
         'extractFromSentence',
         'extractFromText',
         'transcribe',
-        'classifyPatterns'
+        'classifyPatterns',
+        'segmentMaterial',
+        'reviewRetell'
     ];
     if (!task || typeof task !== 'string' || !ALLOWED_TASKS.includes(task)) {
         return json(400, { error: '不支援的工作' });
@@ -227,6 +231,112 @@ export default async (req: Request) => {
                 return { index: i, relation: 'new' };
             });
             result = { results };
+        } else if (task === 'segmentMaterial') {
+            const sentences = payload?.sentences;
+            if (
+                !Array.isArray(sentences) || sentences.length < 1 || sentences.length > 400 ||
+                !sentences.every((s: any) => typeof s === 'string' && s.length >= 1 && s.length <= 1000)
+            ) {
+                return json(400, { error: '輸入格式不正確' });
+            }
+            const n = sentences.length;
+            // AI 結果不合規則時，改為每 8 句一段
+            const fallbackSegments = () => {
+                const segs: { title: string; start: number; end: number }[] = [];
+                for (let s = 0; s < n; s += 8) {
+                    segs.push({ title: `第 ${segs.length + 1} 段`, start: s, end: Math.min(n - 1, s + 7) });
+                }
+                return segs;
+            };
+            let segments = fallbackSegments();
+            if (n >= 3) {
+                const prompt = buildSegmentMaterialPrompt(sentences);
+                const config = { temperature: 0.2 };
+                const response = await callGeminiFreeThenPaid(task, (ai, model) =>
+                    ai.models.generateContent({ model, contents: prompt, config })
+                );
+                const text = response.text;
+                if (!text) {
+                    throw new Error('無法從 Gemini 取得內容');
+                }
+                const parsed = cleanAndParseJSON(text);
+                const raw = (Array.isArray(parsed?.segments) ? parsed.segments : [])
+                    .filter((x: any) => x && Number.isInteger(x.start) && Number.isInteger(x.end))
+                    .map((x: any) => ({ title: String(x.title || '').trim().slice(0, 30), start: x.start, end: x.end }))
+                    .sort((a: any, b: any) => a.start - b.start);
+                let expected = 0;
+                let valid = raw.length > 0;
+                for (const seg of raw) {
+                    if (seg.start !== expected || seg.end < seg.start || seg.end >= n) {
+                        valid = false;
+                        break;
+                    }
+                    expected = seg.end + 1;
+                }
+                if (valid && expected === n) {
+                    segments = raw.map((seg: any, i: number) => ({ ...seg, title: seg.title || `第 ${i + 1} 段` }));
+                }
+            } else {
+                segments = [{ title: '第 1 段', start: 0, end: n - 1 }];
+            }
+            result = { segments };
+        } else if (task === 'reviewRetell') {
+            const segmentText = payload?.segmentText;
+            const transcript = payload?.transcript;
+            const targetPatterns = payload?.targetPatterns;
+            if (
+                typeof segmentText !== 'string' || segmentText.length < 1 || segmentText.length > 8000 ||
+                typeof transcript !== 'string' || transcript.trim().length < 1 || transcript.length > 5000 ||
+                !Array.isArray(targetPatterns) || targetPatterns.length > 5 ||
+                !targetPatterns.every((p: any) => p && typeof p.id === 'string' && p.id.length >= 1 && p.id.length <= 100 && typeof p.text === 'string' && p.text.length <= 300 && typeof p.meaningZh === 'string' && p.meaningZh.length <= 500)
+            ) {
+                return json(400, { error: '輸入格式不正確' });
+            }
+            const prompt = buildReviewRetellPrompt(segmentText, transcript, targetPatterns);
+            const config = { temperature: 0.3 };
+            const response = await callGeminiFreeThenPaid(task, (ai, model) =>
+                ai.models.generateContent({ model, contents: prompt, config })
+            );
+            const text = response.text;
+            if (!text) {
+                throw new Error('無法從 Gemini 取得內容');
+            }
+            const parsed = cleanAndParseJSON(text);
+            const strList = (v: any, max: number) => (Array.isArray(v) ? v : [])
+                .filter((x: any) => typeof x === 'string' && x.trim())
+                .map((x: string) => x.trim().slice(0, 300))
+                .slice(0, max);
+            const clampScore = (v: any) => {
+                const num = Math.round(Number(v));
+                return Number.isFinite(num) ? Math.min(100, Math.max(0, num)) : 0;
+            };
+            const corrections = (Array.isArray(parsed?.corrections) ? parsed.corrections : [])
+                .filter((c: any) => c && typeof c.original === 'string' && typeof c.better === 'string' && c.better.trim())
+                .map((c: any) => ({
+                    original: c.original.trim().slice(0, 300),
+                    better: c.better.trim().slice(0, 300),
+                    note: String(c.note || '').trim().slice(0, 300)
+                }))
+                .slice(0, 5);
+            // 每個建議句型都要有一筆；AI 沒回或狀態不合法的一律視為沒用到
+            const rawUsage = Array.isArray(parsed?.patternUsage) ? parsed.patternUsage : [];
+            const patternUsage = targetPatterns.map((p: any) => {
+                const u = rawUsage.find((x: any) => x && x.id === p.id);
+                const status = ['correct', 'incorrect', 'unused'].includes(u?.status) ? u.status : 'unused';
+                return { id: p.id, status, note: String(u?.note || '').trim().slice(0, 300) };
+            });
+            result = {
+                coverage: {
+                    covered: strList(parsed?.coverage?.covered, 8),
+                    missed: strList(parsed?.coverage?.missed, 4)
+                },
+                corrections,
+                patternUsage,
+                modelAnswer: String(parsed?.modelAnswer || '').trim().slice(0, 600),
+                comment: String(parsed?.comment || '').trim().slice(0, 600),
+                contentScore: clampScore(parsed?.contentScore),
+                languageScore: clampScore(parsed?.languageScore)
+            };
         } else if (task === 'transcribe') {
             if (
                 !payload ||

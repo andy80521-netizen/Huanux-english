@@ -10,6 +10,9 @@ import { startCoverGeneration, buildCoverExcerpt } from '../services/cover';
 import ConfirmDialog from './ConfirmDialog';
 import PatternQuickCard from './PatternQuickCard';
 import { requestSightingDetection, MaterialSightings } from '../services/sightings';
+import RetellSection from './RetellSection';
+import RetellView from './RetellView';
+import { RetellSegment, RetellTargetPattern } from '../services/retell';
 
 export default function MaterialDetailView({ materialId, onBack }: { materialId: string, onBack: () => void }) {
     const [material, setMaterial] = useState<Material | null>(null);
@@ -55,6 +58,7 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
     const [sightings, setSightings] = useState<MaterialSightings | null>(null);
     const [patternNames, setPatternNames] = useState<Record<string, string | null>>({});
     const [quickCardPatternId, setQuickCardPatternId] = useState<string | null>(null);
+    const [retellTarget, setRetellTarget] = useState<{ segmentIndex: number; segment: RetellSegment; targetPatterns: RetellTargetPattern[] } | null>(null);
 
     // 監聽這份教材的已學句型比對結果
     React.useEffect(() => {
@@ -106,6 +110,18 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
     const activeIndices = material.sentences.map((s, i) => (s.deleted ? -1 : i)).filter(i => i >= 0);
     const deletedIndices = material.sentences.map((s, i) => (s.deleted ? i : -1)).filter(i => i >= 0);
     const lastActiveIndex = activeIndices[activeIndices.length - 1];
+
+    if (retellTarget) {
+        return (
+            <RetellView
+                material={material}
+                segment={retellTarget.segment}
+                segmentIndex={retellTarget.segmentIndex}
+                targetPatterns={retellTarget.targetPatterns}
+                onBack={() => setRetellTarget(null)}
+            />
+        );
+    }
 
     if (practiceIndex !== null) {
         return (
@@ -376,6 +392,12 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
                     </div>
                 );
             })()}
+
+            <RetellSection
+                material={material}
+                bySentence={sightings?.bySentence}
+                onStart={(segmentIndex, segment, targetPatterns) => setRetellTarget({ segmentIndex, segment, targetPatterns })}
+            />
 
             {extractMessage && (
                 <div className={`mb-6 text-sm px-4 py-3 rounded-xl shadow-sm border animate-in slide-in-from-top-2 font-bold text-center ${
