@@ -1,55 +1,90 @@
 import { createHash } from 'crypto';
 import { verifyRealUserToken } from '../shared/auth';
-import { callGeminiFreeThenPaid } from '../shared/aiKeys';
 
 export const config = { background: true };
 
 const APP_ID = 'huan-power-english';
 const PROJECT_ID = 'huanux-english';
 const BUCKET = 'huanux-english.firebasestorage.app';
+const FS_BASE = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents`;
 
-const VOICE_NAME = 'Aoede';
-const TTS_MODELS = ['gemini-3.1-flash-tts-preview', 'gemini-3.8-flash-lite-tts'];
+const CACHE_VERSION = 'gcp1';
 const MAX_TEXT_LENGTH = 500;
+const MAX_BATCH = 30;
+const GENERATING_STALE_MS = 2 * 60 * 1000;
+
+type SpeechLang = 'zh' | 'en';
+
+// 優先使用的聲音；Google 回覆找不到這個聲音時，改用「語言＋女聲」讓 Google 自動挑選
+const VOICES: Record<SpeechLang, { languageCode: string; name: string }> = {
+    en: { languageCode: 'en-US', name: 'en-US-Chirp3-HD-Aoede' },
+    zh: { languageCode: 'cmn-TW', name: 'cmn-TW-Wavenet-A' }
+};
+const FALLBACK_VOICES: Record<SpeechLang, { languageCode: string; ssmlGender: string }> = {
+    en: { languageCode: 'en-US', ssmlGender: 'FEMALE' },
+    zh: { languageCode: 'cmn-TW', ssmlGender: 'FEMALE' }
+};
+
+// 含中文字用中文聲音，否則用英文聲音（src/services/speech.ts 有相同的判斷）
+function speechLang(text: string): SpeechLang {
+    return /[\u3400-\u9fff\uf900-\ufaff]/.test(text) ? 'zh' : 'en';
+}
 
 // 快取 key：前後端必須用同一套規則計算（src/services/speech.ts 有相同的實作）
 function speechCacheKey(text: string): string {
-    return createHash('sha256').update(`${VOICE_NAME}|${text.trim()}`, 'utf8').digest('hex').slice(0, 40);
+    const clean = text.trim();
+    return createHash('sha256').update(`${CACHE_VERSION}|${speechLang(clean)}|${clean}`, 'utf8').digest('hex').slice(0, 40);
 }
 
-// TTS 回傳可能是帶 WAV 檔頭的音訊，或無檔頭的純 PCM；統一轉成 WAV
-function toWav(base64Data: string, mimeType: string | undefined): Buffer {
-    const bytes = Buffer.from(base64Data, 'base64');
-    if (bytes.length > 12 && bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WAVE') {
-        return bytes;
+async function callCloudTts(apiKey: string, text: string, voice: Record<string, string>): Promise<Response> {
+    return fetch('https://texttospeech.googleapis.com/v1/text:synthesize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': apiKey },
+        body: JSON.stringify({ input: { text }, voice, audioConfig: { audioEncoding: 'MP3' } })
+    });
+}
+
+// Google Cloud Text-to-Speech：回傳 MP3
+async function synthesize(text: string): Promise<Buffer> {
+    const apiKey = process.env.GOOGLE_TTS_API_KEY;
+    if (!apiKey) {
+        throw new Error('尚未設定 GOOGLE_TTS_API_KEY');
     }
+    const lang = speechLang(text);
+    let res = await callCloudTts(apiKey, text, VOICES[lang]);
+    if (res.status === 400 || res.status === 404) {
+        const errText = await res.text();
+        console.warn(`[語音] 指定聲音 ${VOICES[lang].name} 失敗 (${res.status})，改用自動挑選:`, errText.slice(0, 200));
+        res = await callCloudTts(apiKey, text, FALLBACK_VOICES[lang]);
+    }
+    if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`Cloud TTS 失敗 (${res.status}): ${errText.slice(0, 200)}`);
+    }
+    const data = await res.json();
+    if (!data?.audioContent) {
+        throw new Error('Cloud TTS 沒有回傳音訊資料');
+    }
+    return Buffer.from(data.audioContent, 'base64');
+}
 
-    const rateMatch = /rate=(\d+)/i.exec(mimeType || '');
-    const sampleRate = rateMatch ? Number(rateMatch[1]) : 24000;
-    const numChannels = 1;
-    const bitsPerSample = 16;
-
-    const header = Buffer.alloc(44);
-    header.write('RIFF', 0, 'ascii');
-    header.writeUInt32LE(36 + bytes.length, 4);
-    header.write('WAVE', 8, 'ascii');
-    header.write('fmt ', 12, 'ascii');
-    header.writeUInt32LE(16, 16);
-    header.writeUInt16LE(1, 20);
-    header.writeUInt16LE(numChannels, 22);
-    header.writeUInt32LE(sampleRate, 24);
-    header.writeUInt32LE((sampleRate * numChannels * bitsPerSample) / 8, 28);
-    header.writeUInt16LE((numChannels * bitsPerSample) / 8, 32);
-    header.writeUInt16LE(bitsPerSample, 34);
-    header.write('data', 36, 'ascii');
-    header.writeUInt32LE(bytes.length, 40);
-    return Buffer.concat([header, bytes]);
+async function readCacheDoc(uid: string, key: string, idToken: string): Promise<Record<string, any> | null> {
+    const res = await fetch(`${FS_BASE}/artifacts/${APP_ID}/users/${uid}/ttsCache/${key}`, {
+        headers: { 'Authorization': `Bearer ${idToken}` }
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const f = data?.fields || {};
+    return {
+        status: f.status?.stringValue,
+        audioUrl: f.audioUrl?.stringValue,
+        requestedAt: f.requestedAt ? Number(f.requestedAt.integerValue ?? f.requestedAt.doubleValue) : undefined
+    };
 }
 
 async function writeCacheDoc(uid: string, key: string, idToken: string, fields: Record<string, any>): Promise<void> {
-    const docPath = `projects/${PROJECT_ID}/databases/(default)/documents/artifacts/${APP_ID}/users/${uid}/ttsCache/${key}`;
     const mask = Object.keys(fields).map(f => `updateMask.fieldPaths=${f}`).join('&');
-    const res = await fetch(`https://firestore.googleapis.com/v1/${docPath}?${mask}`, {
+    const res = await fetch(`${FS_BASE}/artifacts/${APP_ID}/users/${uid}/ttsCache/${key}?${mask}`, {
         method: 'PATCH',
         headers: {
             'Content-Type': 'application/json',
@@ -63,72 +98,34 @@ async function writeCacheDoc(uid: string, key: string, idToken: string, fields: 
     }
 }
 
-export default async (req: Request) => {
-    // Background Function 一律回傳 200
-    if (req.method !== 'POST') {
-        return new Response(null, { status: 200 });
-    }
-
-    let payload: any;
-    try {
-        payload = await req.json();
-    } catch {
-        console.error('[語音] 解析 JSON 失敗');
-        return new Response(null, { status: 200 });
-    }
-
-    const { idToken, text } = payload || {};
-    if (
-        typeof idToken !== 'string' || !idToken ||
-        typeof text !== 'string' || !text.trim() || text.trim().length > MAX_TEXT_LENGTH
-    ) {
-        console.error('[語音] 參數不符合規定');
-        return new Response(null, { status: 200 });
-    }
-
-    const authResult = await verifyRealUserToken(idToken);
-    if ('error' in authResult) {
-        console.error('[語音] 登入驗證失敗:', authResult.error);
-        return new Response(null, { status: 200 });
-    }
-    const uid = authResult.uid;
-
-    const cleanText = text.trim();
+// 產生一段語音；已完成時略過。批次預先產生時，另一個請求正在產生的也略過
+// （單段請求由前端先標記「產生中」再送來，所以單段不檢查產生中）
+async function processOne(uid: string, idToken: string, cleanText: string, skipIfGenerating: boolean): Promise<void> {
     const key = speechCacheKey(cleanText);
-    console.log(`[語音] 開始：${key}`);
+    const existing = await readCacheDoc(uid, key, idToken);
+    if (existing?.status === 'done' && existing.audioUrl) {
+        return;
+    }
+    if (skipIfGenerating && existing?.status === 'generating' && typeof existing.requestedAt === 'number' && Date.now() - existing.requestedAt < GENERATING_STALE_MS) {
+        return;
+    }
+
+    await writeCacheDoc(uid, key, idToken, {
+        text: { stringValue: cleanText },
+        status: { stringValue: 'generating' },
+        requestedAt: { integerValue: String(Date.now()) }
+    });
 
     try {
-        const response = await callGeminiFreeThenPaid('speech', (ai, model) =>
-            ai.models.generateContent({
-                model,
-                contents: cleanText,
-                config: {
-                    responseModalities: ['AUDIO'],
-                    speechConfig: {
-                        voiceConfig: {
-                            prebuiltVoiceConfig: { voiceName: VOICE_NAME }
-                        }
-                    }
-                }
-            } as any),
-            { free: TTS_MODELS, paid: TTS_MODELS }
-        );
-
-        const parts = response.candidates?.[0]?.content?.parts || [];
-        const audioPart = parts.find((p: any) => p?.inlineData?.data);
-        if (!audioPart?.inlineData?.data) {
-            throw new Error('沒有回傳音訊資料');
-        }
-        const wav = toWav(audioPart.inlineData.data, audioPart.inlineData.mimeType);
-
-        const storagePath = `artifacts/${APP_ID}/users/${uid}/ttsAudio/${key}.wav`;
+        const mp3 = await synthesize(cleanText);
+        const storagePath = `artifacts/${APP_ID}/users/${uid}/ttsAudio/${key}.mp3`;
         const uploadRes = await fetch(`https://firebasestorage.googleapis.com/v0/b/${BUCKET}/o?uploadType=media&name=${encodeURIComponent(storagePath)}`, {
             method: 'POST',
             headers: {
                 'Authorization': `Firebase ${idToken}`,
-                'Content-Type': 'audio/wav'
+                'Content-Type': 'audio/mpeg'
             },
-            body: wav
+            body: mp3
         });
         if (!uploadRes.ok) {
             const errText = await uploadRes.text();
@@ -148,13 +145,57 @@ export default async (req: Request) => {
         });
         console.log(`[語音] 完成：${key}`);
     } catch (err: any) {
-        console.error('[語音] 產生失敗:', err?.message || err);
+        console.error(`[語音] 產生失敗 ${key}:`, err?.message || err);
         await writeCacheDoc(uid, key, idToken, {
             text: { stringValue: cleanText },
             status: { stringValue: 'error' },
             error: { stringValue: String(err?.message || '語音產生失敗').slice(0, 300) },
             updatedAt: { integerValue: String(Date.now()) }
         });
+    }
+}
+
+export default async (req: Request) => {
+    // Background Function 一律回傳 200
+    if (req.method !== 'POST') {
+        return new Response(null, { status: 200 });
+    }
+
+    let payload: any;
+    try {
+        payload = await req.json();
+    } catch {
+        console.error('[語音] 解析 JSON 失敗');
+        return new Response(null, { status: 200 });
+    }
+
+    // 單段：{ idToken, text }；批次（預先產生）：{ idToken, texts: string[] }
+    const { idToken, text, texts } = payload || {};
+    const isBatch = Array.isArray(texts);
+    const rawList: any[] = isBatch ? texts : [text];
+    const list = Array.from(new Set(
+        rawList
+            .filter((t: any) => typeof t === 'string')
+            .map((t: string) => t.trim())
+            .filter((t: string) => t.length >= 1 && t.length <= MAX_TEXT_LENGTH)
+    )).slice(0, MAX_BATCH);
+
+    if (typeof idToken !== 'string' || !idToken || list.length === 0) {
+        console.error('[語音] 參數不符合規定');
+        return new Response(null, { status: 200 });
+    }
+
+    const authResult = await verifyRealUserToken(idToken);
+    if ('error' in authResult) {
+        console.error('[語音] 登入驗證失敗:', authResult.error);
+        return new Response(null, { status: 200 });
+    }
+    const uid = authResult.uid;
+
+    console.log(`[語音] 開始：${list.length} 段`);
+    // 依序處理，避免同時大量請求
+    for (const cleanText of list) {
+        await processOne(uid, idToken, cleanText, isBatch);
     }
 
     return new Response(null, { status: 200 });

@@ -1,6 +1,7 @@
 import { doc, runTransaction } from 'firebase/firestore';
 import { db, auth, appId } from '../firebase';
 import { generatePracticePrompts } from './gemini';
+import { prefetchSpeech } from './speech';
 import { PatternExampleSentence } from '../types';
 
 export async function generateAndSavePracticePrompts(
@@ -57,6 +58,9 @@ export async function generateAndSavePracticePrompts(
 
     tx.update(patternRef, { exampleSentences: updatedSentences });
   });
+
+  // 題目存好後，背景預先產生兩種題目與答案原句的語音
+  void prefetchSpeech([prompts.qaQuestion, prompts.situationalPrompt, sentenceText]);
 
   return prompts;
 }

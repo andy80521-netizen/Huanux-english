@@ -5,7 +5,7 @@ import { transcribeRecording } from '../services/gemini';
 import { calculateFinalScores } from '../utils/scoring';
 import { generateAndSavePracticePrompts } from '../services/practicePrompts';
 import { requestPracticeImages } from '../services/practiceImage';
-import { getSpeechUrl } from '../services/speech';
+import { getSpeechUrl, prefetchSpeech } from '../services/speech';
 import { auth } from '../firebase';
 import { updatePatternSentences } from '../services/sentenceWrites';
 import { Mic, Loader2, Play, RefreshCw, ChevronRight, Check, ChevronLeft, Volume2 } from 'lucide-react';
@@ -337,6 +337,9 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
         imageRequestedForRef.current = key;
         const ids = (pattern.exampleSentences || []).filter(s => s.groupIndex === g).map(s => s.id);
         void requestPracticeImages(pattern.id, ids);
+        // 同時預先產生這一組其他句子的題目與答案語音（目前這一句由下方當場取得）
+        const others = (pattern.exampleSentences || []).filter(s => s.groupIndex === g && s.checked && s.id !== sentenceObj?.id);
+        void prefetchSpeech(others.reduce<string[]>((acc, s) => acc.concat([s.qaQuestion || '', s.situationalPrompt || '', s.text || '']), []));
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [pattern.id, groupIndex, sentenceObj?.groupIndex]);
 

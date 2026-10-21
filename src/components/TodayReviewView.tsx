@@ -5,6 +5,7 @@ import { LanguagePattern, PatternExampleSentence } from '../types';
 import { isSydneyDateReached, getSydneyDateString } from '../utils/sydneyTime';
 import PatternPracticeSessionView from './PatternPracticeSessionView';
 import { Sparkles, CalendarCheck, Target, CheckCircle2, ShieldCheck, Loader2, AlertCircle } from 'lucide-react';
+import { prefetchSpeech } from '../services/speech';
 import { needsMaintenanceInit, initMaintenance, isMaintenanceDue, pickMaintenanceSentences, applyMaintenanceResult, MaintenanceOutcome, MAINTENANCE_SIZE } from '../services/maintenance';
 
 interface ReviewItem {
@@ -50,6 +51,7 @@ export default function TodayReviewView() {
     const [maintenanceSaving, setMaintenanceSaving] = useState(false);
     const [maintenanceResult, setMaintenanceResult] = useState<MaintenanceResultState | null>(null);
     const maintenanceInitRequestedRef = useRef<Set<string>>(new Set());
+    const speechPrefetchedRef = useRef(false);
 
     useEffect(() => {
         const unsubscribeAuth = auth.onAuthStateChanged((u) => {
@@ -164,6 +166,18 @@ export default function TodayReviewView() {
         return groups;
     }, [reviewItems]);
 
+    // 打開今日複習時，預先產生待練句子缺少的語音（每次進入畫面一次，最多 30 段）
+    useEffect(() => {
+        if (speechPrefetchedRef.current || loading) return;
+        if (maintenanceItems.length === 0 && reviewGroups.length === 0) return;
+        speechPrefetchedRef.current = true;
+        const sentences: PatternExampleSentence[] = [
+            ...maintenanceItems.reduce<PatternExampleSentence[]>((acc, m) => acc.concat(m.sentences), []),
+            ...reviewGroups.reduce<PatternExampleSentence[]>((acc, g) => acc.concat(g.items.map(it => it.sentence)), [])
+        ];
+        void prefetchSpeech(sentences.reduce<string[]>((acc, s) => acc.concat([s.qaQuestion || '', s.situationalPrompt || '', s.text || '']), []));
+    }, [loading, maintenanceItems, reviewGroups]);
+
     if (!user) {
         return (
             <div className="flex flex-col items-center justify-center h-full bg-slate-50 dark:bg-slate-950 text-slate-500 font-bold">
@@ -210,6 +224,8 @@ export default function TodayReviewView() {
         setMaintenanceSaving(false);
         setIsSummary(false);
         setActiveItemKey(`${queue[0].pattern.id}::${queue[0].sentence.id}`);
+        // 預先產生第 2、3 題的語音（第 1 題由練習畫面當場取得）
+        void prefetchSpeech(item.sentences.slice(1).reduce<string[]>((acc, s) => acc.concat([s.qaQuestion || '', s.situationalPrompt || '', s.text || '']), []));
     };
 
     // 三句都做完才結算；任何一句沒有分數（例如跳過）就不計算，下次重做
