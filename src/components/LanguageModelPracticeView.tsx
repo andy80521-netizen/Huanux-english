@@ -211,9 +211,10 @@ export default function LanguageModelPracticeView({ pattern, groupIndex, onBack 
                     natural: checkResult.natural,
                     grammar: checkResult.grammar,
                     spelling: checkResult.spelling,
-                    comment: checkResult.comment,
-                    suggestedRevision: checkResult.suggestedRevision,
-                    suggestedRevisionScope: checkResult.suggestedRevisionScope
+                    comment: checkResult.comment || '',
+                    // 句子已經很好時 AI 不會給建議，沒有建議就不寫這兩個欄位
+                    ...(checkResult.suggestedRevision ? { suggestedRevision: checkResult.suggestedRevision } : {}),
+                    ...(checkResult.suggestedRevision && checkResult.suggestedRevisionScope ? { suggestedRevisionScope: checkResult.suggestedRevisionScope } : {})
                 },
                 groupIndex,
                 mastery: 0,
@@ -390,7 +391,7 @@ export default function LanguageModelPracticeView({ pattern, groupIndex, onBack 
                     </div>
                     
                     {errorMsg && (
-                        <div className="bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm px-4 py-3 rounded-xl border border-red-100 dark:border-red-800 font-bold">
+                        <div className="bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm px-4 py-3 rounded-xl border border-red-100 dark:border-red-800 font-bold break-words">
                             {errorMsg}
                         </div>
                     )}

@@ -73,7 +73,19 @@ export default async (req: Request) => {
             if (!text) {
                 throw new Error('無法從 Gemini 取得內容');
             }
-            result = cleanAndParseJSON(text);
+            const parsed = cleanAndParseJSON(text);
+            // 整理格式：三項判斷一律是布林值；沒有建議時不回傳建議欄位（不可出現 undefined 或空字串）
+            const revision = typeof parsed?.suggestedRevision === 'string' ? parsed.suggestedRevision.trim().slice(0, 500) : '';
+            result = {
+                natural: parsed?.natural === true,
+                grammar: parsed?.grammar === true,
+                spelling: parsed?.spelling === true,
+                comment: String(parsed?.comment || '').trim().slice(0, 1000),
+                ...(revision ? {
+                    suggestedRevision: revision,
+                    suggestedRevisionScope: parsed?.suggestedRevisionScope === 'partial' ? 'partial' : 'whole'
+                } : {})
+            };
         } else if (task === 'practicePrompts') {
             if (
                 !payload ||
