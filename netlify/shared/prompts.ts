@@ -1,38 +1,45 @@
 export function buildCheckSentencePrompt(patternText: string, userSentence: string): string {
-    return `這是使用者針對某個英文句型/片語自己造的一句話，請檢查這句話：
-1) natural (自然度): 只有在「嚴重不自然」時(例如明顯的中式直譯、語序完全不符合英文母語者的表達方式)才給 false。正常範圍內自然度的高低差異不算「不自然」，應該給 true。
-2) grammar (文法): 文法對不對。
-3) spelling (拼字): 拼字對不對。
-
-注意：使用者造的句子不需要跟原本的句型有完全一樣的情境或字面意思，只需要有實際運用到這個句型/片語的核心用法即可，請基於這個前提判斷，不要因為使用者換了完全不同的情境就誤判為不相關。
+    return `你是英文母語的語言老師。使用者針對一個英文句型/片語自己造了一句話，這句話之後會成為他反覆練習、背到能脫口而出的固定句子，所以用字必須道地。
 
 目標句型/片語：${patternText}
 使用者造的句子：${userSentence}
 
-請只回傳 JSON 物件，不要有其他文字。
-- comment 欄位請用中文說明哪裡不自然/文法錯在哪/拼字錯在哪。如果三者都通過 (皆為 true)，comment 可以是簡短的肯定文字(例如「很好，這句話運用得很自然！」)。
-- 不論 natural 是 true 或 false，只要你認為有更道地/更好的說法，就提供 suggestedRevision (完整句子版本) 以及 suggestedRevisionScope ('whole' 或 'partial')。
-- 如果是部分片段需要調整，suggestedRevision 仍然提供「完整句子」，方便直接替換使用，但 suggestedRevisionScope 標記為 'partial' 讓使用者知道問題只在小部分。如果是整句重寫則標記為 'whole'。
-- 如果句子已經很好、沒有更好的建議，suggestedRevision 和 suggestedRevisionScope 可以省略。
+請檢查：
+1) natural：只有「嚴重不自然」（明顯中式直譯、語序不符合母語者習慣、搭配詞明顯用錯）才給 false，其餘給 true。
+2) grammar：文法是否正確（句子結構、時態形式、主詞動詞一致等）；搭配詞用錯屬於 natural，不算文法錯。
+3) spelling：拼字是否正確。
 
-格式範例 (有建議時)：
+接著逐項檢查以下四點，只有真的有問題才提出：
+- 搭配詞：動詞、名詞、形容詞的組合是不是母語者常用的
+- 用字精準度：有沒有意思或語氣更貼切的字
+- 時態與情境：時態是否符合最可能的情境；如果不同情境要用不同時態，在說明裡講清楚哪種情境用哪個
+- 語域：口語和書面用語是否一致
+
+規則：
+- 不要為了換風格而修改：兩種說法同樣自然時（例如 that 可省略也可保留、要不要縮寫），不算問題，不要提出。
+- 必須保留目標句型/片語，也盡量保留使用者原本的意思和情境，只做必要的最小修改。
+- 使用者的句子不需要跟句型原本的情境相同，只要正確運用句型的核心用法即可。
+- 沒有實質改進時，不要提供 suggestedRevision 與 revisionNotes，也不要硬找問題。
+- revisionNotes 只寫「改了什麼、為什麼」，每條一句；不要寫「保留了什麼」或「其他部分不變」這類說明。
+- comment 用中文寫整體評語；三項都通過且沒有建議時，用一句簡短的肯定即可。
+
+只回傳 JSON，不要有其他文字。有建議時：
 {
   "natural": true,
   "grammar": true,
   "spelling": true,
-  "comment": "句子結構很好，但有個小地方可以更道地。",
-  "suggestedRevision": "The revised full sentence.",
-  "suggestedRevisionScope": "partial"
+  "comment": "中文整體評語",
+  "suggestedRevision": "修改後的完整句子",
+  "revisionNotes": ["中文：改了什麼、為什麼（最多 3 條）"]
 }
 
-格式範例 (沒建議時)：
+沒有建議時：
 {
   "natural": true,
   "grammar": true,
   "spelling": true,
   "comment": "很好，這句話運用得很自然！"
-}
-`;
+}`;
 }
 
 export function buildPracticePromptsPrompt(sentenceText: string, patternText: string): string {
@@ -67,12 +74,21 @@ ${avoidListText}
 }
 
 export const cleanAndParseJSON = (text: string) => {
-    try {
-        const cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-        return JSON.parse(cleaned);
-    } catch (e) {
-        throw new Error("無法解析 Gemini 回傳的 JSON 格式。請稍後再試。");
+    const cleaned = String(text || '').replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+    // 依序嘗試：原文 → 只取第一個 { 或 [ 到最後一個 } 或 ] → 去掉結尾多出的逗號（部分模型會輸出 {"a": 1,}）
+    const candidates: string[] = [cleaned];
+    const start = cleaned.search(/[[{]/);
+    const end = Math.max(cleaned.lastIndexOf('}'), cleaned.lastIndexOf(']'));
+    if (start >= 0 && end > start) candidates.push(cleaned.slice(start, end + 1));
+    candidates.slice().forEach(c => candidates.push(c.replace(/,\s*([}\]])/g, '$1')));
+    for (const c of candidates) {
+        try {
+            return JSON.parse(c);
+        } catch {
+            // 換下一種
+        }
     }
+    throw new Error("無法解析 AI 回傳的 JSON 格式。請稍後再試。");
 };
 
 export const PRIMARY_CATEGORY_GUIDE = `主要情境分類（primaryCategory 只能填以下 13 個大類名稱之一，不要加【】符號；冒號後面的細項只是幫助你判斷歸類的參考，不要填細項）：

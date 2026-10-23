@@ -49,6 +49,7 @@ export interface PatternExampleSentence {
     comment: string;            // 中文說明哪裡不自然/文法錯/拼字錯
     suggestedRevision?: string;
     suggestedRevisionScope?: 'whole' | 'partial';
+    revisionNotes?: string[];   // 建議改法的中文說明（改了什麼、為什麼）
   };
   groupIndex: number;           // 0-9，對應 10 組
   mastery: number;              // 沿用現有 mastery 累加機制，達 1000 視為完成

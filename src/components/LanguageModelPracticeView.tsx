@@ -25,6 +25,7 @@ type CheckResult = {
     comment: string;
     suggestedRevision?: string;
     suggestedRevisionScope?: 'whole' | 'partial';
+    revisionNotes?: string[];
 };
 
 export default function LanguageModelPracticeView({ pattern, groupIndex, onBack }: Props) {
@@ -214,7 +215,8 @@ export default function LanguageModelPracticeView({ pattern, groupIndex, onBack 
                     comment: checkResult.comment || '',
                     // 句子已經很好時 AI 不會給建議，沒有建議就不寫這兩個欄位
                     ...(checkResult.suggestedRevision ? { suggestedRevision: checkResult.suggestedRevision } : {}),
-                    ...(checkResult.suggestedRevision && checkResult.suggestedRevisionScope ? { suggestedRevisionScope: checkResult.suggestedRevisionScope } : {})
+                    ...(checkResult.suggestedRevision && checkResult.suggestedRevisionScope ? { suggestedRevisionScope: checkResult.suggestedRevisionScope } : {}),
+                    ...(checkResult.suggestedRevision && checkResult.revisionNotes && checkResult.revisionNotes.length > 0 ? { revisionNotes: checkResult.revisionNotes } : {})
                 },
                 groupIndex,
                 mastery: 0,
@@ -445,6 +447,16 @@ export default function LanguageModelPracticeView({ pattern, groupIndex, onBack 
                                     <p className="text-sm font-bold text-slate-800 dark:text-slate-200 italic">
                                         "{checkResult.suggestedRevision}"
                                     </p>
+                                    {checkResult.revisionNotes && checkResult.revisionNotes.length > 0 && (
+                                        <ul className="mt-2 space-y-1">
+                                            {checkResult.revisionNotes.map((note, i) => (
+                                                <li key={i} className="text-xs font-medium text-slate-600 dark:text-slate-300 leading-relaxed flex gap-1.5">
+                                                    <span className="shrink-0">•</span>
+                                                    <span>{note}</span>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    )}
                                 </div>
                             )}
 

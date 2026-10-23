@@ -1,6 +1,6 @@
 import { ThinkingLevel } from '@google/genai';
 import { verifyRealUser } from '../shared/auth';
-import { callGeminiFreeThenPaid } from '../shared/aiKeys';
+import { callGeminiFreeThenPaid, callQualityText } from '../shared/aiKeys';
 import {
     buildCheckSentencePrompt,
     buildPracticePromptsPrompt,
@@ -17,6 +17,26 @@ import {
 
 const json = (status: number, body: Record<string, any>) =>
     new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+
+// 造句檢查用：把句子拆成小寫單字（忽略標點）
+const toWords = (s: string): string[] =>
+    s.toLowerCase().replace(/[^a-z0-9'\s]/g, ' ').split(/\s+/).filter(Boolean);
+
+const sameWords = (a: string, b: string): boolean => toWords(a).join(' ') === toWords(b).join(' ');
+
+// 修改範圍：建議句與原句相同的單字（依順序）佔一半以上＝部分調整，否則＝整句重寫
+function revisionScope(original: string, revised: string): 'partial' | 'whole' {
+    const a = toWords(original);
+    const b = toWords(revised);
+    if (a.length === 0 || b.length === 0) return 'whole';
+    const dp: number[][] = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
+    for (let i = 1; i <= a.length; i++) {
+        for (let j = 1; j <= b.length; j++) {
+            dp[i][j] = a[i - 1] === b[j - 1] ? dp[i - 1][j - 1] + 1 : Math.max(dp[i - 1][j], dp[i][j - 1]);
+        }
+    }
+    return dp[a.length][b.length] / Math.max(a.length, b.length) >= 0.5 ? 'partial' : 'whole';
+}
 
 export default async (req: Request) => {
     if (req.method !== 'POST') return json(405, { error: 'Method Not Allowed' });
@@ -66,16 +86,21 @@ export default async (req: Request) => {
             }
             const prompt = buildCheckSentencePrompt(payload.patternText, payload.userSentence);
             const config = { temperature: 0.2 };
-            const response = await callGeminiFreeThenPaid(task, (ai, model) =>
-                ai.models.generateContent({ model, contents: prompt, config })
-            );
-            const text = response.text;
+            const text = await callQualityText(task, prompt, config.temperature);
             if (!text) {
                 throw new Error('無法從 Gemini 取得內容');
             }
             const parsed = cleanAndParseJSON(text);
             // 整理格式：三項判斷一律是布林值；沒有建議時不回傳建議欄位（不可出現 undefined 或空字串）
-            const revision = typeof parsed?.suggestedRevision === 'string' ? parsed.suggestedRevision.trim().slice(0, 500) : '';
+            let revision = typeof parsed?.suggestedRevision === 'string' ? parsed.suggestedRevision.trim().slice(0, 500) : '';
+            // 建議跟原句只差標點或大小寫時，視為沒有建議
+            if (revision && sameWords(revision, payload.userSentence)) {
+                revision = '';
+            }
+            const revisionNotes = (Array.isArray(parsed?.revisionNotes) ? parsed.revisionNotes : [])
+                .filter((n: any) => typeof n === 'string' && n.trim())
+                .map((n: string) => n.trim().slice(0, 300))
+                .slice(0, 3);
             result = {
                 natural: parsed?.natural === true,
                 grammar: parsed?.grammar === true,
@@ -83,7 +108,9 @@ export default async (req: Request) => {
                 comment: String(parsed?.comment || '').trim().slice(0, 1000),
                 ...(revision ? {
                     suggestedRevision: revision,
-                    suggestedRevisionScope: parsed?.suggestedRevisionScope === 'partial' ? 'partial' : 'whole'
+                    // 修改範圍由程式依單字差異判斷，不採用 AI 的判斷
+                    suggestedRevisionScope: revisionScope(payload.userSentence, revision),
+                    ...(revisionNotes.length > 0 ? { revisionNotes } : {})
                 } : {})
             };
         } else if (task === 'practicePrompts') {
@@ -100,10 +127,7 @@ export default async (req: Request) => {
             }
             const prompt = buildPracticePromptsPrompt(payload.sentenceText, payload.patternText);
             const config = { temperature: 0.3 };
-            const response = await callGeminiFreeThenPaid(task, (ai, model) =>
-                ai.models.generateContent({ model, contents: prompt, config })
-            );
-            const text = response.text;
+            const text = await callQualityText(task, prompt, config.temperature);
             if (!text) {
                 throw new Error('無法從 Gemini 取得內容');
             }
@@ -129,10 +153,7 @@ export default async (req: Request) => {
             }
             const prompt = buildRegenerateSeedsPrompt(pattern, avoidSentences);
             const config = { temperature: 0.8 };
-            const response = await callGeminiFreeThenPaid(task, (ai, model) =>
-                ai.models.generateContent({ model, contents: prompt, config })
-            );
-            const text = response.text;
+            const text = await callQualityText(task, prompt, config.temperature);
             if (!text) {
                 throw new Error('無法從 Gemini 取得內容');
             }
@@ -170,10 +191,7 @@ export default async (req: Request) => {
             }
             const prompt = buildExtractFromSentencePrompt(payload.sentenceText, payload.sentenceTranslation);
             const config = { temperature: 0.2 };
-            const response = await callGeminiFreeThenPaid(task, (ai, model) =>
-                ai.models.generateContent({ model, contents: prompt, config })
-            );
-            const text = response.text;
+            const text = await callQualityText(task, prompt, config.temperature);
             if (!text) {
                 throw new Error('無法從 Gemini 取得內容');
             }
@@ -306,10 +324,7 @@ export default async (req: Request) => {
             }
             const prompt = buildReviewRetellPrompt(segmentText, transcript, targetPatterns);
             const config = { temperature: 0.3 };
-            const response = await callGeminiFreeThenPaid(task, (ai, model) =>
-                ai.models.generateContent({ model, contents: prompt, config })
-            );
-            const text = response.text;
+            const text = await callQualityText(task, prompt, config.temperature);
             if (!text) {
                 throw new Error('無法從 Gemini 取得內容');
             }

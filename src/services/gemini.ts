@@ -312,6 +312,7 @@ export async function checkSentenceQuality(
       comment: string; 
       suggestedRevision?: string;
       suggestedRevisionScope?: 'whole' | 'partial';
+      revisionNotes?: string[];
   }> {
     return callAiText('checkSentence', { patternText, userSentence });
 }
