@@ -19,6 +19,9 @@
 - GitHub：**只能用 REST API**（`gh api repos/andy80521-netizen/huanux-english/...`）。`gh pr list/view/checks`、`gh issue list` 等走 GraphQL 會失敗；**Actions API 也讀不到**，所以測試輸出一律看 PR 留言
 - PR 草稿切換：`POST .../pulls/{n}/ccr/ready_for_review`、`POST .../pulls/{n}/ccr/convert_to_draft`
 - 等待留言：`bash scripts/ai/wait_comment.sh <編號> "<標記>" [逾時分鐘] [起始時間]`
+- Netlify 預覽網址（每個 PR 自動部署）：
+  `gh api repos/andy80521-netizen/huanux-english/commits/$(git rev-parse HEAD)/status --jq '.statuses[] | select(.context|test("deploy-preview")) | .target_url'`
+  （格式為 `https://deploy-preview-<PR編號>--huanuxenglish.netlify.app`）
 
 ## 絕對禁止
 - 推送到 `main`、合併 PR（**只有擁有者能按 Merge**；Netlify 從 main 部署正式版）
