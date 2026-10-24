@@ -290,17 +290,49 @@ export async function transcribeRecording(audioFile: File): Promise<string> {
 }
 
 
+export interface ExtractReviewSummary {
+    dropped: number;
+    fixed: number;
+    reviewed: boolean;   // 審核步驟是否成功執行（失敗時沿用第一步結果）
+}
+
 export async function extractPatternsFromSentence(
     sentenceText: string,
     sentenceTranslation: string,
     existingPatterns: string[] = []   // 這句之前已萃取出的句型（重新萃取時避免重複）
-  ): Promise<Omit<LanguagePattern, 'id' | 'sourceMaterialId' | 'sourceLabel' | 'exampleSentences' | 'unlockedGroups'>[]> {
+  ): Promise<{ patterns: Omit<LanguagePattern, 'id' | 'sourceMaterialId' | 'sourceLabel' | 'exampleSentences' | 'unlockedGroups'>[]; review: ExtractReviewSummary }> {
     const data = await callAiText<{ patterns: any[] }>('extractFromSentence', {
         sentenceText,
         sentenceTranslation: (sentenceTranslation || '').slice(0, 1000),
         ...(existingPatterns.length > 0 ? { existingPatterns: existingPatterns.map(t => t.slice(0, 300)).slice(0, 20) } : {})
     });
-    return data.patterns;
+    const patterns = data.patterns || [];
+    const review: ExtractReviewSummary = { dropped: 0, fixed: 0, reviewed: false };
+    if (patterns.length === 0) return { patterns, review };
+
+    // 第二步：逐項審核（保留／修正／刪除）；審核失敗時直接沿用第一步的結果
+    try {
+        const r = await callAiText<{ results: { index: number; action: 'keep' | 'fix' | 'drop'; text?: string }[] }>('reviewExtraction', {
+            sentenceText: sentenceText.slice(0, 1000),
+            candidates: patterns.map(p => ({
+                category: p.category,
+                text: (p.text || '').slice(0, 300),
+                meaningZh: (p.meaningZh || '').slice(0, 500),
+                learningPoint: ((p as any).learningPoint || '').slice(0, 300)
+            }))
+        });
+        const reviewed = patterns.flatMap((p, i) => {
+            const res = (r.results || []).find(x => x.index === i);
+            if (res?.action === 'drop') { review.dropped++; return []; }
+            if (res?.action === 'fix' && res.text) { review.fixed++; return [{ ...p, text: res.text }]; }
+            return [p];
+        });
+        review.reviewed = true;
+        return { patterns: reviewed, review };
+    } catch (err) {
+        console.warn('[萃取] 審核失敗，沿用萃取結果:', err);
+        return { patterns, review };
+    }
 }
 
 

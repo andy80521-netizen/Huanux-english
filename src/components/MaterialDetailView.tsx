@@ -180,7 +180,7 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
             const existingFromSentence = sentence.extracted
                 ? await listPatternsFromSentence(material.id, { id: sentence.id, text: sentence.text }).catch(() => [])
                 : [];
-            const patterns = await extractPatternsFromSentence(
+            const { patterns, review } = await extractPatternsFromSentence(
                 sentence.text,
                 sentence.translation || '',
                 existingFromSentence.map(p => p.text).filter(Boolean)
@@ -200,7 +200,10 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
                 sentences: updatedSentences
             });
 
-            setExtractMessage({ text: formatSaveResult(saveResult), isError: false });
+            const reviewNote = review.reviewed && (review.dropped > 0 || review.fixed > 0)
+                ? `（審核刪除 ${review.dropped} 個、修正 ${review.fixed} 個）`
+                : '';
+            setExtractMessage({ text: formatSaveResult(saveResult) + reviewNote, isError: false });
             setTimeout(() => setExtractMessage(null), 6000);
         } catch (err: any) {
             console.error(err);

@@ -10,6 +10,7 @@ import {
     buildClassifyPatternsPrompt,
     buildSegmentMaterialPrompt,
     buildReviewRetellPrompt,
+    buildReviewExtractionPrompt,
     normalizePrimaryCategories,
     TRANSCRIBE_PROMPT,
     cleanAndParseJSON
@@ -51,7 +52,9 @@ function isAcceptablePatternText(category: string, text: string): boolean {
     const fixedWords = (text.replace(/\[[^\]]+\]/g, ' ').toLowerCase().match(/[a-z']+/g) || []);
     const contentWords = fixedWords.filter(w => !FUNCTION_WORDS.has(w));
     if (contentWords.length === 0) return false;
+    if (fixedWords.length > 6) return false;                                   // 固定字太多＝照抄原句片段
     if (category === 'structural' && slots.length > 3) return false;
+    if (category !== 'structural' && slots.length > 2) return false;
     return true;
 }
 
@@ -109,7 +112,8 @@ export default async (req: Request) => {
         'transcribe',
         'classifyPatterns',
         'segmentMaterial',
-        'reviewRetell'
+        'reviewRetell',
+        'reviewExtraction'
     ];
     if (!task || typeof task !== 'string' || !ALLOWED_TASKS.includes(task)) {
         return json(400, { error: '不支援的工作' });
@@ -361,6 +365,46 @@ export default async (req: Request) => {
                 segments = [{ title: '第 1 段', start: 0, end: n - 1 }];
             }
             result = { segments };
+        } else if (task === 'reviewExtraction') {
+            const sentenceText = payload?.sentenceText;
+            const candidates = payload?.candidates;
+            if (
+                typeof sentenceText !== 'string' || sentenceText.length < 1 || sentenceText.length > 1000 ||
+                !Array.isArray(candidates) || candidates.length < 1 || candidates.length > 3 ||
+                !candidates.every((c: any) => c &&
+                    ['structural', 'phrase', 'collocation'].includes(c.category) &&
+                    typeof c.text === 'string' && c.text.length >= 1 && c.text.length <= 300 &&
+                    typeof c.meaningZh === 'string' && c.meaningZh.length <= 500 &&
+                    typeof c.learningPoint === 'string' && c.learningPoint.length <= 300)
+            ) {
+                return json(400, { error: '輸入格式不正確' });
+            }
+            const prompt = buildReviewExtractionPrompt(
+                sentenceText,
+                candidates.map((c: any, i: number) => ({ index: i, category: c.category, text: c.text, meaningZh: c.meaningZh, learningPoint: c.learningPoint }))
+            );
+            const config = { temperature: 0.1 };
+            const text = await callQualityText(task, prompt, config.temperature);
+            if (!text) {
+                throw new Error('無法從 Gemini 取得內容');
+            }
+            const parsed = cleanAndParseJSON(text);
+            const raw = Array.isArray(parsed?.results) ? parsed.results : [];
+            // 每個候選都要有結果；AI 沒回的一律保留。修正後的寫法也要通過品質把關，否則刪除
+            const results = candidates.map((c: any, i: number) => {
+                const r = raw.find((x: any) => x && x.index === i);
+                const reason = String(r?.reason || '').trim().slice(0, 200);
+                if (r?.action === 'drop') return { index: i, action: 'drop', reason };
+                if (r?.action === 'fix' && typeof r.text === 'string' && r.text.trim()) {
+                    const fixed = r.text.trim().slice(0, 300);
+                    if (fixed === c.text) return { index: i, action: 'keep' };
+                    return isAcceptablePatternText(c.category, fixed)
+                        ? { index: i, action: 'fix', text: fixed, reason }
+                        : { index: i, action: 'drop', reason: reason || '修正後的寫法仍不合格' };
+                }
+                return { index: i, action: 'keep' };
+            });
+            result = { results };
         } else if (task === 'reviewRetell') {
             const segmentText = payload?.segmentText;
             const transcript = payload?.transcript;

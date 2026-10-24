@@ -235,6 +235,44 @@ ${sourceText}
 `;
 }
 
+// 萃取審核：萃取完後再逐項檢查一次（一次只做一件事，比在萃取提示詞裡塞更多規則可靠）
+export function buildReviewExtractionPrompt(
+    sentenceText: string,
+    candidates: { index: number; category: string; text: string; meaningZh: string; learningPoint: string }[]
+): string {
+    const list = candidates.map(c =>
+        `${c.index}. [${c.category}] ${c.text}\n   中文：${c.meaningZh}\n   學習重點：${c.learningPoint}`
+    ).join('\n');
+    return `你是嚴格的英文教材審核員。下面是從一句英文萃取出來、準備讓中文母語者反覆練習的句型。請逐項用檢核清單檢查，決定保留、修正或刪除。
+
+原句：${sentenceText}
+
+萃取結果（前面的數字是 index）：
+${list}
+
+檢核清單：
+1. 動詞是否為原形？（例如 recorded → record）不是就修正寫法
+2. 是否含有原句碰巧出現、不屬於核心用法的字？（例如 actually、several、more of、具體的月份或地名）有就修正，拿掉這些字或改成方括號空格
+3. 是否與同一批其他項目重疊或互相涵蓋？有就刪除學習價值較低的那個
+4. 學習重點是否具體指出「中文母語者在這裡會用錯或想不到什麼」？只是空泛描述（例如「英文常用這個句型」「讓句子更有說服力」）就刪除
+5. 是否只是字面一看就懂的組合、或單字等級的名詞（例如 daily news podcast、show notes）？是就刪除
+6. 結構句型拿掉方括號空格後，剩下的字是否只是把原句挖空？是就刪除
+
+規則：
+- 「修正」只能改寫法（text），必須仍是同一個學習點，不可變成另一個句型
+- 寧可刪除，也不要保留可疑的項目
+- 每一項都要回傳
+
+只回傳 JSON，不要有其他文字：
+{
+  "results": [
+    { "index": 0, "action": "keep" },
+    { "index": 1, "action": "fix", "text": "修正後的寫法", "reason": "中文簡短原因" },
+    { "index": 2, "action": "drop", "reason": "中文簡短原因" }
+  ]
+}`;
+}
+
 export const TRANSCRIBE_PROMPT = "請把這段音檔裡使用者說的英文內容逐字轉錄出來,只回傳轉錄後的純文字,不要有任何其他說明文字、不要有引號、不要有markdown格式";
 
 export function buildClassifyPatternsPrompt(
