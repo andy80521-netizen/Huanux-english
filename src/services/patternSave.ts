@@ -1,4 +1,4 @@
-import { collection, doc, getDocs, setDoc, updateDoc, arrayUnion } from 'firebase/firestore';
+import { collection, doc, getDocs, setDoc, updateDoc, arrayUnion, query, where } from 'firebase/firestore';
 import { db, auth, appId } from '../firebase';
 import { LanguagePattern } from '../types';
 import { classifyPatterns, PatternRelation } from './gemini';
@@ -9,6 +9,28 @@ export interface SavePatternsResult {
   created: number;
   duplicates: { text: string; matchText: string }[];
   related: number;
+}
+
+// 判斷句型是不是從某一句萃取出來的（新句型看 sourceSentenceId；舊句型看「同教材＋句子開頭等於 sourceLabel」，與 detect-sightings 相同）
+export function isPatternFromSentence(
+  p: Pick<LanguagePattern, 'sourceMaterialId' | 'sourceSentenceId' | 'sourceLabel'>,
+  materialId: string | undefined,
+  sentence: { id?: string; text?: string }
+): boolean {
+  if (!materialId || p.sourceMaterialId !== materialId) return false;
+  if (p.sourceSentenceId) return !!sentence.id && p.sourceSentenceId === sentence.id;
+  const prefix = String(p.sourceLabel || '').replace(/\.\.\.$/, '');
+  return !!prefix && String(sentence.text || '').startsWith(prefix);
+}
+
+// 找出某一句已經萃取出的句型（重新萃取前使用）
+export async function listPatternsFromSentence(materialId: string, sentence: { id: string; text: string }): Promise<LanguagePattern[]> {
+  const uid = auth.currentUser?.uid;
+  if (!uid) return [];
+  const snap = await getDocs(query(collection(db, `artifacts/${appId}/users/${uid}/languagePatterns`), where('sourceMaterialId', '==', materialId)));
+  return snap.docs
+    .map(d => ({ ...(d.data() as LanguagePattern), id: d.id }))
+    .filter(p => isPatternFromSentence(p, materialId, sentence));
 }
 
 // 萃取後存檔：先與既有句型比對，重複的不建立（改把來源例句加進既有句型），變體／近義建立並互相記錄關係
@@ -40,7 +62,15 @@ export async function savePatternsWithDedup(
 
   for (let i = 0; i < candidates.length; i++) {
     const c = candidates[i];
-    const r: PatternRelation = relations.find(x => x.index === i) || { index: i, relation: 'new' };
+    let r: PatternRelation = relations.find(x => x.index === i) || { index: i, relation: 'new' };
+
+    // 重新萃取同一句時：對到「來源就是這一句」的既有句型的變體，視為重複（避免同一句產生重疊的句型）
+    if (r.relation === 'variant' && r.matchId) {
+      const target = existingById.get(r.matchId);
+      if (target && isPatternFromSentence(target, meta.sourceMaterialId, { id: meta.sourceSentenceId, text: meta.sourceExample?.en })) {
+        r = { ...r, relation: 'duplicate' };
+      }
+    }
 
     if (r.relation === 'duplicate') {
       const target = r.matchId ? existingById.get(r.matchId) : undefined;

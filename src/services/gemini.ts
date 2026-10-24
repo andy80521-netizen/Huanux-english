@@ -292,11 +292,13 @@ export async function transcribeRecording(audioFile: File): Promise<string> {
 
 export async function extractPatternsFromSentence(
     sentenceText: string,
-    sentenceTranslation: string
+    sentenceTranslation: string,
+    existingPatterns: string[] = []   // 這句之前已萃取出的句型（重新萃取時避免重複）
   ): Promise<Omit<LanguagePattern, 'id' | 'sourceMaterialId' | 'sourceLabel' | 'exampleSentences' | 'unlockedGroups'>[]> {
     const data = await callAiText<{ patterns: any[] }>('extractFromSentence', {
         sentenceText,
-        sentenceTranslation: (sentenceTranslation || '').slice(0, 1000)
+        sentenceTranslation: (sentenceTranslation || '').slice(0, 1000),
+        ...(existingPatterns.length > 0 ? { existingPatterns: existingPatterns.map(t => t.slice(0, 300)).slice(0, 20) } : {})
     });
     return data.patterns;
 }

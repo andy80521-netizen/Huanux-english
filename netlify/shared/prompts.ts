@@ -131,6 +131,7 @@ const EXTRACTION_RULES = `■ 什麼值得萃取至少符合一項：
 - 動詞用原形（trigger，不是 triggered）
 - 去掉原句裡碰巧出現、不屬於核心用法的修飾語（例如 several、very）
 - 可替換的部分用英文方括號標示：[someone]、[something]、[verb]、[time]、[place]、[number] 等
+- 空格只標真正可以替換的部分；必須保留讓句型成立的固定字，不要把大半句子都換成空格（例如不要寫成 Here's what's [verb] [noun]）
 - 保留真正固定、不能替換的字
 
 ■ 三種分類
@@ -142,12 +143,19 @@ const EXTRACTION_RULES = `■ 什麼值得萃取至少符合一項：
 - 至少 5 句，由你新寫，不可摘錄原句
 - 必須使用 text 一般化後的寫法，套在不同的情境裡（日常、職場、新聞等），讓使用者看出它能用在哪些地方`;
 
-export function buildExtractFromSentencePrompt(sentenceText: string, sentenceTranslation: string): string {
+export function buildExtractFromSentencePrompt(sentenceText: string, sentenceTranslation: string, existingPatterns: string[] = []): string {
+    const existingBlock = existingPatterns.length > 0
+        ? `
+■ 這句已經萃取過以下句型（使用者正在練習）：
+${existingPatterns.map(t => `- ${t}`).join('\n')}
+不要再萃取上面這些句型，也不要萃取它們的改寫版本、或只是多套一點內容的版本（例如已有 Here's what's [verb-ing]，就不要再給 Here's what's [verb-ing] this [time]）。只找不同的新學習點；沒有就回傳 []。
+`
+        : '';
     return `這是使用者既有的雙語分析框架（結構句型 Structural Patterns / 片語 Phrases / 語組 Collocations 三分類）。
 輸入是一句英文和它的中文翻譯。請從這句話找出值得學習的句型、片語、語組，**最多 3 個**，依學習價值由高到低排列。一句話裡可能同時有一個結構句型和一個語組，都要各自拆出來；**如果沒有值得學的，就回傳空陣列 []，不要硬找**。
 
 ${EXTRACTION_RULES}
-
+${existingBlock}
 每個項目要包含：
 - category（三選一："structural"、"phrase"、"collocation"）
 - text（依上方寫法規則寫成的英文）

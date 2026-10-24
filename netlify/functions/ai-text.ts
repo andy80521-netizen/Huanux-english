@@ -211,11 +211,16 @@ export default async (req: Request) => {
                 typeof payload.sentenceTranslation !== 'string' ||
                 payload.sentenceText.length < 1 ||
                 payload.sentenceText.length > 1000 ||
-                payload.sentenceTranslation.length > 1000
+                payload.sentenceTranslation.length > 1000 ||
+                (payload.existingPatterns !== undefined && (
+                    !Array.isArray(payload.existingPatterns) ||
+                    payload.existingPatterns.length > 20 ||
+                    !payload.existingPatterns.every((t: any) => typeof t === 'string' && t.length >= 1 && t.length <= 300)
+                ))
             ) {
                 return json(400, { error: '輸入格式不正確' });
             }
-            const prompt = buildExtractFromSentencePrompt(payload.sentenceText, payload.sentenceTranslation);
+            const prompt = buildExtractFromSentencePrompt(payload.sentenceText, payload.sentenceTranslation, payload.existingPatterns || []);
             const config = { temperature: 0.2 };
             const text = await callQualityText(task, prompt, config.temperature);
             if (!text) {

@@ -5,7 +5,7 @@ import { auth, db, appId } from '../firebase';
 import { doc, onSnapshot, collection, setDoc, updateDoc, getDoc } from 'firebase/firestore';
 import ShadowingPracticeView from './ShadowingPracticeView';
 import { extractPatternsFromSentence } from '../services/gemini';
-import { savePatternsWithDedup, formatSaveResult } from '../services/patternSave';
+import { savePatternsWithDedup, formatSaveResult, listPatternsFromSentence } from '../services/patternSave';
 import { startCoverGeneration, buildCoverExcerpt } from '../services/cover';
 import ConfirmDialog from './ConfirmDialog';
 import PatternQuickCard from './PatternQuickCard';
@@ -176,7 +176,15 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
         const sentence = material.sentences[index];
 
         try {
-            const patterns = await extractPatternsFromSentence(sentence.text, sentence.translation || '');
+            // 重新萃取時，把這句已有的句型告訴 AI，避免產生重疊的句型
+            const existingFromSentence = sentence.extracted
+                ? await listPatternsFromSentence(material.id, { id: sentence.id, text: sentence.text }).catch(() => [])
+                : [];
+            const patterns = await extractPatternsFromSentence(
+                sentence.text,
+                sentence.translation || '',
+                existingFromSentence.map(p => p.text).filter(Boolean)
+            );
             
             const saveResult = await savePatternsWithDedup(patterns, {
                 sourceMaterialId: material.id,
