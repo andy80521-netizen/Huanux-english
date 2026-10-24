@@ -117,7 +117,14 @@ export const normalizePrimaryCategories = (items: any) => {
 };
 
 // 萃取規則（單句與整篇共用）：什麼值得萃取、怎麼寫成可重複使用的形式
-const EXTRACTION_RULES = `■ 什麼值得萃取至少符合一項：
+// 使用者程度：萃取與審核共用；要調整難度只改這裡
+const LEARNER_PROFILE = `使用者是中高級英文學習者（約 CEFR B2），母語是中文，住在澳洲。已經會日常基礎搭配（例如 listen to、lead to、respond to、look forward to、make a decision、take a photo），想學更道地、更進階、或中文母語者常用錯的說法。`;
+
+const EXTRACTION_RULES = `■ 使用者程度
+${LEARNER_PROFILE}
+- B2 學習者已經會的基礎用法不要萃取
+
+■ 什麼值得萃取（至少符合一項）：
 - 中文母語者自己不容易寫出來的搭配（例如 make a mistake、trigger a bushfire、heavy rain）
 - 意思不能從字面推出來的固定說法（片語動詞、慣用語，例如 run out of、on the verge of）
 - 可以套用到很多情境的句子骨架（例如 What [someone] is about to [verb] is...、the [hottest] [day] since [year]）
@@ -250,7 +257,10 @@ export function buildReviewExtractionPrompt(
 萃取結果（前面的數字是 index）：
 ${list}
 
+使用者程度：${LEARNER_PROFILE}
+
 檢核清單：
+0. 這是 B2 學習者已經會的基礎用法嗎？（例如 listen to、lead to、[number] minutes each）是就刪除
 1. 動詞是否為原形？（例如 recorded → record）不是就修正寫法
 2. 是否含有原句碰巧出現、不屬於核心用法的字？（例如 actually、several、more of、具體的月份或地名）有就修正，拿掉這些字或改成方括號空格
 3. 是否與同一批其他項目重疊或互相涵蓋？有就刪除學習價值較低的那個

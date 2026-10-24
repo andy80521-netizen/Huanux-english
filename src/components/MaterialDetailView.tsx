@@ -9,6 +9,7 @@ import { savePatternsWithDedup, formatSaveResult, listPatternsFromSentence } fro
 import { startCoverGeneration, buildCoverExcerpt } from '../services/cover';
 import ConfirmDialog from './ConfirmDialog';
 import PatternQuickCard from './PatternQuickCard';
+import ExtractPreviewDialog from './ExtractPreviewDialog';
 import { requestSightingDetection, MaterialSightings } from '../services/sightings';
 import RetellSection from './RetellSection';
 import RetellView from './RetellView';
@@ -58,6 +59,9 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
     const [sightings, setSightings] = useState<MaterialSightings | null>(null);
     const [patternNames, setPatternNames] = useState<Record<string, string | null>>({});
     const [quickCardPatternId, setQuickCardPatternId] = useState<string | null>(null);
+    // 萃取結果預覽：使用者勾選後才存入句型庫
+    const [extractPreview, setExtractPreview] = useState<{ index: number; patterns: any[]; reviewNote: string } | null>(null);
+    const [savingPreview, setSavingPreview] = useState(false);
     const [retellTarget, setRetellTarget] = useState<{ segmentIndex: number; segment: RetellSegment; targetPatterns: RetellTargetPattern[] } | null>(null);
 
     // 監聽這份教材的已學句型比對結果
@@ -166,6 +170,23 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
         }
     };
 
+    // 把句子標記為「已萃取」
+    const markExtracted = async (index: number) => {
+        const uid = auth.currentUser?.uid;
+        if (!uid || !material) return;
+        const updatedSentences = [...material.sentences];
+        updatedSentences[index] = { ...updatedSentences[index], extracted: true };
+        await updateDoc(doc(db, `artifacts/${appId}/users/${uid}/materials`, material.id), {
+            sentences: updatedSentences
+        });
+    };
+
+    const showExtractMessage = (text: string, isError: boolean) => {
+        setExtractMessage({ text, isError });
+        setTimeout(() => setExtractMessage(null), isError ? 3000 : 6000);
+    };
+
+    // 第一步：萃取＋審核，結果先給使用者預覽勾選
     const handleExtract = async (index: number) => {
         if (!material) return;
         const uid = auth.currentUser?.uid;
@@ -185,33 +206,60 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
                 sentence.translation || '',
                 existingFromSentence.map(p => p.text).filter(Boolean)
             );
-            
-            const saveResult = await savePatternsWithDedup(patterns, {
+
+            const reviewNote = review.reviewed && (review.dropped > 0 || review.fixed > 0)
+                ? `（審核刪除 ${review.dropped} 個、修正 ${review.fixed} 個）`
+                : '';
+
+            if (patterns.length === 0) {
+                await markExtracted(index);
+                showExtractMessage('這次沒有找到值得萃取的句型' + reviewNote, false);
+                return;
+            }
+            setExtractPreview({ index, patterns, reviewNote });
+        } catch (err: any) {
+            console.error(err);
+            showExtractMessage(err.message || '萃取失敗', true);
+        } finally {
+            setExtractingIndex(null);
+        }
+    };
+
+    // 第二步：只把勾選的項目存入句型庫
+    const handleConfirmPreview = async (selectedIndexes: number[]) => {
+        if (!material || !extractPreview) return;
+        const { index, patterns, reviewNote } = extractPreview;
+        const sentence = material.sentences[index];
+        setSavingPreview(true);
+        try {
+            const chosen = selectedIndexes.map(i => patterns[i]).filter(Boolean);
+            const saveResult = await savePatternsWithDedup(chosen, {
                 sourceMaterialId: material.id,
                 sourceSentenceId: sentence.id,
                 sourceLabel: sentence.text.substring(0, 20) + (sentence.text.length > 20 ? '...' : ''),
                 sourceExample: { en: sentence.text, zh: sentence.translation || '' }
             });
-
-            const updatedSentences = [...material.sentences];
-            updatedSentences[index] = { ...updatedSentences[index], extracted: true };
-            
-            await updateDoc(doc(db, `artifacts/${appId}/users/${uid}/materials`, material.id), {
-                sentences: updatedSentences
-            });
-
-            const reviewNote = review.reviewed && (review.dropped > 0 || review.fixed > 0)
-                ? `（審核刪除 ${review.dropped} 個、修正 ${review.fixed} 個）`
-                : '';
-            setExtractMessage({ text: formatSaveResult(saveResult) + reviewNote, isError: false });
-            setTimeout(() => setExtractMessage(null), 6000);
+            await markExtracted(index);
+            setExtractPreview(null);
+            showExtractMessage(formatSaveResult(saveResult) + reviewNote, false);
         } catch (err: any) {
             console.error(err);
-            setExtractMessage({ text: err.message || '萃取失敗', isError: true });
-            setTimeout(() => setExtractMessage(null), 3000);
+            showExtractMessage(err.message || '存檔失敗', true);
         } finally {
-            setExtractingIndex(null);
+            setSavingPreview(false);
         }
+    };
+
+    const handleCancelPreview = async () => {
+        if (!extractPreview) return;
+        const { index } = extractPreview;
+        setExtractPreview(null);
+        try {
+            await markExtracted(index);
+        } catch (err) {
+            console.warn('標記已萃取失敗:', err);
+        }
+        showExtractMessage('沒有加入任何句型', false);
     };
 
     const handleDeleteSentence = async (index: number) => {
@@ -608,6 +656,16 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
 
             {quickCardPatternId && (
                 <PatternQuickCard patternId={quickCardPatternId} onClose={() => setQuickCardPatternId(null)} />
+            )}
+
+            {extractPreview && (
+                <ExtractPreviewDialog
+                    candidates={extractPreview.patterns}
+                    note={extractPreview.reviewNote}
+                    saving={savingPreview}
+                    onConfirm={handleConfirmPreview}
+                    onCancel={handleCancelPreview}
+                />
             )}
         </div>
     );

@@ -15,6 +15,7 @@ import MaterialReviewPanel, { ReviewSentence } from './MaterialReviewPanel';
 import MaterialListView from './MaterialListView';
 import MaterialDetailView from './MaterialDetailView';
 import { ChevronLeft } from 'lucide-react';
+import ExtractPreviewDialog from './ExtractPreviewDialog';
 
 export type PendingMaterial = {
     source: 'upload' | 'tts';
@@ -42,6 +43,9 @@ export default function MaterialImportMode() {
     const [importTitle, setImportTitle] = useState('文字匯入教材');
     const [isExtracting, setIsExtracting] = useState(false);
     const [extractSuccessMsg, setExtractSuccessMsg] = useState<string | null>(null);
+    // 整篇萃取結果預覽：使用者勾選後才存入句型庫
+    const [textExtractPreview, setTextExtractPreview] = useState<{ patterns: any[]; sourceLabel: string } | null>(null);
+    const [savingTextPreview, setSavingTextPreview] = useState(false);
     const [courses, setCourses] = useState<string[]>([]);
     const [vocabData, setVocabData] = useState<VocabItem[]>([]);
     const [selectedCourses, setSelectedCourses] = useState<string[]>([]);
@@ -166,9 +170,12 @@ export default function MaterialImportMode() {
             const patterns = await extractPatternsFromText(fullText);
             
             const sourceLabel = fullText.length > 20 ? fullText.substring(0, 20) + '...' : fullText;
-            
-            const saveResult = await savePatternsWithDedup(patterns, { sourceLabel });
-            setExtractSuccessMsg(formatSaveResult(saveResult));
+
+            if (!patterns || patterns.length === 0) {
+                setExtractSuccessMsg('這次沒有找到值得萃取的句型');
+                return;
+            }
+            setTextExtractPreview({ patterns, sourceLabel });
         } catch (e: any) {
             setError(e.message || '萃取失敗');
         } finally {
@@ -177,6 +184,21 @@ export default function MaterialImportMode() {
     };
 
     
+    const handleConfirmTextPreview = async (selectedIndexes: number[]) => {
+        if (!textExtractPreview) return;
+        setSavingTextPreview(true);
+        try {
+            const chosen = selectedIndexes.map(i => textExtractPreview.patterns[i]).filter(Boolean);
+            const saveResult = await savePatternsWithDedup(chosen, { sourceLabel: textExtractPreview.sourceLabel });
+            setTextExtractPreview(null);
+            setExtractSuccessMsg(formatSaveResult(saveResult));
+        } catch (e: any) {
+            setError(e.message || '存檔失敗');
+        } finally {
+            setSavingTextPreview(false);
+        }
+    };
+
     const handleLibrarySubmit = () => {
         if (selectedCourses.length === 0) return;
         setLoadingState('processing');
@@ -988,6 +1010,15 @@ export default function MaterialImportMode() {
                         ))}
                     </div>
                 </div>
+            )}
+
+            {textExtractPreview && (
+                <ExtractPreviewDialog
+                    candidates={textExtractPreview.patterns}
+                    saving={savingTextPreview}
+                    onConfirm={handleConfirmTextPreview}
+                    onCancel={() => { setTextExtractPreview(null); setExtractSuccessMsg('沒有加入任何句型'); }}
+                />
             )}
         </div>
     );
