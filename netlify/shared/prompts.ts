@@ -135,9 +135,19 @@ const EXTRACTION_RULES = `■ 什麼值得萃取至少符合一項：
 - 保留真正固定、不能替換的字
 
 ■ 三種分類
-- structural（結構句型）：帶空格的句子骨架，學的是句子怎麼組
+- structural（結構句型）：英文裡常見、有固定功能的句型框架，學的是句子怎麼組（例如 What [someone] is about to [verb] is…、the [hottest] [day] since [year]、It's not that…, it's that…）
+  · 檢驗：把空格拿掉後，剩下的固定字如果只有 the、a、is、are、in、to、has 這類基本文法字，就不是結構句型，不要萃取
+  · 不要把原句的名詞、數字、地點全部挖空當成句型；空格最多 3 個
+  · 句子裡沒有這種框架時，不要硬湊結構句型
 - phrase（片語）：固定、不可拆的說法，學的是整個說法（片語動詞、慣用語）
 - collocation（語組）：哪個字跟哪個字搭配才是學習重點（動詞＋名詞、形容詞＋名詞等）
+
+■ 同一次萃取的項目不能互相涵蓋
+- 例如已經有 trigger [something]，就不要再給包含 trigger 的結構句型；只保留學習價值最高的那個寫法
+
+■ 學習重點 learningPoint（必填）
+- 用一句中文說明：中文母語者在這裡容易用錯、或自己想不到的是什麼（例如「中文說『引發火災』時常直覺用 cause，母語者描述突發事件更常用 trigger 或 spark」）
+- 寫不出具體的學習重點，就代表不值得萃取，不要列出
 
 ■ 示範例句 seedExamples
 - 至少 5 句，由你新寫，不可摘錄原句
@@ -160,6 +170,7 @@ ${existingBlock}
 - category（三選一："structural"、"phrase"、"collocation"）
 - text（依上方寫法規則寫成的英文）
 - meaningZh（中文語意說明）
+- learningPoint（學習重點，見上方說明）
 - usageContext（使用時機說明）
 - primaryCategory（主要情境大類，依下方「主要情境分類」規則填寫）
 - situationTags（情緒／溝通功能標籤陣列，例如 ["劃清界線", "委婉拒絕"]）
@@ -173,6 +184,7 @@ ${PRIMARY_CATEGORY_GUIDE}
     "category": "collocation",
     "text": "trigger [something]",
     "meaningZh": "引發、觸發（某事件或反應）",
+    "learningPoint": "中文說「引發」時常直覺用 cause，但災害、警報、反應這類突發事件，母語者更常用 trigger",
     "usageContext": "描述某件事導致災害、警報、情緒或連鎖反應發生，新聞與日常都常用",
     "primaryCategory": "...",
     "situationTags": ["..."],
@@ -196,6 +208,7 @@ ${EXTRACTION_RULES}
 - category（三選一："structural"、"phrase"、"collocation"）
 - text（依上方寫法規則寫成的英文）
 - meaningZh（中文語意說明）
+- learningPoint（學習重點，見上方說明）
 - usageContext（使用時機說明）
 - primaryCategory（主要情境大類，依下方「主要情境分類」規則填寫）
 - situationTags（情緒／溝通功能標籤陣列，例如 ["強調", "轉折"]）
@@ -209,6 +222,7 @@ ${PRIMARY_CATEGORY_GUIDE}
     "category": "structural",
     "text": "the [hottest] [day] since [year]",
     "meaningZh": "自某年以來最……的一天",
+    "learningPoint": "中文說「X 年來最熱」容易直譯成 in X years，母語者更常用「最高級＋since＋年份」",
     "usageContext": "描述紀錄、比較歷史高低點，常見於新聞與天氣報導",
     "primaryCategory": "...",
     "situationTags": ["..."],

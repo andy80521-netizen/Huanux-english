@@ -63,7 +63,7 @@ const GROQ_MODEL = 'openai/gpt-oss-120b';
 const GROQ_MAX_PROMPT_CHARS = 6000;   // Groq 免費方案每分鐘 8K token，太長的提示詞直接跳過 Groq
 const GROQ_TIMEOUT_MS = 20000;
 
-async function callGroq(prompt: string, temperature: number): Promise<string> {
+async function callGroq(prompt: string, temperature: number, reasoningEffort: 'low' | 'medium' | 'high'): Promise<string> {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) throw new Error('尚未設定 GROQ_API_KEY');
   const controller = new AbortController();
@@ -76,7 +76,7 @@ async function callGroq(prompt: string, temperature: number): Promise<string> {
         model: GROQ_MODEL,
         messages: [{ role: 'user', content: prompt }],
         temperature,
-        reasoning_effort: 'low',
+        reasoning_effort: reasoningEffort,
         max_completion_tokens: 4096
       }),
       signal: controller.signal
@@ -96,11 +96,12 @@ async function callGroq(prompt: string, temperature: number): Promise<string> {
   }
 }
 
-export async function callQualityText(label: string, prompt: string, temperature: number): Promise<string> {
+// reasoningEffort：Groq 的思考強度；萃取用 medium（需要判斷學習價值），其他維持 low 以節省每日 token
+export async function callQualityText(label: string, prompt: string, temperature: number, reasoningEffort: 'low' | 'medium' | 'high' = 'low'): Promise<string> {
   if (process.env.GROQ_API_KEY && prompt.length <= GROQ_MAX_PROMPT_CHARS) {
     const startTime = Date.now();
     try {
-      const text = await callGroq(prompt, temperature);
+      const text = await callGroq(prompt, temperature, reasoningEffort);
       console.log(`[ai-text] ${label} 成功：Groq ${GROQ_MODEL} ${Date.now() - startTime}ms`);
       return text;
     } catch (err: any) {

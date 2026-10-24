@@ -180,6 +180,17 @@ export default function LanguageModelDetailView({ patternId, onBack }: { pattern
                             {pattern.meaningZh}
                         </p>
                     </div>
+
+                    {pattern.learningPoint && (
+                        <div>
+                            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-2">
+                                <Sparkles size={14} /> 學習重點
+                            </h4>
+                            <p className="text-slate-700 dark:text-slate-300 leading-relaxed">
+                                {pattern.learningPoint}
+                            </p>
+                        </div>
+                    )}
                     
                     <div>
                         <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-2">

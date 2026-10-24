@@ -38,7 +38,24 @@ function revisionScope(original: string, revised: string): 'partial' | 'whole' {
     return dp[a.length][b.length] / Math.max(a.length, b.length) >= 0.5 ? 'partial' : 'whole';
 }
 
-// 萃取結果整理：只保留格式正確的項目，最多 max 個；沒有值得萃取的句型時回傳空陣列
+// 句型的固定字中，不算「有內容」的基本文法字
+const FUNCTION_WORDS = new Set([
+    'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'am', 'to', 'in', 'on', 'at', 'of', 'for', 'and', 'or',
+    'it', 'its', "it's", 'this', 'that', 'these', 'those', 'has', 'have', 'had', 'do', 'does', 'did', 'will', 'can',
+    'with', 'by', 'from', 'as', 'there'
+]);
+
+// 萃取品質把關：空格太多、或拿掉空格後只剩基本文法字的項目不採用
+function isAcceptablePatternText(category: string, text: string): boolean {
+    const slots = text.match(/\[[^\]]+\]/g) || [];
+    const fixedWords = (text.replace(/\[[^\]]+\]/g, ' ').toLowerCase().match(/[a-z']+/g) || []);
+    const contentWords = fixedWords.filter(w => !FUNCTION_WORDS.has(w));
+    if (contentWords.length === 0) return false;
+    if (category === 'structural' && slots.length > 3) return false;
+    return true;
+}
+
+// 萃取結果整理：只保留格式正確、通過品質把關的項目，最多 max 個；沒有值得萃取的句型時回傳空陣列
 function normalizeExtractedPatterns(parsed: any, max: number): any[] {
     if (!Array.isArray(parsed)) {
         throw new Error('回傳格式不是陣列');
@@ -48,11 +65,14 @@ function normalizeExtractedPatterns(parsed: any, max: number): any[] {
         .map((x: string) => x.trim().slice(0, maxLen));
     const items = parsed
         .filter((p: any) => p && ['structural', 'phrase', 'collocation'].includes(p.category) && typeof p.text === 'string' && p.text.trim())
+        .filter((p: any) => typeof p.learningPoint === 'string' && p.learningPoint.trim())
+        .filter((p: any) => isAcceptablePatternText(p.category, p.text.trim()))
         .slice(0, max)
         .map((p: any) => ({
             category: p.category,
             text: p.text.trim().slice(0, 300),
             meaningZh: String(p.meaningZh || '').trim().slice(0, 500),
+            learningPoint: p.learningPoint.trim().slice(0, 300),
             usageContext: String(p.usageContext || '').trim().slice(0, 1000),
             primaryCategory: p.primaryCategory,
             situationTags: strList(p.situationTags, 30).slice(0, 8),
@@ -222,7 +242,7 @@ export default async (req: Request) => {
             }
             const prompt = buildExtractFromSentencePrompt(payload.sentenceText, payload.sentenceTranslation, payload.existingPatterns || []);
             const config = { temperature: 0.2 };
-            const text = await callQualityText(task, prompt, config.temperature);
+            const text = await callQualityText(task, prompt, config.temperature, 'medium');
             if (!text) {
                 throw new Error('無法從 Gemini 取得內容');
             }

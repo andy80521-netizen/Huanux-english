@@ -68,6 +68,7 @@ export interface LanguagePattern {
   category: PatternCategory;
   text: string;                 // 句型/片語/語組本身（英文）
   meaningZh: string;            // 中文語意說明
+  learningPoint?: string;       // 學習重點：中文母語者容易用錯或想不到的地方（萃取時產生，2026-10-24 起）
   usageContext: string;         // 使用時機說明
   primaryCategory: string;      // 主要情境分類（場景/領域，句型庫瀏覽的主要導覽軸）
   situationTags: string[];      // 情緒/溝通功能標籤，例如「劃清界線」「委婉拒絕」
