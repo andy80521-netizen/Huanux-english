@@ -1,5 +1,5 @@
 import { checkAndUpdateUnlockedGroups } from '../utils/groupUnlock';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { LanguagePattern, PatternExampleSentence } from '../types';
 import { auth, db, appId } from '../firebase';
 import { doc, updateDoc } from 'firebase/firestore';
@@ -38,6 +38,7 @@ export default function LanguageModelPracticeView({ pattern, groupIndex, onBack 
     const [isPracticing, setIsPracticing] = useState(false);
     const [practiceTargetIndex, setPracticeTargetIndex] = useState(-1);
     const [addingSeed, setAddingSeed] = useState(false);
+    const composeAreaRef = useRef<HTMLDivElement>(null);
     const [regeneratingSeeds, setRegeneratingSeeds] = useState(false);
     const [regenerateSeedsError, setRegenerateSeedsError] = useState<string | null>(null);
     const [showRegenerateSeedsConfirm, setShowRegenerateSeedsConfirm] = useState(false);
@@ -248,9 +249,23 @@ export default function LanguageModelPracticeView({ pattern, groupIndex, onBack 
 
         setAddingSeed(true);
         setErrorMsg(null);
+        setCheckResult(null);
 
         try {
             const text = ex.en.trim();
+
+            // 示範例句也要經過造句檢查：完全通過且沒有建議才直接加入；
+            // 否則帶入輸入框並顯示檢查結果，由使用者決定（採用建議或確認送出）
+            const result = await checkSentenceQuality(pattern.text, text);
+            const passed = result.natural && result.grammar && result.spelling;
+            if (!passed || result.suggestedRevision) {
+                setInputText(text);
+                setCheckResult(result);
+                setAttemptCountForCurrent(prev => prev + 1);
+                composeAreaRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                return;
+            }
+
             const sentenceId = `p_${groupIndex}_${currentIndex}`;
 
             const newSentenceObj: PatternExampleSentence = {
@@ -261,7 +276,7 @@ export default function LanguageModelPracticeView({ pattern, groupIndex, onBack 
                     natural: true,
                     grammar: true,
                     spelling: true,
-                    comment: '來自示範例句（未經檢查）'
+                    comment: result.comment || '來自示範例句（已通過檢查）'
                 },
                 groupIndex,
                 mastery: 0,
@@ -378,7 +393,7 @@ export default function LanguageModelPracticeView({ pattern, groupIndex, onBack 
                 </div>
             ) : (
                 <>
-                <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-800 flex flex-col gap-6">
+                <div ref={composeAreaRef} className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-800 flex flex-col gap-6">
                     <div className="flex flex-col gap-2">
                         <label className="text-sm font-bold text-slate-700 dark:text-slate-300">
                             請用目標句型造一個英文句子：
@@ -574,7 +589,7 @@ export default function LanguageModelPracticeView({ pattern, groupIndex, onBack 
                                                         {addingSeed ? (
                                                             <>
                                                                 <Loader2 size={16} className="animate-spin" />
-                                                                加入中
+                                                                檢查中
                                                             </>
                                                         ) : (
                                                             <>
