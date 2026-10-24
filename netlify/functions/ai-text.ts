@@ -38,6 +38,32 @@ function revisionScope(original: string, revised: string): 'partial' | 'whole' {
     return dp[a.length][b.length] / Math.max(a.length, b.length) >= 0.5 ? 'partial' : 'whole';
 }
 
+// 萃取結果整理：只保留格式正確的項目，最多 max 個；沒有值得萃取的句型時回傳空陣列
+function normalizeExtractedPatterns(parsed: any, max: number): any[] {
+    if (!Array.isArray(parsed)) {
+        throw new Error('回傳格式不是陣列');
+    }
+    const strList = (v: any, maxLen: number) => (Array.isArray(v) ? v : [])
+        .filter((x: any) => typeof x === 'string' && x.trim())
+        .map((x: string) => x.trim().slice(0, maxLen));
+    const items = parsed
+        .filter((p: any) => p && ['structural', 'phrase', 'collocation'].includes(p.category) && typeof p.text === 'string' && p.text.trim())
+        .slice(0, max)
+        .map((p: any) => ({
+            category: p.category,
+            text: p.text.trim().slice(0, 300),
+            meaningZh: String(p.meaningZh || '').trim().slice(0, 500),
+            usageContext: String(p.usageContext || '').trim().slice(0, 1000),
+            primaryCategory: p.primaryCategory,
+            situationTags: strList(p.situationTags, 30).slice(0, 8),
+            seedExamples: (Array.isArray(p.seedExamples) ? p.seedExamples : [])
+                .filter((e: any) => e && typeof e.en === 'string' && e.en.trim() && typeof e.zh === 'string')
+                .map((e: any) => ({ en: e.en.trim().slice(0, 500), zh: e.zh.trim().slice(0, 500) }))
+                .slice(0, 10)
+        }));
+    return normalizePrimaryCategories(items);
+}
+
 export default async (req: Request) => {
     if (req.method !== 'POST') return json(405, { error: 'Method Not Allowed' });
 
@@ -196,7 +222,7 @@ export default async (req: Request) => {
                 throw new Error('無法從 Gemini 取得內容');
             }
             try {
-                const patterns = normalizePrimaryCategories(cleanAndParseJSON(text));
+                const patterns = normalizeExtractedPatterns(cleanAndParseJSON(text), 3);
                 result = { patterns };
             } catch (e: any) {
                 throw new Error('解析語言模型句型失敗：' + e.message);
@@ -220,7 +246,7 @@ export default async (req: Request) => {
                 throw new Error('無法從 Gemini 取得內容');
             }
             try {
-                const patterns = normalizePrimaryCategories(cleanAndParseJSON(text));
+                const patterns = normalizeExtractedPatterns(cleanAndParseJSON(text), 12);
                 result = { patterns };
             } catch (e: any) {
                 throw new Error('解析語言模型句型失敗：' + e.message);

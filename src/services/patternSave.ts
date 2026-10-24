@@ -86,6 +86,9 @@ export async function savePatternsWithDedup(
 }
 
 export function formatSaveResult(r: SavePatternsResult): string {
+  if (r.created === 0 && r.duplicates.length === 0) {
+    return '這次沒有找到值得萃取的句型';
+  }
   const parts = [`新增 ${r.created} 個句型`];
   if (r.duplicates.length > 0) {
     const names = r.duplicates.map(d => `「${d.matchText || d.text}」`).join('、');

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { LanguagePattern } from '../types';
 import { auth, db, appId } from '../firebase';
-import { doc, onSnapshot, deleteDoc, collection, getDocs } from 'firebase/firestore';
+import { doc, onSnapshot } from 'firebase/firestore';
 import { ChevronLeft, Loader2, Sparkles, BookOpen, Quote, PenTool, RefreshCw, Trash2 } from 'lucide-react';
 import LanguageModelPracticeView from './LanguageModelPracticeView';
 import GroupSelectionView from './GroupSelectionView';
@@ -10,6 +10,7 @@ import { regenerateAndSaveSeedExamples } from '../services/seedExamples';
 import ConfirmDialog from './ConfirmDialog';
 import PatternSightingsSection from './PatternSightingsSection';
 import { getPatternStage } from '../utils/patternStage';
+import { deletePattern } from '../services/patternDelete';
 import { getSydneyDateString } from '../utils/sydneyTime';
 
 export default function LanguageModelDetailView({ patternId, onBack }: { patternId: string, onBack: () => void }) {
@@ -114,10 +115,7 @@ export default function LanguageModelDetailView({ patternId, onBack }: { pattern
         setDeleteError(null);
 
         try {
-            // 先刪除重逢紀錄子集合（Firestore 刪除文件時不會自動刪除子集合）
-            const sightingsSnap = await getDocs(collection(db, `artifacts/${appId}/users/${uid}/languagePatterns/${pattern.id}/sightings`));
-            await Promise.all(sightingsSnap.docs.map(d => deleteDoc(d.ref)));
-            await deleteDoc(doc(db, `artifacts/${appId}/users/${uid}/languagePatterns`, pattern.id));
+            await deletePattern(pattern.id);
             onBack();
         } catch (err: any) {
             console.error('刪除句型失敗:', err);

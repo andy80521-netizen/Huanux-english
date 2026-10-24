@@ -471,10 +471,15 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
                                     </button>
                                 )}
                                 {isCompleted && s.extracted && (
-                                    <div className="shrink-0 px-4 h-12 rounded-xl flex items-center justify-center gap-2 shadow-sm bg-slate-50 text-slate-500 dark:bg-slate-800/50 dark:text-slate-400 font-bold text-sm border border-slate-200 dark:border-slate-700">
-                                        <Sparkles size={18} />
-                                        已萃取
-                                    </div>
+                                    <button
+                                        onClick={() => handleExtract(i)}
+                                        disabled={extractingIndex !== null}
+                                        title="已萃取過，可重新萃取（與既有句型重複的會自動略過）"
+                                        className="shrink-0 px-4 h-12 rounded-xl flex items-center justify-center gap-2 shadow-sm bg-slate-50 text-slate-500 hover:bg-slate-100 dark:bg-slate-800/50 dark:text-slate-400 dark:hover:bg-slate-800 font-bold text-sm border border-slate-200 dark:border-slate-700 transition-all disabled:opacity-50"
+                                    >
+                                        {extractingIndex === i ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}
+                                        已萃取・重新萃取
+                                    </button>
                                 )}
                                 <button
                                     onClick={() => setPracticeIndex(i)}

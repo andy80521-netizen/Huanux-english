@@ -116,28 +116,56 @@ export const normalizePrimaryCategories = (items: any) => {
     });
 };
 
+// 萃取規則（單句與整篇共用）：什麼值得萃取、怎麼寫成可重複使用的形式
+const EXTRACTION_RULES = `■ 什麼值得萃取至少符合一項：
+- 中文母語者自己不容易寫出來的搭配（例如 make a mistake、trigger a bushfire、heavy rain）
+- 意思不能從字面推出來的固定說法（片語動詞、慣用語，例如 run out of、on the verge of）
+- 可以套用到很多情境的句子骨架（例如 What [someone] is about to [verb] is...、the [hottest] [day] since [year]）
+
+■ 不要萃取
+- 字面意思相加、一看就懂的普通組合（例如 early spring、big house、very happy）
+- 單一個字、專有名詞、人名地名、數字與日期
+- 只是把原句整段照抄、換個情境就用不上的長片段
+
+■ 寫法（text 欄位）
+- 動詞用原形（trigger，不是 triggered）
+- 去掉原句裡碰巧出現、不屬於核心用法的修飾語（例如 several、very）
+- 可替換的部分用英文方括號標示：[someone]、[something]、[verb]、[time]、[place]、[number] 等
+- 保留真正固定、不能替換的字
+
+■ 三種分類
+- structural（結構句型）：帶空格的句子骨架，學的是句子怎麼組
+- phrase（片語）：固定、不可拆的說法，學的是整個說法（片語動詞、慣用語）
+- collocation（語組）：哪個字跟哪個字搭配才是學習重點（動詞＋名詞、形容詞＋名詞等）
+
+■ 示範例句 seedExamples
+- 至少 5 句，由你新寫，不可摘錄原句
+- 必須使用 text 一般化後的寫法，套在不同的情境裡（日常、職場、新聞等），讓使用者看出它能用在哪些地方`;
+
 export function buildExtractFromSentencePrompt(sentenceText: string, sentenceTranslation: string): string {
-    return `這是使用者既有的雙語分析框架(結構句型Structural Patterns / 片語Phrases / 語組Collocations三分類)。
-輸入只有這一句英文+中文翻譯,請從這句話裡拆解出可能不只一個的句型/片語/語組(例如一句話裡可能同時有一個結構句型跟一個片語,都要各自拆出來)。
-每個萃取出來的項目要包含:
-- category (三選一: "structural", "phrase", "collocation")
-- text (句型/片語本身，英文)
-- meaningZh (中文語意說明)
-- usageContext (使用時機說明)
-- primaryCategory (主要情境大類，依下方「主要情境分類」規則填寫)
-- situationTags (情緒/溝通功能標籤陣列，例如 ["劃清界線", "委婉拒絕"])
-- seedExamples (至少5個, 明確由你生成的示範例句，不是從原句摘錄，格式 {en: string, zh: string} 陣列)
+    return `這是使用者既有的雙語分析框架（結構句型 Structural Patterns / 片語 Phrases / 語組 Collocations 三分類）。
+輸入是一句英文和它的中文翻譯。請從這句話找出值得學習的句型、片語、語組，**最多 3 個**，依學習價值由高到低排列。一句話裡可能同時有一個結構句型和一個語組，都要各自拆出來；**如果沒有值得學的，就回傳空陣列 []，不要硬找**。
+
+${EXTRACTION_RULES}
+
+每個項目要包含：
+- category（三選一："structural"、"phrase"、"collocation"）
+- text（依上方寫法規則寫成的英文）
+- meaningZh（中文語意說明）
+- usageContext（使用時機說明）
+- primaryCategory（主要情境大類，依下方「主要情境分類」規則填寫）
+- situationTags（情緒／溝通功能標籤陣列，例如 ["劃清界線", "委婉拒絕"]）
+- seedExamples（格式 {en: string, zh: string} 陣列）
 
 ${PRIMARY_CATEGORY_GUIDE}
 
-請只回傳 JSON 陣列，不要有其他文字。
-格式範例：
+請只回傳 JSON 陣列，不要有其他文字。格式範例：
 [
   {
-    "category": "structural",
-    "text": "...",
-    "meaningZh": "...",
-    "usageContext": "...",
+    "category": "collocation",
+    "text": "trigger [something]",
+    "meaningZh": "引發、觸發（某事件或反應）",
+    "usageContext": "描述某件事導致災害、警報、情緒或連鎖反應發生，新聞與日常都常用",
     "primaryCategory": "...",
     "situationTags": ["..."],
     "seedExamples": [{"en": "...", "zh": "..."}]
@@ -151,27 +179,29 @@ ${PRIMARY_CATEGORY_GUIDE}
 }
 
 export function buildExtractFromTextPrompt(sourceText: string): string {
-    return `這是使用者既有的雙語分析框架(結構句型Structural Patterns / 片語Phrases / 語組Collocations三分類)。
-輸入為一段完整的英文段落, 請從這段文字裡找出所有值得萃取的句型/片語/語組。請考慮跨句子的語境關聯, 不要逐句機械式拆解。
-每個萃取出來的項目要包含:
-- category (三選一: "structural", "phrase", "collocation")
-- text (句型/片語本身，英文)
-- meaningZh (中文語意說明)
-- usageContext (使用時機說明)
-- primaryCategory (主要情境大類，依下方「主要情境分類」規則填寫)
-- situationTags (情緒/溝通功能標籤陣列，例如 ["強調", "轉折"])
-- seedExamples (至少5個, 明確由你生成的示範例句，格式 {en: string, zh: string} 陣列)
+    return `這是使用者既有的雙語分析框架（結構句型 Structural Patterns / 片語 Phrases / 語組 Collocations 三分類）。
+輸入為一段完整的英文段落。請從這段文字找出值得學習的句型、片語、語組，**最多 12 個**，依學習價值由高到低排列。請考慮跨句子的語境關聯，不要逐句機械式拆解；**同一個用法只列一次**；**如果沒有值得學的，就回傳空陣列 []，不要硬找**。
+
+${EXTRACTION_RULES}
+
+每個項目要包含：
+- category（三選一："structural"、"phrase"、"collocation"）
+- text（依上方寫法規則寫成的英文）
+- meaningZh（中文語意說明）
+- usageContext（使用時機說明）
+- primaryCategory（主要情境大類，依下方「主要情境分類」規則填寫）
+- situationTags（情緒／溝通功能標籤陣列，例如 ["強調", "轉折"]）
+- seedExamples（格式 {en: string, zh: string} 陣列）
 
 ${PRIMARY_CATEGORY_GUIDE}
 
-請只回傳 JSON 陣列，不要有其他文字。
-格式範例：
+請只回傳 JSON 陣列，不要有其他文字。格式範例：
 [
   {
     "category": "structural",
-    "text": "...",
-    "meaningZh": "...",
-    "usageContext": "...",
+    "text": "the [hottest] [day] since [year]",
+    "meaningZh": "自某年以來最……的一天",
+    "usageContext": "描述紀錄、比較歷史高低點，常見於新聞與天氣報導",
     "primaryCategory": "...",
     "situationTags": ["..."],
     "seedExamples": [{"en": "...", "zh": "..."}]

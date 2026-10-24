@@ -2,9 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { LanguagePattern } from '../types';
 import { auth, db, appId } from '../firebase';
 import { collection, query, onSnapshot } from 'firebase/firestore';
-import { Sparkles, User, ChevronRight, Search, X, RotateCcw } from 'lucide-react';
+import { Sparkles, User, ChevronRight, Search, X, RotateCcw, Trash2, CheckSquare, Square, Loader2 } from 'lucide-react';
 import { PatternFilterState } from './LanguageModelMode';
 import { getPatternStage } from '../utils/patternStage';
+import ConfirmDialog from './ConfirmDialog';
+import { deletePatterns } from '../services/patternDelete';
 
 interface LanguageModelListViewProps {
     onPatternClick: (id: string) => void;
@@ -16,6 +18,13 @@ export default function LanguageModelListView({ onPatternClick, filters, onFilte
     const [patterns, setPatterns] = useState<LanguagePattern[]>([]);
     const [loading, setLoading] = useState(true);
     const [uid, setUid] = useState<string | null | undefined>(undefined);
+
+    // 刪除：卡片垃圾桶（單一）或選取模式（批次）
+    const [selectMode, setSelectMode] = useState(false);
+    const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+    const [pendingDeleteIds, setPendingDeleteIds] = useState<string[] | null>(null);
+    const [deleteProgress, setDeleteProgress] = useState<{ done: number; total: number } | null>(null);
+    const [deleteMessage, setDeleteMessage] = useState<{ text: string; isError: boolean } | null>(null);
 
     useEffect(() => {
         const currentUid = auth.currentUser?.uid;
@@ -33,7 +42,7 @@ export default function LanguageModelListView({ onPatternClick, filters, onFilte
         const unsubscribe = onSnapshot(q, (snapshot) => {
             const data: LanguagePattern[] = [];
             snapshot.forEach((doc) => {
-                data.push(doc.data() as LanguagePattern);
+                data.push({ ...(doc.data() as LanguagePattern), id: doc.id });
             });
             setPatterns(data);
             setLoading(false);
@@ -232,6 +241,61 @@ export default function LanguageModelListView({ onPatternClick, filters, onFilte
         });
     };
 
+    const exitSelectMode = () => {
+        setSelectMode(false);
+        setSelectedIds(new Set());
+    };
+
+    const toggleSelected = (id: string) => {
+        setSelectedIds(prev => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id); else next.add(id);
+            return next;
+        });
+    };
+
+    // 全選只針對目前篩選結果
+    const visibleIds = finalFilteredPatterns.map(p => p.id);
+    const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => selectedIds.has(id));
+    const toggleSelectAllVisible = () => {
+        setSelectedIds(prev => {
+            const next = new Set(prev);
+            if (allVisibleSelected) visibleIds.forEach(id => next.delete(id));
+            else visibleIds.forEach(id => next.add(id));
+            return next;
+        });
+    };
+
+    // 只計算仍存在的句型（刪除後監聽會自動更新清單）
+    const selectedExisting = patterns.filter(p => selectedIds.has(p.id));
+    const pendingPatterns = pendingDeleteIds ? patterns.filter(p => pendingDeleteIds.includes(p.id)) : [];
+    const pendingSentenceCount = pendingPatterns.reduce((n, p) => n + (p.exampleSentences || []).filter(s => s.checked).length, 0);
+    const deleteConfirmMessage = pendingPatterns.length === 1
+        ? `「${pendingPatterns[0].text}」的 ${pendingSentenceCount} 句造句與所有練習進度會一起刪除，無法復原。`
+        : `${pendingPatterns.length} 個句型、共 ${pendingSentenceCount} 句造句與所有練習進度會一起刪除，無法復原。`;
+
+    const handleConfirmDelete = async () => {
+        const ids = pendingPatterns.map(p => p.id);
+        setPendingDeleteIds(null);
+        if (ids.length === 0) return;
+        setDeleteMessage(null);
+        setDeleteProgress({ done: 0, total: ids.length });
+        const r = await deletePatterns(ids, (done, total) => setDeleteProgress({ done, total }));
+        setDeleteProgress(null);
+        setSelectedIds(prev => {
+            const next = new Set(prev);
+            ids.forEach(id => next.delete(id));
+            return next;
+        });
+        if (r.failed > 0) {
+            setDeleteMessage({ text: `已刪除 ${r.deleted} 個，${r.failed} 個刪除失敗，請稍後再試`, isError: true });
+        } else {
+            setDeleteMessage({ text: `已刪除 ${r.deleted} 個句型`, isError: false });
+            if (ids.length > 1) exitSelectMode();
+        }
+        setTimeout(() => setDeleteMessage(null), 4000);
+    };
+
     const isFiltered = filters.search !== '' || filters.category !== 'all' || effectivePrimaryCategory !== 'all' || effectiveSituationTag !== null;
 
     return (
@@ -246,16 +310,73 @@ export default function LanguageModelListView({ onPatternClick, filters, onFilte
                         從跟讀教材中萃取出的精華句型
                     </p>
                 </div>
-                {isFiltered && (
-                    <button
-                        onClick={handleClearFilters}
-                        className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 bg-indigo-50 dark:bg-indigo-900/30 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 shrink-0"
-                    >
-                        <RotateCcw size={14} />
-                        清除篩選
-                    </button>
-                )}
+                <div className="flex flex-col items-end gap-2 shrink-0">
+                    {!selectMode && (
+                        <button
+                            onClick={() => { setSelectMode(true); setSelectedIds(new Set()); }}
+                            className="text-xs font-bold text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 shrink-0"
+                        >
+                            <CheckSquare size={14} />
+                            選取
+                        </button>
+                    )}
+                    {isFiltered && (
+                        <button
+                            onClick={handleClearFilters}
+                            className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 bg-indigo-50 dark:bg-indigo-900/30 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 shrink-0"
+                        >
+                            <RotateCcw size={14} />
+                            清除篩選
+                        </button>
+                    )}
+                </div>
             </div>
+
+            {/* 選取模式操作列（批次刪除） */}
+            {selectMode && (
+                <div className="sticky top-0 z-10 mb-4 px-3 py-3 rounded-2xl bg-white/95 dark:bg-slate-900/95 backdrop-blur border border-indigo-200 dark:border-indigo-800 shadow-sm flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-black text-slate-700 dark:text-slate-200 flex-1 min-w-[5rem]">
+                        已選 {selectedExisting.length} 個
+                    </span>
+                    <button
+                        onClick={toggleSelectAllVisible}
+                        disabled={visibleIds.length === 0}
+                        className="text-xs font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 px-3 py-2 rounded-lg transition-colors disabled:opacity-50"
+                    >
+                        {allVisibleSelected ? '取消全選' : '全選目前結果'}
+                    </button>
+                    <button
+                        onClick={() => setPendingDeleteIds(selectedExisting.map(p => p.id))}
+                        disabled={selectedExisting.length === 0 || !!deleteProgress}
+                        className="text-xs font-bold text-white bg-red-500 hover:bg-red-600 px-3 py-2 rounded-lg transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                    >
+                        <Trash2 size={14} />
+                        刪除
+                    </button>
+                    <button
+                        onClick={exitSelectMode}
+                        disabled={!!deleteProgress}
+                        className="text-xs font-bold text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 px-3 py-2 rounded-lg transition-colors disabled:opacity-50"
+                    >
+                        完成
+                    </button>
+                </div>
+            )}
+
+            {(deleteProgress || deleteMessage) && (
+                <div className={`mb-4 px-4 py-3 rounded-xl text-sm font-bold flex items-center gap-2 break-words ${
+                    deleteMessage?.isError
+                        ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 border border-red-100 dark:border-red-800'
+                        : 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-800'
+                }`}>
+                    {deleteProgress ? (
+                        <>
+                            <Loader2 size={16} className="animate-spin shrink-0" />
+                            刪除中 {deleteProgress.done}/{deleteProgress.total}…
+                        </>
+                    ) : deleteMessage?.text}
+                </div>
+            )}
 
             {/* 篩選區 */}
             <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 shadow-sm border border-slate-200 dark:border-slate-800 mb-6 space-y-4">
@@ -429,18 +550,40 @@ export default function LanguageModelListView({ onPatternClick, filters, onFilte
                                     const all = pattern.exampleSentences || [];
                                     const createdCount = all.filter(s => s.checked).length;
                                     const masteredCount = all.filter(s => s.checked && (s.mastery || 0) >= 1000).length;
+                                    const isSelected = selectMode && selectedIds.has(pattern.id);
 
                                     return (
                                         <div 
                                             key={pattern.id}
-                                            onClick={() => onPatternClick(pattern.id)}
-                                            className="bg-white dark:bg-slate-900 rounded-xl p-4 shadow-sm border border-slate-200 dark:border-slate-800 hover:shadow-md hover:border-indigo-200 dark:hover:border-indigo-800 transition-all cursor-pointer group flex flex-col"
+                                            onClick={() => (selectMode ? toggleSelected(pattern.id) : onPatternClick(pattern.id))}
+                                            className={`bg-white dark:bg-slate-900 rounded-xl p-4 shadow-sm border hover:shadow-md transition-all cursor-pointer group flex flex-col ${
+                                                isSelected
+                                                    ? 'border-indigo-500 ring-2 ring-indigo-500/30'
+                                                    : 'border-slate-200 dark:border-slate-800 hover:border-indigo-200 dark:hover:border-indigo-800'
+                                            }`}
                                         >
                                             <div className="flex items-start justify-between mb-1">
                                                 <h4 className="text-lg font-black text-slate-800 dark:text-slate-100 flex-1 pr-2 leading-tight">
                                                     {pattern.text}
                                                 </h4>
-                                                <ChevronRight size={18} className="text-slate-300 group-hover:text-indigo-500 transition-colors shrink-0 mt-1" />
+                                                {selectMode ? (
+                                                    isSelected
+                                                        ? <CheckSquare size={20} className="text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5" />
+                                                        : <Square size={20} className="text-slate-300 dark:text-slate-600 shrink-0 mt-0.5" />
+                                                ) : (
+                                                    <div className="flex items-center gap-1 shrink-0">
+                                                        <button
+                                                            type="button"
+                                                            onClick={(e) => { e.stopPropagation(); setPendingDeleteIds([pattern.id]); }}
+                                                            disabled={!!deleteProgress}
+                                                            title="刪除句型"
+                                                            className="p-1.5 text-slate-300 hover:text-red-500 dark:text-slate-600 dark:hover:text-red-400 rounded-lg transition-colors disabled:opacity-50"
+                                                        >
+                                                            <Trash2 size={16} />
+                                                        </button>
+                                                        <ChevronRight size={18} className="text-slate-300 group-hover:text-indigo-500 transition-colors" />
+                                                    </div>
+                                                )}
                                             </div>
                                             {pattern.meaningZh && (
                                                 <p className="text-sm text-slate-500 dark:text-slate-400 line-clamp-1 mb-2">
@@ -481,6 +624,15 @@ export default function LanguageModelListView({ onPatternClick, filters, onFilte
                     ))}
                 </div>
             )}
+
+            <ConfirmDialog
+                isOpen={!!pendingDeleteIds && pendingPatterns.length > 0}
+                title={pendingPatterns.length > 1 ? `刪除 ${pendingPatterns.length} 個句型？` : '刪除句型？'}
+                message={deleteConfirmMessage}
+                confirmText="刪除"
+                onConfirm={handleConfirmDelete}
+                onCancel={() => setPendingDeleteIds(null)}
+            />
         </div>
     );
 }
