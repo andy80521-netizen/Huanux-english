@@ -1,0 +1,54 @@
+# 防作弊檢查（獨立工作流程）
+# 使用 pull_request_target：一律執行 main 上「可信任」版本的工作流程與 guard.sh，
+# PR 無法透過修改這些檔案來關閉檢查。這裡只讀取 git 差異，不執行 PR 中的任何程式碼。
+name: 防作弊檢查
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: ai-guard-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  guard:
+    if: github.event.pull_request.draft == false && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PR: ${{ github.event.pull_request.number }}
+      SHA: ${{ github.event.pull_request.head.sha }}
+      BASE: ${{ github.event.pull_request.base.ref }}
+    steps:
+      - name: 取出 main 上的可信任版本
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: 取得 PR 的 commit（只讀取，不執行）
+        run: git fetch --no-tags origin "+refs/pull/$PR/head:refs/remotes/pr/head"
+
+      - name: 檢查
+        id: guard
+        continue-on-error: true
+        run: |
+          bash scripts/ai/guard.sh "origin/$BASE" pr/head | tee guard.md
+          exit "${PIPESTATUS[0]}"
+
+      - name: 留言回報
+        if: always()
+        run: |
+          { echo "<!-- ai-guard:sha=$SHA -->"; cat guard.md 2>/dev/null || echo "⚠️ 防作弊檢查執行失敗"; } > comment.md
+          gh pr comment "$PR" --body-file comment.md
+
+      - name: 結果
+        if: steps.guard.outcome != 'success'
+        run: exit 1

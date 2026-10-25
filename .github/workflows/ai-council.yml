@@ -1,32 +1,38 @@
-# AI 委員會（需求規劃）
-#   issue 貼上 ai-plan  → 各 AI 獨立評估，結果留言在 issue
-#   issue 貼上 ai-cross → 各 AI 看過第一輪後交叉討論
-# 只有 repo 的協作者能貼標籤，陌生人無法觸發
-name: AI 委員會
+# 規劃委員會（只在規劃階段使用）
+#   PR 貼上 ai-plan → 各成員獨立評估 PR 中的規劃文件（docs/plans/*.md）
+#   PR 貼上 ai-ask  → 各成員回應 Claude 最新一則質詢留言（含 <!-- claude:ask -->）
+# 結果留言在 PR。只有協作者能貼標籤；外部 fork 的 PR 拿不到金鑰，不會執行。
+name: 規劃委員會
 
 on:
-  issues:
+  pull_request:
     types: [labeled]
 
 permissions:
   contents: read
+  pull-requests: write
   issues: write
 
 concurrency:
-  group: ai-council-${{ github.event.issue.number }}
+  group: ai-council-${{ github.event.pull_request.number }}
 
 jobs:
   council:
-    if: github.event.label.name == 'ai-plan' || github.event.label.name == 'ai-cross'
+    if: >-
+      (github.event.label.name == 'ai-plan' || github.event.label.name == 'ai-ask') &&
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
       GH_TOKEN: ${{ github.token }}
-      ISSUE: ${{ github.event.issue.number }}
+      PR: ${{ github.event.pull_request.number }}
       LABEL: ${{ github.event.label.name }}
+      BASE: ${{ github.event.pull_request.base.ref }}
       OWNER: ${{ github.repository_owner }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -34,45 +40,39 @@ jobs:
 
       - run: pip install requests
 
-      - name: 準備需求與專案脈絡
+      - name: 準備規劃文件與擁有者留言
+        id: prep
         run: |
-          # 需求 = issue 內文 + 擁有者的留言（忽略其他人的留言，避免公開 repo 被注入指令）
-          gh api "repos/$GITHUB_REPOSITORY/issues/$ISSUE" --jq '"# 需求：\(.title)\n\n\(.body // "")"' > brief.md
-          gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$ISSUE/comments" \
-            --jq ".[] | select(.user.login == \"$OWNER\") | select(.body | contains(\"<!-- ai-council\") | not) | \"\n### 擁有者補充（\(.created_at)）\n\(.body)\"" >> brief.md || true
-          {
-            echo; echo "## 專案脈絡"
-            echo "### CLAUDE.md"; cat CLAUDE.md 2>/dev/null || true
-            echo; echo "### 檔案列表"; git ls-files | grep -v -E '^(package-lock.json|public/)'
-            echo; echo "### 原始碼"
-            git ls-files 'src/*.ts' 'src/*.tsx' 'netlify/*.ts' \
-              | while read -r f; do echo; echo "#### $f"; echo '```'; head -c 80000 "$f"; echo; echo '```'; done
-          } > context.md
-          # 程式碼太多時以 ai_council.py 的上限截斷；需求永遠放最前面
-          cat brief.md context.md > full_brief.md
+          plan=$(git diff --name-only --diff-filter=AM "origin/$BASE...HEAD" -- 'docs/plans/*.md' | grep -v '_template' | head -1 || true)
+          if [ -z "$plan" ]; then
+            printf '%s\n' "<!-- ai-council:error -->" "⚠️ 這個 PR 沒有新增或修改 \`docs/plans/*.md\` 規劃文件，委員會無法執行。" > result.md
+            exit 0
+          fi
+          echo "plan=$plan" >> "$GITHUB_OUTPUT"
+          # 擁有者的留言（排除 Claude 用擁有者帳號發的留言：含 <!-- by-claude -->）
+          gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/comments" \
+            --jq ".[] | select(.user.login == \"$OWNER\") | select(.body | contains(\"<!-- by-claude\") | not) | \"### \(.created_at)\n\(.body)\n\"" > owner_notes.md || true
+          # Claude 最新一則質詢
+          gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/comments" \
+            --jq "[.[] | select(.user.login == \"$OWNER\") | select(.body | contains(\"<!-- claude:ask -->\"))] | last | .body // \"\"" > question.md || true
 
-      - name: 第一輪：獨立評估
-        if: env.LABEL == 'ai-plan'
+      - name: 委員會討論
+        if: steps.prep.outputs.plan != ''
         env:
+          COUNCIL_GEMINI_API_KEY: ${{ secrets.COUNCIL_GEMINI_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           AI_COUNCIL: ${{ vars.AI_COUNCIL }}
-        run: python .github/scripts/ai_council.py plan --brief full_brief.md --out result.md
-
-      - name: 第二輪：交叉討論
-        if: env.LABEL == 'ai-cross'
-        env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          AI_COUNCIL: ${{ vars.AI_COUNCIL }}
+          AI_COUNCIL_MAX_CHARS: ${{ vars.AI_COUNCIL_MAX_CHARS }}
+          PLAN: ${{ steps.prep.outputs.plan }}
         run: |
-          gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$ISSUE/comments" \
-            --jq '[.[] | select(.body | contains("<!-- ai-council:plan -->"))] | last | .body // ""' > round1.md
-          if [ ! -s round1.md ]; then echo "找不到第一輪意見，請先執行 ai-plan" > result.md; exit 0; fi
-          python .github/scripts/ai_council.py cross --brief brief.md --round1 round1.md --out result.md
+          mode=plan; [ "$LABEL" = "ai-ask" ] && mode=ask
+          python .github/scripts/ai_council.py "$mode" --plan "$PLAN" \
+            --owner-notes owner_notes.md --question question.md --out result.md
 
-      - name: 發表結果
+      - name: 發表結果並移除標籤
         if: always()
         run: |
-          [ -s result.md ] || echo "<!-- ai-council:error -->
-          ⚠️ AI 委員會執行失敗，請查看 Actions 紀錄（${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}）" > result.md
-          gh issue comment "$ISSUE" --body-file result.md
-          gh issue edit "$ISSUE" --remove-label "$LABEL" || true
+          [ -s result.md ] || printf '%s\n' "<!-- ai-council:error -->" \
+            "⚠️ 規劃委員會執行失敗，請查看 [Actions 紀錄](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" > result.md
+          gh pr comment "$PR" --body-file result.md
+          gh pr edit "$PR" --remove-label "$LABEL" || true

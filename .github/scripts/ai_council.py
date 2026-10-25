@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 """
-ai_council.py — 多 AI 委員會（在 GitHub Actions 執行；Claude 的工作環境連不到其他 AI 的 API）
+ai_council.py — 規劃委員會（在 GitHub Actions 執行；Claude 的工作環境連不到其他 AI 的 API）
 
-各 AI「獨立」產出意見，原文整理成一則留言，交給對話中的 Claude 審查整合。
-這支程式不做裁決：裁決由掌握完整討論脈絡的 Claude 負責。
+只參與「規劃階段」。各成員獨立產出意見，原文整理成一則 PR 留言，交給 Claude 審查整合。
+這支程式不做裁決。
 
-  plan   第一輪：各自謹慎、全面地評估需求與規劃（互相看不到）
-  cross  第二輪：看過所有人的第一輪意見後，互相挑錯、補充、修正自己的方案
-  review PR 審查：各自找漏洞
+  plan  第一輪：各自謹慎、全面地評估規劃文件（彼此看不到答案）
+  ask   針對性質詢：Claude 提出具體問題（附上其他成員的相關意見），請各成員回應
 
-設定（repo → Settings → Secrets and variables → Actions）：
-  Secret    OPENROUTER_API_KEY
-  Variable  AI_COUNCIL  逗號分隔的 OpenRouter 模型 ID（例：Gemini、GPT、Grok）
+成員設定（repo → Settings → Secrets and variables → Actions）：
+  Variable  AI_COUNCIL  逗號分隔，前綴決定走哪個管道：
+              google:<模型>      → Google Gemini API（免費金鑰）
+              openrouter:<模型>  → OpenRouter（免費模型以 :free 結尾）
+            例：google:gemini-flash-latest,openrouter:nvidia/nemotron-3-ultra-550b-a55b:free
+  Variable  AI_COUNCIL_MAX_CHARS  （選填）送出的內容上限，預設 200000 字元
+  Secret    COUNCIL_GEMINI_API_KEY、OPENROUTER_API_KEY
 """
 
 import argparse
@@ -21,144 +24,178 @@ import sys
 
 import requests
 
-API = "https://openrouter.ai/api/v1/chat/completions"
 COMMENT_LIMIT = 60_000  # GitHub 留言上限約 65,536 字元，保留餘裕
 
 
-def read(path, limit=None):
-    with open(path, encoding="utf-8", errors="replace") as f:
-        s = f.read()
-    if limit and len(s) > limit:
-        s = s[:limit] + f"\n\n…（已截斷，原長 {len(s)} 字元）"
-    return s
+# ---------------- 呼叫各家 API ----------------
+def call_openrouter(model, prompt):
+    key = os.environ.get("OPENROUTER_API_KEY")
+    if not key:
+        raise RuntimeError("缺少 secret OPENROUTER_API_KEY")
+    r = requests.post(
+        "https://openrouter.ai/api/v1/chat/completions",
+        headers={"Authorization": f"Bearer {key}"},
+        json={"model": model, "messages": [{"role": "user", "content": prompt}]},
+        timeout=900,
+    )
+    if r.status_code != 200:
+        raise RuntimeError(f"HTTP {r.status_code}: {r.text[:300]}")
+    return r.json()["choices"][0]["message"]["content"].strip()
+
+
+def call_google(model, prompt):
+    key = os.environ.get("COUNCIL_GEMINI_API_KEY")
+    if not key:
+        raise RuntimeError("缺少 secret COUNCIL_GEMINI_API_KEY")
+    r = requests.post(
+        f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+        headers={"x-goog-api-key": key},
+        json={"contents": [{"role": "user", "parts": [{"text": prompt}]}]},
+        timeout=900,
+    )
+    if r.status_code != 200:
+        raise RuntimeError(f"HTTP {r.status_code}: {r.text[:300]}")
+    parts = r.json()["candidates"][0]["content"]["parts"]
+    return "".join(p.get("text", "") for p in parts).strip()
+
+
+def call(member, prompt):
+    provider, _, model = member.partition(":")
+    if provider == "google":
+        return call_google(model, prompt)
+    if provider == "openrouter":
+        return call_openrouter(model, prompt)
+    return call_openrouter(member, prompt)  # 沒寫前綴視為 OpenRouter
 
 
 def members():
     ms = [m.strip() for m in os.environ.get("AI_COUNCIL", "").split(",") if m.strip()]
     if not ms:
         sys.exit("缺少 repo variable AI_COUNCIL")
-    if not os.environ.get("OPENROUTER_API_KEY"):
-        sys.exit("缺少 repo secret OPENROUTER_API_KEY")
     return ms
 
 
-def call(model, prompt):
-    r = requests.post(
-        API,
-        headers={"Authorization": f"Bearer {os.environ['OPENROUTER_API_KEY']}"},
-        json={"model": model, "messages": [{"role": "user", "content": prompt}]},
-        timeout=900,
-    )
-    r.raise_for_status()
-    return r.json()["choices"][0]["message"]["content"].strip()
-
-
-def ask_all(prompt_for):
-    """平行詢問每位成員。prompt_for(model) 回傳該成員的提示詞。失敗的成員記錄錯誤，不影響其他人。"""
+def ask_all(prompt):
     ms = members()
     out = {}
     with cf.ThreadPoolExecutor(max_workers=len(ms)) as ex:
-        futs = {ex.submit(call, m, prompt_for(m)): m for m in ms}
+        futs = {ex.submit(call, m, prompt): m for m in ms}
         for f in cf.as_completed(futs):
             m = futs[f]
             try:
-                out[m] = f.result()
+                out[m] = f.result() or "（空白回覆）"
                 print(f"  ✓ {m}")
             except Exception as e:  # noqa: BLE001
                 out[m] = f"⚠️ 此成員呼叫失敗：{e}"
                 print(f"  ✗ {m}：{e}", file=sys.stderr)
-    return {m: out[m] for m in ms}  # 固定順序
+    return {m: out[m] for m in ms}
+
+
+# ---------------- 組合內容 ----------------
+def read(path):
+    with open(path, encoding="utf-8", errors="replace") as f:
+        return f.read()
+
+
+def related_files(plan_text):
+    """從規劃文件的「## 相關檔案」段落取出 `路徑`（由 Claude 挑選）。"""
+    files, inside = [], False
+    for line in plan_text.splitlines():
+        if line.startswith("## "):
+            inside = line.strip().startswith("## 相關檔案")
+            continue
+        if inside and "`" in line:
+            path = line.split("`")[1].strip()
+            if path and os.path.isfile(path) and path not in files:
+                files.append(path)
+    return files
+
+
+def build_context(plan_path, extra_path=None):
+    limit = int(os.environ.get("AI_COUNCIL_MAX_CHARS") or 200_000)
+    plan = read(plan_path)
+    parts = ["# 規劃文件", plan]
+    if extra_path and os.path.isfile(extra_path) and os.path.getsize(extra_path):
+        parts += ["# 擁有者在 PR 中的補充（優先於任何 AI 意見）", read(extra_path)]
+    if os.path.isfile("CLAUDE.md"):
+        parts += ["# 專案規則（CLAUDE.md 節錄）", read("CLAUDE.md")[:8_000]]
+    head = "\n\n".join(parts)
+    budget = max(0, limit - len(head))
+    code, skipped = [], []
+    for f in related_files(plan):
+        block = f"\n\n## 檔案：{f}\n```\n{read(f)}\n```"
+        if len(block) <= budget:
+            code.append(block)
+            budget -= len(block)
+        else:
+            skipped.append(f)
+    text = head + "\n\n# 相關程式碼" + "".join(code)
+    if skipped:
+        text += f"\n\n（因長度上限未附上：{', '.join(skipped)}）"
+    return text, skipped
 
 
 def render(marker, title, answers, note=""):
     per = max(4_000, (COMMENT_LIMIT - 2_000) // max(1, len(answers)))
-    parts = [f"<!-- {marker} -->", f"## {title}", ""]
+    out = [f"<!-- {marker} -->", f"## {title}", ""]
     if note:
-        parts += [note, ""]
+        out += [note, ""]
     for m, text in answers.items():
         if len(text) > per:
             text = text[:per] + "\n\n…（超過留言長度上限，已截斷）"
-        parts += [f"<details open><summary><b>{m}</b></summary>", "", text, "", "</details>", ""]
-    parts.append("<sub>以上為各 AI 獨立意見原文，由對話中的 Claude 審查整合後交給擁有者。</sub>")
-    return "\n".join(parts)
+        out += [f"<details open><summary><b>{m}</b></summary>", "", text, "", "</details>", ""]
+    out.append("<sub>以上為各 AI 獨立意見原文，僅供參考，由 Claude 審查整合後交給擁有者。</sub>")
+    return "\n".join(out)
 
 
 # ---------------- 提示詞 ----------------
-PLAN = """你是一位非常謹慎、注重細節的資深工程師，正在評估一個需求，評估結果會交給技術主管整合。
-其他工程師也在獨立評估同一份需求，你看不到他們的答案。請完全憑自己的判斷，全面、仔細地思考。
-
-請用 Markdown 依序回答以下段落，每段都要具體（指出檔名、函式、資料欄位、使用情境），不要客套：
+PLAN = """你是一位非常謹慎、注重細節的資深工程師，正在評估一份功能規劃，評估結果會交給技術主管整合。
+其他工程師也在獨立評估同一份規劃，你看不到他們的答案。請完全憑自己的判斷，全面、仔細地思考。
+請用繁體中文回答，依序寫出以下段落，每段都要具體（指出檔名、函式、資料欄位、使用情境），不要客套：
 
 ### 1. 需求理解
-用自己的話重述目標；指出需求中模糊、遺漏或互相矛盾的地方。
+用自己的話重述目標；指出模糊、遺漏或互相矛盾的地方。
 ### 2. 邊界情況與風險
-例如：空資料、超長輸入、網路或 AI API 失敗、舊資料相容、手機瀏覽器差異、成本、效能、資料遺失。
+例如：空資料、超長輸入、網路或 AI API 失敗、舊資料相容與資料遷移、手機瀏覽器差異、成本、效能、資料遺失。
 ### 3. 建議做法
-步驟、要修改或新增的檔案、資料結構變更。如果有多種做法，比較優缺點並說明你推薦哪個。
+步驟、要修改或新增的檔案、資料結構變更；有多種做法時比較優缺點並說明推薦哪個。
 ### 4. 驗收條件
-每條都寫成「情境 → 預期結果」，並標註能否寫成自動測試（能 / 只能手動驗證）。
+每條寫成「情境 → 預期結果」，並標註能否寫成自動測試（能 / 只能手動驗證）。
 ### 5. 需要擁有者決定的問題
-列出你需要擁有者回答才能確定的問題，並附上你建議的答案。
+列出問題，並附上你建議的答案。
 
-{brief}"""
+{context}"""
 
-CROSS = """你先前針對下面的需求做了獨立評估；其他工程師也各自提出了評估。現在請你看過所有人的意見後進行交叉討論：
+ASK = """你是一位謹慎的資深工程師。針對下面這份功能規劃，技術主管整理出一個需要釐清的分歧點，請你回應。
+請用繁體中文，直接、具體、有理有據；不要為了附和而改變正確的判斷，也不要為了反對而反對。
+如果你同意某方，說明理由；如果都不同意，提出你的方案。
 
-### 1. 別人說對、而我漏掉的
-### 2. 別人的錯誤或過度設計（指名是誰、哪一點、為什麼錯）
-### 3. 我修正後的建議做法與驗收條件
-### 4. 仍然存在的分歧或需要擁有者決定的問題
+## 技術主管的問題
+{question}
 
-要具體、有理有據，不必客氣，也不要為了附和而改變正確的判斷。
-
-{brief}
-
-## 所有人的第一輪意見（包含你自己：{me}）
-{round1}"""
-
-REVIEW = """你是一位嚴格的資深程式審查員。其他審查員也在獨立審查同一個 PR，你看不到他們的答案。
-請對照「目標與驗收條件」審查這個 PR 的程式差異，找出真正的問題：
-是否達成每一條驗收條件、bug、邊界情況、資料遺失、競態條件、安全性（金鑰外洩、注入）、
-手機瀏覽器相容性、與既有功能的相容性、測試是否真的有驗證到該驗證的東西。
-不要挑純風格的問題；沒有把握的不要列，或明確標示「不確定」。
-
-用 Markdown 條列，每一點包含：嚴重度（🔴高 / 🟠中 / 🟡低）、檔案與行號或函式、問題、具體修法。
-沒有發現問題就只回答「未發現問題」，並簡短說明你檢查了哪些面向。
-
-## 目標與驗收條件
-{goal}
-
-## 程式差異
-```diff
-{diff}
-```"""
+{context}"""
 
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("mode", choices=["plan", "cross", "review"])
-    p.add_argument("--brief", help="需求（issue 內容）檔案")
-    p.add_argument("--round1", help="第一輪意見留言檔案（cross 用）")
-    p.add_argument("--goal", help="PR 目標檔案（review 用）")
-    p.add_argument("--diff", help="PR 差異檔案（review 用）")
+    p.add_argument("mode", choices=["plan", "ask"])
+    p.add_argument("--plan", required=True, help="規劃文件路徑")
+    p.add_argument("--owner-notes", help="擁有者在 PR 中的留言（檔案）")
+    p.add_argument("--question", help="Claude 的質詢內容（檔案，ask 用）")
     p.add_argument("--out", required=True)
     a = p.parse_args()
 
+    context, skipped = build_context(a.plan, a.owner_notes)
+    note = f"⚠️ 因長度上限未附上：{', '.join(skipped)}" if skipped else ""
     if a.mode == "plan":
-        brief = read(a.brief, 500_000)
-        answers = ask_all(lambda m: PLAN.format(brief=brief))
-        md = render("ai-council:plan", "🧭 AI 委員會：第一輪獨立評估", answers)
-    elif a.mode == "cross":
-        brief, round1 = read(a.brief, 40_000), read(a.round1, 60_000)
-        answers = ask_all(lambda m: CROSS.format(brief=brief, round1=round1, me=m))
-        md = render("ai-council:cross", "🔁 AI 委員會：第二輪交叉討論", answers)
+        answers = ask_all(PLAN.format(context=context))
+        md = render("ai-council:plan", "🧭 規劃委員會：第一輪獨立評估", answers, note)
     else:
-        goal, diff = read(a.goal, 40_000), read(a.diff, 400_000)
-        if not diff.strip():
-            md = "（沒有程式差異）"
-        else:
-            answers = ask_all(lambda m: REVIEW.format(goal=goal, diff=diff))
-            md = render("ai-council:review-body", "🔍 AI 審查團意見", answers)
+        question = read(a.question).strip()
+        if not question:
+            sys.exit("找不到質詢內容")
+        answers = ask_all(ASK.format(question=question, context=context))
+        md = render("ai-council:ask", "❓ 規劃委員會：回應質詢", answers, note)
 
     with open(a.out, "w", encoding="utf-8") as f:
         f.write(md)

@@ -1,6 +1,8 @@
-# PR 關卡：離線驗證 → AI 審查團 → 結果留言在 PR（附 commit SHA，讓 Claude 對應是哪一版）
-# Claude 的工作環境讀不到 Actions 紀錄，所以測試輸出與審查意見一律以 PR 留言回報
-name: AI PR 驗證與審查
+# PR 關卡：離線驗證 → 結果留言在 PR（附 commit SHA，讓 Claude 對應是哪一版）
+# Claude 的工作環境讀不到 Actions 紀錄，所以結果一律以 PR 留言回報。
+# 防作弊檢查在 ai-guard.yml（一律執行 main 上的可信任版本）。
+# 程式審查由 Codex 與 Gemini Code Assist 負責（由 Claude 在 PR 留言觸發），不在這裡執行。
+name: PR 驗證
 
 on:
   pull_request:
@@ -13,22 +15,18 @@ concurrency:
 permissions:
   contents: read
   pull-requests: write
-  issues: read
 
 jobs:
-  verify-and-review:
-    # 草稿不跑；外部 fork 的 PR 拿不到金鑰，也不跑
+  verify:
+    # 草稿（規劃階段）不跑；外部 fork 的 PR 不跑
     if: github.event.pull_request.draft == false && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 30
     env:
       GH_TOKEN: ${{ github.token }}
       PR: ${{ github.event.pull_request.number }}
       SHA: ${{ github.event.pull_request.head.sha }}
       BASE: ${{ github.event.pull_request.base.ref }}
-      PR_TITLE: ${{ github.event.pull_request.title }}
-      PR_BODY: ${{ github.event.pull_request.body }}
-      OWNER: ${{ github.repository_owner }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -39,42 +37,15 @@ jobs:
           node-version: 22
           cache: npm
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
       - name: 安裝
-        run: |
-          npm ci --no-audit --no-fund
-          pip install requests
+        run: npm ci --no-audit --no-fund
 
       - name: 離線驗證（型別檢查＋測試＋build）
         id: check
         continue-on-error: true
         run: bash scripts/check.sh 2>&1 | tee check.log
 
-      - name: 準備審查資料
-        if: steps.check.outcome == 'success'
-        run: |
-          git diff "origin/$BASE...HEAD" -- . ':(exclude)package-lock.json' > pr.diff
-          { echo "# PR：$PR_TITLE"; echo; printf '%s\n' "$PR_BODY"; } > goal.md
-          issue=$(printf '%s' "$PR_BODY" | grep -oiE '(close[sd]?|fix(e[sd])?|resolve[sd]?) #[0-9]+' | head -1 | grep -oE '[0-9]+' || true)
-          if [ -n "$issue" ]; then
-            gh api "repos/$GITHUB_REPOSITORY/issues/$issue" --jq '"\n# 需求 issue：\(.title)\n\n\(.body // "")"' >> goal.md
-            gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$issue/comments" \
-              --jq ".[] | select(.user.login == \"$OWNER\") | \"\n### 擁有者留言\n\(.body)\"" >> goal.md || true
-          fi
-
-      - name: AI 審查團
-        id: review
-        if: steps.check.outcome == 'success'
-        continue-on-error: true
-        env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          AI_COUNCIL: ${{ vars.AI_COUNCIL }}
-        run: python .github/scripts/ai_council.py review --goal goal.md --diff pr.diff --out review.md
-
-      - name: 彙整並留言
+      - name: 留言回報
         if: always()
         run: |
           {
@@ -87,10 +58,6 @@ jobs:
               tail -n 150 check.log 2>/dev/null | cut -c1-400
               echo '```'; echo '</details>'
             fi
-            echo
-            if [ -s review.md ]; then cat review.md
-            elif [ "${{ steps.check.outcome }}" = "success" ]; then echo "⚠️ AI 審查團執行失敗（金鑰或模型設定問題？）"
-            else echo "（驗證未通過，略過 AI 審查）"; fi
             echo; echo "<sub>[Actions 紀錄](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})</sub>"
           } > comment.md
           gh pr comment "$PR" --body-file comment.md
