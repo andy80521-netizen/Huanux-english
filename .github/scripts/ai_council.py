@@ -97,8 +97,25 @@ def read(path):
         return f.read()
 
 
+ALLOWED_PREFIXES = ("src/", "netlify/", "tests/", "docs/")
+ALLOWED_ROOT_FILES = {"CLAUDE.md", "AGENTS.md", "package.json", "index.html", "vite.config.ts", "tsconfig.json", "netlify.toml", "README.md"}
+
+
+def safe_path(path):
+    """只允許 repo 內的一般檔案（不可絕對路徑、..、符號連結、repo 以外），避免讀到金鑰或系統檔。"""
+    if not path or os.path.isabs(path) or ".." in path.replace("\\", "/").split("/"):
+        return False
+    if not (path.startswith(ALLOWED_PREFIXES) or path in ALLOWED_ROOT_FILES):
+        return False
+    root = os.path.realpath(os.getcwd())
+    real = os.path.realpath(path)
+    if os.path.islink(path) or not real.startswith(root + os.sep):
+        return False
+    return os.path.isfile(real) and os.path.getsize(real) < 2_000_000
+
+
 def related_files(plan_text):
-    """從規劃文件的「## 相關檔案」段落取出 `路徑`（由 Claude 挑選）。"""
+    """從規劃文件的「## 相關檔案」段落取出 `路徑`（由 Claude 挑選）。路徑一律經過 safe_path 檢查。"""
     files, inside = [], False
     for line in plan_text.splitlines():
         if line.startswith("## "):
@@ -106,7 +123,7 @@ def related_files(plan_text):
             continue
         if inside and "`" in line:
             path = line.split("`")[1].strip()
-            if path and os.path.isfile(path) and path not in files:
+            if safe_path(path) and path not in files:
                 files.append(path)
     return files
 
@@ -117,7 +134,7 @@ def build_context(plan_path, extra_path=None):
     parts = ["# 規劃文件", plan]
     if extra_path and os.path.isfile(extra_path) and os.path.getsize(extra_path):
         parts += ["# 擁有者在 PR 中的補充（優先於任何 AI 意見）", read(extra_path)]
-    if os.path.isfile("CLAUDE.md"):
+    if safe_path("CLAUDE.md"):
         parts += ["# 專案規則（CLAUDE.md 節錄）", read("CLAUDE.md")[:8_000]]
     head = "\n\n".join(parts)
     budget = max(0, limit - len(head))
@@ -185,6 +202,8 @@ def main():
     p.add_argument("--out", required=True)
     a = p.parse_args()
 
+    if not safe_path(a.plan):
+        sys.exit(f"規劃文件路徑不安全：{a.plan}")
     context, skipped = build_context(a.plan, a.owner_notes)
     note = f"⚠️ 因長度上限未附上：{', '.join(skipped)}" if skipped else ""
     if a.mode == "plan":

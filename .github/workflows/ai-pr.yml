@@ -2,6 +2,10 @@
 # Claude 的工作環境讀不到 Actions 紀錄，所以結果一律以 PR 留言回報。
 # 防作弊檢查在 ai-guard.yml（一律執行 main 上的可信任版本）。
 # 程式審查由 Codex 與 Gemini Code Assist 負責（由 Claude 在 PR 留言觸發），不在這裡執行。
+#
+# 安全：verify 會執行 PR 的程式（測試、build），所以分成兩個 job、跑在兩台不同的機器上：
+#   - verify：完全沒有 GitHub token、不保留 git 憑證、npm ci 不執行套件腳本
+#   - report：不執行任何 PR 程式，只拿 verify 的結果去留言（PR 程式無法接觸 token、無法偽造回報）
 name: PR 驗證
 
 on:
@@ -14,7 +18,6 @@ concurrency:
 
 permissions:
   contents: read
-  pull-requests: write
 
 jobs:
   verify:
@@ -22,46 +25,70 @@ jobs:
     if: github.event.pull_request.draft == false && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      GH_TOKEN: ${{ github.token }}
-      PR: ${{ github.event.pull_request.number }}
-      SHA: ${{ github.event.pull_request.head.sha }}
-      BASE: ${{ github.event.pull_request.base.ref }}
+    permissions:
+      contents: read
+    outputs:
+      outcome: ${{ steps.check.outcome }}
+      tests: ${{ steps.summary.outputs.tests }}
+      log: ${{ steps.summary.outputs.log }}
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
 
-      - name: 安裝
-        run: npm ci --no-audit --no-fund
+      - name: 安裝（不執行套件腳本）
+        run: npm ci --ignore-scripts --no-audit --no-fund
 
       - name: 離線驗證（型別檢查＋測試＋build）
         id: check
         continue-on-error: true
         run: bash scripts/check.sh 2>&1 | tee check.log
 
-      - name: 留言回報
+      - name: 整理結果
+        id: summary
         if: always()
         run: |
-          {
-            echo "<!-- ai-pr:sha=$SHA -->"
-            if [ "${{ steps.check.outcome }}" = "success" ]; then
-              echo "## ✅ 離線驗證通過（\`${SHA:0:7}\`）"
-            else
-              echo "## ❌ 離線驗證失敗（\`${SHA:0:7}\`）"
-              echo; echo '<details open><summary>錯誤輸出（最後 150 行）</summary>'; echo; echo '```'
-              tail -n 150 check.log 2>/dev/null | cut -c1-400
-              echo '```'; echo '</details>'
-            fi
-            echo; echo "<sub>[Actions 紀錄](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})</sub>"
-          } > comment.md
-          gh pr comment "$PR" --body-file comment.md
+          d="EOF_$(openssl rand -hex 16)"
+          echo "tests=$(grep -E '^\s*Tests\s' check.log 2>/dev/null | tail -1 | sed 's/^\s*//' | cut -c1-200)" >> "$GITHUB_OUTPUT"
+          { echo "log<<$d"; tail -n 150 check.log 2>/dev/null | cut -c1-400; echo "$d"; } >> "$GITHUB_OUTPUT"
 
       - name: 結果
         if: steps.check.outcome != 'success'
         run: exit 1
+
+  report:
+    needs: verify
+    if: always() && (needs.verify.result == 'success' || needs.verify.result == 'failure')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PR: ${{ github.event.pull_request.number }}
+      SHA: ${{ github.event.pull_request.head.sha }}
+      OUTCOME: ${{ needs.verify.outputs.outcome }}
+      TESTS: ${{ needs.verify.outputs.tests }}
+      LOG: ${{ needs.verify.outputs.log }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: 留言回報
+        run: |
+          {
+            echo "<!-- ai-pr:sha=$SHA -->"
+            if [ "$OUTCOME" = "success" ]; then
+              echo "## ✅ 離線驗證通過（\`${SHA:0:7}\`）"
+              [ -n "$TESTS" ] && echo "- 測試：$TESTS"
+            else
+              echo "## ❌ 離線驗證失敗（\`${SHA:0:7}\`）"
+              echo; echo '<details open><summary>錯誤輸出（最後 150 行）</summary>'; echo; echo '```'
+              printf '%s\n' "$LOG"
+              echo '```'; echo '</details>'
+            fi
+            echo; echo "<sub>[Actions 紀錄]($RUN_URL)</sub>"
+          } > comment.md
+          gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body-file comment.md
