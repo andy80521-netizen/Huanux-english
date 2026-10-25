@@ -145,7 +145,7 @@ def main():
     a = p.parse_args()
 
     if a.mode == "plan":
-        brief = read(a.brief, 60_000)
+        brief = read(a.brief, 500_000)
         answers = ask_all(lambda m: PLAN.format(brief=brief))
         md = render("ai-council:plan", "🧭 AI 委員會：第一輪獨立評估", answers)
     elif a.mode == "cross":
@@ -153,7 +153,7 @@ def main():
         answers = ask_all(lambda m: CROSS.format(brief=brief, round1=round1, me=m))
         md = render("ai-council:cross", "🔁 AI 委員會：第二輪交叉討論", answers)
     else:
-        goal, diff = read(a.goal, 40_000), read(a.diff, 150_000)
+        goal, diff = read(a.goal, 40_000), read(a.diff, 400_000)
         if not diff.strip():
             md = "（沒有程式差異）"
         else:

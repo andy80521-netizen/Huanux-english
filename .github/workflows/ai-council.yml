@@ -46,7 +46,7 @@ jobs:
             echo; echo "### 檔案列表"; git ls-files | grep -v -E '^(package-lock.json|public/)'
             echo; echo "### 原始碼"
             git ls-files 'src/*.ts' 'src/*.tsx' 'netlify/*.ts' \
-              | while read -r f; do echo; echo "#### $f"; echo '```'; head -c 15000 "$f"; echo; echo '```'; done
+              | while read -r f; do echo; echo "#### $f"; echo '```'; head -c 80000 "$f"; echo; echo '```'; done
           } > context.md
           # 程式碼太多時以 ai_council.py 的上限截斷；需求永遠放最前面
           cat brief.md context.md > full_brief.md
