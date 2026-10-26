@@ -110,4 +110,4 @@ v3.11 改成「單字比對」後，補審查（PR #4，Codex／DeepSeek）發�
 - 實作：`src/utils/scoring.ts`（tokenizeForCompare、集合比對、免費規則、原字分組顯示、canAccumulatePattern）、`src/utils/maintenanceLogic.ts`（computeMaintenanceOutcome，由 maintenance.ts 交易呼叫）、畫面文字改用常數
 - `check.sh` 通過（66 個測試）；驗收測試自 `6c5b290` 後未修改
 - 已知限制（不處理）：`5-6` 這類範圍寫法、`1990s` 這類數字加字尾保留原樣比對
-- 下一步：Codex／Gemini 審查
+- 審查第 1 輪（ac2ad4a）：Gemini（主要模型 503 → 自動改用 Flash Lite）沒有發現問題；Codex 1 🔴＋2 🟠 皆為真問題並已重現：英數混合字（B12、1st）的數字被丟掉而放水、`constructor` 等字撞到物件內建屬性而當掉、複合縮寫（I'd've）未展開。已修正並新增 `tests/scoringRegression.test.ts`（4 個測試，驗收測試檔未修改）

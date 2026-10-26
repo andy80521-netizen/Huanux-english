@@ -118,9 +118,28 @@ const NUMBER_WORDS = new Set([...ONES, ...TENS.filter(Boolean), 'hundred', 'thou
 const S_CONTRACTION_STEMS = new Set(['he', 'she', 'it', 'that', 'there', 'here', 'what', 'who', 'where', 'when', 'why', 'how',
     'this', 'everyone', 'everybody', 'everything', 'someone', 'somebody', 'something', 'nobody', 'nothing', 'no one']);
 const DID_STEMS = new Set(['how', 'where', 'what', 'why', 'who', 'when']);
-const SPECIAL_CONTRACTIONS: Record<string, string[][]> = {
-    "won't": [['will'], ['not']], "can't": [['can'], ['not']], 'cannot': [['can'], ['not']],
-    "shan't": [['shall'], ['not']], "let's": [['let'], ['us']],
+// 用 Map 查詢，避免 constructor、toString 等一般單字撞到物件內建屬性
+const SPECIAL_CONTRACTIONS = new Map<string, string[][]>([
+    ["won't", [['will'], ['not']]], ["can't", [['can'], ['not']]], ['cannot', [['can'], ['not']]],
+    ["shan't", [['shall'], ['not']]], ["let's", [['let'], ['us']]],
+]);
+const SUFFIX_ALTS = new Map<string, string[]>([
+    ["n't", ['not']], ["'m", ['am']], ["'re", ['are']], ["'ll", ['will']], ["'ve", ['have']],
+]);
+
+// 把一個字展開成「可接受寫法」的序列；複合縮寫（I'd've、wouldn't've）會對詞幹繼續展開
+const expandWord = (w: string): string[][] => {
+    const special = SPECIAL_CONTRACTIONS.get(w);
+    if (special) return special;
+    const m = w.match(/^(.+?)(n't|'m|'re|'ll|'ve|'d|'s)$/);
+    if (!m) return [[w.replace(/'/g, '')]];
+    const [, stem, suf] = m;
+    if (suf === "'s") {
+        if (!S_CONTRACTION_STEMS.has(stem)) return [[stem.replace(/'/g, '') + 's']];   // 所有格：照念（john's ＝ johns）
+        return [...expandWord(stem), ['is', 'has']];
+    }
+    if (suf === "'d") return [...expandWord(stem), DID_STEMS.has(stem) ? ['would', 'had', 'did'] : ['would', 'had']];
+    return [...expandWord(stem), SUFFIX_ALTS.get(suf) as string[]];
 };
 const MAX_INT = 999_999_999;
 // 完整數值：可帶負號（前面不能緊接字母數字）、千分位或無逗號整數、小數；後面不能緊接數字或字母
@@ -165,34 +184,19 @@ const numberTokens = (neg: string | undefined, intPart: string, frac: string | u
 const wordTokens = (segment: string, src: number, side: 'target' | 'user'): Token[] => {
     const tokens: Token[] = [];
     const cleaned = segment.replace(/&/g, ' and ').replace(/%/g, ' percent ');
-    for (const raw of cleaned.split(/[^a-z']+/)) {
+    for (const raw of cleaned.split(/[^a-z0-9']+/)) {
         const w = raw.replace(/^'+|'+$/g, '');
         if (!w) continue;
-        const one = (...alts: string[]) => tokens.push({ alts, src });
-        if (SPECIAL_CONTRACTIONS[w]) {
-            SPECIAL_CONTRACTIONS[w].forEach(a => one(...a));
+        if (/\d/.test(w)) {
+            tokens.push({ alts: [w.replace(/'/g, '')], src });   // 英數混合字（B12、1st、1990s）保留原樣比對
             continue;
         }
-        const m = w.match(/^(.+?)(n't|'m|'re|'ll|'ve|'d|'s)$/);
-        if (m) {
-            const [, stem, suf] = m;
-            if (suf === "'s" && !S_CONTRACTION_STEMS.has(stem)) {
-                one(stem + 's');                         // 所有格：照念（john's ＝ johns）
-                continue;
-            }
-            one(stem.replace(/'/g, ''));
-            if (suf === "n't") one('not');
-            else if (suf === "'m") one('am');
-            else if (suf === "'re") one('are');
-            else if (suf === "'ll") one('will');
-            else if (suf === "'ve") one('have');
-            else if (suf === "'d") one(...(DID_STEMS.has(stem) ? ['would', 'had', 'did'] : ['would', 'had']));
-            else one('is', 'has');
+        const parts = expandWord(w);
+        if (parts.length === 1 && side === 'user' && FILLER_WORDS.has(parts[0][0])) {
+            tokens.push({ alts: parts[0], src, kind: 'filler' });
             continue;
         }
-        const plain = w.replace(/'/g, '');
-        if (side === 'user' && FILLER_WORDS.has(plain)) tokens.push({ alts: [plain], src, kind: 'filler' });
-        else one(plain);
+        parts.forEach(alts => tokens.push({ alts, src }));
     }
     return tokens;
 };
