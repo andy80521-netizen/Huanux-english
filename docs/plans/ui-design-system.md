@@ -39,6 +39,12 @@
 - 新增 `src/styles/app.css`：`@import "tailwindcss"`，在 `src/index.tsx` 匯入
 - 保留現有行為：`darkMode: 'class'` → `@custom-variant dark (&:where(.dark, .dark *))`；保留自訂的 `slate-850`
 - 理由：CDN 版官方不建議用於正式環境（每次開啟都在瀏覽器即時產生樣式、深色模式會閃一下）
+- **v3 → v4 相容（2026-10-27 本機試裝 tailwindcss 4.3.3 已可 build）**：CDN 版是 v3，v4 有幾個預設值改變，會讓既有畫面走樣，處理方式：
+  - `border` 未指定顏色：v3 是淺灰、v4 是文字色（約 140 處）→ 在 `@layer base` 加相容規則恢復 v3 預設
+  - `ring` 預設寬度 3px → 1px（37 處）→ 以 `--default-ring-width: 3px` 恢復
+  - `<button>` 游標 v4 改為預設箭頭 → base 規則恢復 `cursor: pointer`
+  - 尺寸改名（`shadow-sm`→`shadow-xs`、`shadow`→`shadow-sm`、`blur-sm`→`blur-xs`、`outline-none`→`outline-hidden`，約 100 處）→ 用官方 `@tailwindcss/upgrade` 工具做機械式改名，單獨一個 commit，方便審查
+  - `animate-in`、`slide-in-from-top-2`、`zoom-in-95` 在現行 CDN 版本來就沒有作用（未載入外掛），升級不影響
 
 ### 2. 設計 token（`src/styles/app.css`）
 語意色以 CSS 變數定義在 `:root`（淺色）與 `.dark`（深色），再透過 `@theme` 提供給 Tailwind（`bg-ground`、`bg-surface`、`text-ink`、`text-muted`、`bg-accent` 等）：
@@ -138,4 +144,4 @@
 - 2026-10-27 擁有者：Tailwind 改正式安裝；主題改三選一（跟隨系統／淺色／深色）；桌機跟讀頁右側顯示本集句子列表（屬於 PR ②，點句子可跳到該句）
 
 ## 進度紀錄
-- 2026-10-27：建立分支與規劃文件，準備開草稿 PR 並召集委員會
+- 2026-10-27：建立分支與規劃文件，開草稿 PR #7，召集委員會＋Codex（22:10Z）；本機試裝 Tailwind v4 可 build，補上 v3→v4 相容做法
