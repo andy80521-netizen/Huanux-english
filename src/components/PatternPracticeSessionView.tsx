@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { LanguagePattern, PatternExampleSentence } from '../types';
 import { getSupportedMimeType } from '../utils/mediaRecorder';
 import { transcribeRecording } from '../services/gemini';
-import { calculateFinalScores, PracticeScores } from '../utils/scoring';
+import { calculateFinalScores, canAccumulatePattern, PracticeScores } from '../utils/scoring';
 import WordDiffView from './WordDiffView';
 import { generateAndSavePracticePrompts } from '../services/practicePrompts';
 import { requestPracticeImages } from '../services/practiceImage';
@@ -387,7 +387,7 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
             const scores = calculateFinalScores(transcribedText, sentenceObj.text, durationSec);
             setScoreResult(scores);
             // 【v3.11】精準背出原句：一字不差才累加熟練度
-            const isExact = scores.errors === 0;
+            const isExact = canAccumulatePattern(scores);
             onScored?.(sentenceObj.id, scores.total, isExact);
 
             if (isExact) {

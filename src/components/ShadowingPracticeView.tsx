@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Material } from '../types';
 import { ChevronLeft, Mic, AlertCircle, RotateCcw, Send, Loader2, Headphones, Check } from 'lucide-react';
 import { transcribeRecording } from '../services/gemini';
-import { calculateShadowingScores, isShadowingPass, PracticeScores, SHADOWING_PASS_CONTENT } from '../utils/scoring';
+import { calculateShadowingScores, isShadowingPass, PracticeScores, SHADOWING_PASS_CONTENT, SHADOWING_PASS_TOTAL } from '../utils/scoring';
 import WordDiffView from './WordDiffView';
 import { getSupportedMimeType } from '../utils/mediaRecorder';
 import { auth, db, appId } from '../firebase';
@@ -491,8 +491,8 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                                 {!isShadowingPass(scoreResult) && (
                                     <p className="mt-4 text-center text-sm font-bold text-amber-600 dark:text-amber-400">
                                         {scoreResult.content < SHADOWING_PASS_CONTENT
-                                            ? `內容未達 70 分（錯 ${scoreResult.errors} 個字），熟練度未增加`
-                                            : '總分未達 70 分，熟練度未增加'}
+                                            ? `內容未達 ${SHADOWING_PASS_CONTENT} 分（錯 ${scoreResult.errors} 個字），熟練度未增加`
+                                            : `總分未達 ${SHADOWING_PASS_TOTAL} 分，熟練度未增加`}
                                     </p>
                                 )}
                             </div>

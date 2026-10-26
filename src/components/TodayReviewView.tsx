@@ -6,7 +6,7 @@ import { isSydneyDateReached, getSydneyDateString } from '../utils/sydneyTime';
 import PatternPracticeSessionView from './PatternPracticeSessionView';
 import { Sparkles, CalendarCheck, Target, CheckCircle2, ShieldCheck, Loader2, AlertCircle } from 'lucide-react';
 import { prefetchSpeech } from '../services/speech';
-import { needsMaintenanceInit, initMaintenance, isMaintenanceDue, pickMaintenanceSentences, applyMaintenanceResult, MaintenanceOutcome, MAINTENANCE_SIZE } from '../services/maintenance';
+import { needsMaintenanceInit, initMaintenance, isMaintenanceDue, pickMaintenanceSentences, applyMaintenanceResult, MaintenanceOutcome, MAINTENANCE_SIZE, MAINTENANCE_PASS_COUNT } from '../services/maintenance';
 
 interface ReviewItem {
     pattern: LanguagePattern;
@@ -489,7 +489,7 @@ export default function TodayReviewView() {
                                     {(item.pattern.maintenance?.level || 0) > 0
                                         ? `已連續通過 ${item.pattern.maintenance?.level} 次`
                                         : item.pattern.maintenance?.lastReviewedAt ? '上次沒有通過' : '第一次維持複習'}
-                                    ・{MAINTENANCE_SIZE} 句中 2 句全對即通過
+                                    ・{MAINTENANCE_SIZE} 句中 {MAINTENANCE_PASS_COUNT} 句全對即通過
                                 </div>
                             </div>
                         ))}
