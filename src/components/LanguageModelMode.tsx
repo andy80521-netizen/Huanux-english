@@ -40,7 +40,7 @@ export default function LanguageModelMode() {
                         onClick={() => setActiveTab('review')}
                         className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${
                             activeTab === 'review'
-                                ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                                ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-xs'
                                 : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
                         }`}
                     >
@@ -50,7 +50,7 @@ export default function LanguageModelMode() {
                         onClick={() => setActiveTab('library')}
                         className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${
                             activeTab === 'library'
-                                ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                                ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-xs'
                                 : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
                         }`}
                     >

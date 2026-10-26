@@ -388,7 +388,7 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
             <div className="flex items-center gap-4 mb-8">
                 <button 
                     onClick={onBack}
-                    className="p-2 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 rounded-full shadow-sm hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                    className="p-2 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 rounded-full shadow-xs hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
                 >
                     <ChevronLeft size={24} />
                 </button>
@@ -409,13 +409,13 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
             />
 
             {error && (
-                <div className="mb-6 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm px-4 py-4 rounded-xl flex items-center gap-3 shadow-sm border border-red-100 dark:border-red-800">
+                <div className="mb-6 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm px-4 py-4 rounded-xl flex items-center gap-3 shadow-xs border border-red-100 dark:border-red-800">
                     <AlertCircle size={20} className="shrink-0" />
                     <span className="font-bold leading-relaxed">{error}</span>
                 </div>
             )}
 
-            <div className="bg-white dark:bg-slate-900 rounded-3xl p-8 shadow-sm border border-slate-200 dark:border-slate-800 text-center space-y-6 max-w-2xl mx-auto w-full">
+            <div className="bg-white dark:bg-slate-900 rounded-3xl p-8 shadow-xs border border-slate-200 dark:border-slate-800 text-center space-y-6 max-w-2xl mx-auto w-full">
                 
                 <div className="space-y-4 mb-6">
                     <p className="text-2xl md:text-3xl font-black text-slate-800 dark:text-white leading-relaxed">
@@ -509,7 +509,7 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                             <div className="flex justify-center pt-2">
                                 <button
                                     onClick={handleReplayRecording}
-                                    className="px-5 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold rounded-xl shadow-sm transition-all flex items-center gap-2 text-sm cursor-pointer"
+                                    className="px-5 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold rounded-xl shadow-xs transition-all flex items-center gap-2 text-sm cursor-pointer"
                                 >
                                     <RotateCcw size={16} />
                                     重播我的錄音

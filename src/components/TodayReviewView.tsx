@@ -477,7 +477,7 @@ export default function TodayReviewView() {
                             <div
                                 key={item.pattern.id}
                                 onClick={() => startMaintenance(item)}
-                                className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-emerald-200 dark:border-emerald-900/60 shadow-sm cursor-pointer hover:border-emerald-400 dark:hover:border-emerald-700 transition-colors"
+                                className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-emerald-200 dark:border-emerald-900/60 shadow-xs cursor-pointer hover:border-emerald-400 dark:hover:border-emerald-700 transition-colors"
                             >
                                 <div className="text-xs font-bold text-emerald-600 dark:text-emerald-400 mb-2 truncate">
                                     句型：{item.pattern.text}
@@ -498,7 +498,7 @@ export default function TodayReviewView() {
             )}
 
             {reviewGroups.length === 0 && maintenanceItems.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-20 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 text-center shadow-sm">
+                <div className="flex flex-col items-center justify-center py-20 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 text-center shadow-xs">
                     <Sparkles size={48} className="text-amber-400 mb-4" />
                     <h3 className="text-lg font-black text-slate-700 dark:text-slate-200 mb-2">今天沒有可以複習的句子</h3>
                     <p className="text-sm font-bold text-slate-500">
@@ -512,7 +512,7 @@ export default function TodayReviewView() {
                             <div 
                                 key={group.key}
                                 onClick={() => startSession(group)}
-                                className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200 dark:border-slate-800 shadow-sm cursor-pointer hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors group"
+                                className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200 dark:border-slate-800 shadow-xs cursor-pointer hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors group"
                             >
                                 <div className="text-xs font-bold text-indigo-500 dark:text-indigo-400 mb-2 truncate">
                                     來自句型：{group.pattern.text}

@@ -34,7 +34,7 @@ export default function PatternQuickCard({ patternId, onClose }: { patternId: st
   const stage = pattern ? getPatternStage(pattern) : null;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-xs p-4" onClick={onClose}>
       <div
         className="bg-white dark:bg-slate-900 rounded-3xl p-6 w-full max-w-sm shadow-2xl border border-slate-100 dark:border-slate-800"
         onClick={e => e.stopPropagation()}

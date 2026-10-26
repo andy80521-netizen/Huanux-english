@@ -73,7 +73,7 @@ export default function RetellSection({ material, bySentence, onStart }: Props) 
   const valid = segmentsDoc ? isSegmentsValid(material, segmentsDoc) : false;
 
   return (
-    <div className="mb-6 p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-3">
+    <div className="mb-6 p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs space-y-3">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
           <p className="text-sm font-bold text-slate-700 dark:text-slate-200 flex items-center gap-1.5">

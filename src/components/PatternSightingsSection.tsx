@@ -90,7 +90,7 @@ export default function PatternSightingsSection({ patternId }: { patternId: stri
       ) : (
         <div className="space-y-3">
           {sightings.map(s => (
-            <div key={s.id} className="bg-white dark:bg-slate-900 rounded-xl p-4 shadow-sm border border-slate-200 dark:border-slate-800 flex items-start gap-3">
+            <div key={s.id} className="bg-white dark:bg-slate-900 rounded-xl p-4 shadow-xs border border-slate-200 dark:border-slate-800 flex items-start gap-3">
               <button
                 onClick={() => handlePlay(s)}
                 disabled={!s.audioUrl}

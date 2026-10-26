@@ -17,7 +17,7 @@ const ConfirmDialog: React.FC<{
 }> = ({ isOpen, title, message, onConfirm, onCancel, confirmText = "確定", cancelText = "取消" }) => {
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-xs p-4 animate-in fade-in duration-200">
       <div className="bg-white dark:bg-slate-900 rounded-[2rem] p-8 w-full max-w-xs shadow-2xl animate-in zoom-in-95 duration-200 text-center border border-slate-100 dark:border-slate-800">
         <div className="w-16 h-16 bg-red-50 dark:bg-red-900/20 rounded-full flex items-center justify-center mx-auto mb-6">
           <AlertTriangle className="text-red-500 dark:text-red-400" size={32} />
@@ -211,12 +211,12 @@ const LibraryMode: React.FC<Props> = ({ vocabData, courses, onSaveItem, onDelete
 
         {/* MODAL: Edit Course */}
         {isEditingCourse && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm p-4"><div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl p-6 w-full max-w-sm border border-slate-100 dark:border-slate-800"><h3 className="text-xl font-bold text-slate-800 dark:text-white mb-4">{editingCourseName ? '重新命名課程' : '新增課程'}</h3><input value={courseNameInput} onChange={(e) => setCourseNameInput(e.target.value)} className="w-full p-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl mb-6 outline-none focus:ring-2 focus:ring-indigo-500 text-slate-900 dark:text-white" placeholder="輸入課程名稱..." autoFocus /><div className="flex gap-3"><button onClick={() => setIsEditingCourse(false)} className="flex-1 py-3 text-slate-500 dark:text-slate-400 font-bold bg-slate-100 dark:bg-slate-800 rounded-xl">取消</button><button onClick={saveCourse} className="flex-1 py-3 text-white font-bold bg-indigo-600 rounded-xl">確認</button></div></div></div>
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-xs p-4"><div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl p-6 w-full max-w-sm border border-slate-100 dark:border-slate-800"><h3 className="text-xl font-bold text-slate-800 dark:text-white mb-4">{editingCourseName ? '重新命名課程' : '新增課程'}</h3><input value={courseNameInput} onChange={(e) => setCourseNameInput(e.target.value)} className="w-full p-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl mb-6 outline-hidden focus:ring-2 focus:ring-indigo-500 text-slate-900 dark:text-white" placeholder="輸入課程名稱..." autoFocus /><div className="flex gap-3"><button onClick={() => setIsEditingCourse(false)} className="flex-1 py-3 text-slate-500 dark:text-slate-400 font-bold bg-slate-100 dark:bg-slate-800 rounded-xl">取消</button><button onClick={saveCourse} className="flex-1 py-3 text-white font-bold bg-indigo-600 rounded-xl">確認</button></div></div></div>
         )}
 
         {/* MODAL: Bulk Add Questions */}
         {isBulkAdding && (
-            <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+            <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-xs p-4 animate-in fade-in duration-200">
                 <div className="bg-white dark:bg-slate-900 rounded-2xl w-full max-w-lg shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200 border border-slate-100 dark:border-slate-800 max-h-[90vh]">
                     <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center">
                         <h3 className="text-xl font-black text-slate-800 dark:text-white flex items-center gap-2">
@@ -244,7 +244,7 @@ const LibraryMode: React.FC<Props> = ({ vocabData, courses, onSaveItem, onDelete
                                 <input 
                                     value={importUrl}
                                     onChange={(e) => setImportUrl(e.target.value)}
-                                    className="w-full pl-10 pr-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500 text-slate-900 dark:text-white"
+                                    className="w-full pl-10 pr-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm outline-hidden focus:ring-2 focus:ring-indigo-500 text-slate-900 dark:text-white"
                                     placeholder="貼上 URL (例如 GitHub Raw JSON/Text)"
                                 />
                              </div>
@@ -263,7 +263,7 @@ const LibraryMode: React.FC<Props> = ({ vocabData, courses, onSaveItem, onDelete
                              value={bulkText} 
                              onChange={(e) => setBulkText(e.target.value)} 
                              placeholder={`Question 1   Answer 1\nQuestion 2   Answer 2\n題目 A - 答案 A`} 
-                             className="w-full h-48 p-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500 resize-none text-slate-900 dark:text-white font-mono leading-relaxed" 
+                             className="w-full h-48 p-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm outline-hidden focus:ring-2 focus:ring-indigo-500 resize-none text-slate-900 dark:text-white font-mono leading-relaxed" 
                            />
                         </div>
                     </div>
@@ -289,7 +289,7 @@ const LibraryMode: React.FC<Props> = ({ vocabData, courses, onSaveItem, onDelete
 
         {/* Main Content */}
         <div className="flex-1 overflow-hidden flex flex-col">
-            <div className="p-4 bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center shadow-sm z-10 min-h-[72px]">
+            <div className="p-4 bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center shadow-xs z-10 min-h-[72px]">
                 <div className="flex items-center gap-3">
                     {currentLevel === 'questions' && (
                         <button onClick={() => { setCurrentLevel('courses'); setActiveCourse(null); }} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors">
@@ -320,7 +320,7 @@ const LibraryMode: React.FC<Props> = ({ vocabData, courses, onSaveItem, onDelete
                         {courses.map(course => {
                             const count = vocabData.filter(v => v.course === course).length;
                             return (
-                                <div key={course} onClick={() => { setActiveCourse(course); setCurrentLevel('questions'); }} className="bg-white dark:bg-slate-900 p-5 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-800 flex items-center justify-between group hover:border-indigo-200 dark:hover:border-indigo-800 transition-all cursor-pointer">
+                                <div key={course} onClick={() => { setActiveCourse(course); setCurrentLevel('questions'); }} className="bg-white dark:bg-slate-900 p-5 rounded-2xl shadow-xs border border-slate-100 dark:border-slate-800 flex items-center justify-between group hover:border-indigo-200 dark:hover:border-indigo-800 transition-all cursor-pointer">
                                     <div className="flex items-center gap-4">
                                         <div className="p-3 bg-indigo-50 dark:bg-indigo-900/30 rounded-xl text-indigo-600 dark:text-indigo-400 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
                                             <Folder size={24} />
@@ -348,7 +348,7 @@ const LibraryMode: React.FC<Props> = ({ vocabData, courses, onSaveItem, onDelete
                 ) : (
                     <div className="pb-20 relative">
                         {/* Dynamic Header */}
-                        <div className="sticky top-0 bg-slate-50 dark:bg-slate-950 z-20 pt-2 pb-2 px-4 shadow-sm space-y-2">
+                        <div className="sticky top-0 bg-slate-50 dark:bg-slate-950 z-20 pt-2 pb-2 px-4 shadow-xs space-y-2">
                              <div className="flex gap-2 h-12">
                                 {/* Left: Select All Checkbox */}
                                 <button 
@@ -381,7 +381,7 @@ const LibraryMode: React.FC<Props> = ({ vocabData, courses, onSaveItem, onDelete
                                                 value={searchTerm} 
                                                 onChange={(e) => setSearchTerm(e.target.value)} 
                                                 placeholder="搜尋題目..." 
-                                                className="w-full h-12 pl-10 pr-4 bg-slate-100 dark:bg-slate-900 border-none rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500 text-slate-700 dark:text-slate-200 placeholder:font-bold placeholder:text-slate-400" 
+                                                className="w-full h-12 pl-10 pr-4 bg-slate-100 dark:bg-slate-900 border-none rounded-xl text-sm outline-hidden focus:ring-2 focus:ring-indigo-500 text-slate-700 dark:text-slate-200 placeholder:font-bold placeholder:text-slate-400" 
                                             />
                                         </div>
                                         <button onClick={() => setShowHidden(!showHidden)} className={`w-12 h-12 shrink-0 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-center transition-colors ${showHidden ? 'bg-indigo-600 text-white border-transparent' : 'bg-white dark:bg-slate-900 text-slate-400'}`}>
@@ -409,10 +409,10 @@ const LibraryMode: React.FC<Props> = ({ vocabData, courses, onSaveItem, onDelete
                                 const isSelected = selectedIds.includes(item.id);
 
                                 return (
-                                <div key={item.id} className={`bg-white dark:bg-slate-900 p-4 rounded-2xl border ${isSelected ? 'border-indigo-500 ring-1 ring-indigo-500' : 'border-slate-100 dark:border-slate-800'} shadow-sm relative group transition-all`}>
+                                <div key={item.id} className={`bg-white dark:bg-slate-900 p-4 rounded-2xl border ${isSelected ? 'border-indigo-500 ring-1 ring-indigo-500' : 'border-slate-100 dark:border-slate-800'} shadow-xs relative group transition-all`}>
                                     <div className="flex justify-between items-start mb-3 gap-3">
                                          <div className="flex gap-3 flex-1 min-w-0">
-                                             <div onClick={() => toggleSelect(item.id)} className={`w-6 h-6 mt-1 rounded-lg border-2 flex items-center justify-center cursor-pointer transition-all flex-shrink-0 ${isSelected ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-slate-200 dark:border-slate-700 hover:border-indigo-400'}`}>
+                                             <div onClick={() => toggleSelect(item.id)} className={`w-6 h-6 mt-1 rounded-lg border-2 flex items-center justify-center cursor-pointer transition-all shrink-0 ${isSelected ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-slate-200 dark:border-slate-700 hover:border-indigo-400'}`}>
                                                 {isSelected && <Check size={14} strokeWidth={3} />}
                                             </div>
                                             <div className="flex-1 min-w-0">
@@ -496,17 +496,17 @@ const LibraryMode: React.FC<Props> = ({ vocabData, courses, onSaveItem, onDelete
 
         {/* MODAL: Edit Question */}
         {isEditingQuestion && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm p-4">
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-xs p-4">
                 <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl p-6 w-full max-w-sm border border-slate-100 dark:border-slate-800">
                     <h3 className="text-xl font-bold text-slate-800 dark:text-white mb-4">{editingQuestionId ? '編輯題目' : '新增題目'}</h3>
                     <div className="space-y-3 mb-6">
                         <div>
                             <label className="text-xs font-bold text-slate-500 dark:text-slate-400 mb-1 block">題目 (正面)</label>
-                            <input value={questionFormData.question} onChange={(e) => setQuestionFormData({...questionFormData, question: e.target.value})} className="w-full p-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-slate-900 dark:text-white" placeholder="輸入單字或句子..." autoFocus />
+                            <input value={questionFormData.question} onChange={(e) => setQuestionFormData({...questionFormData, question: e.target.value})} className="w-full p-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-hidden focus:ring-2 focus:ring-indigo-500 text-slate-900 dark:text-white" placeholder="輸入單字或句子..." autoFocus />
                         </div>
                         <div>
                             <label className="text-xs font-bold text-slate-500 dark:text-slate-400 mb-1 block">答案 (背面)</label>
-                            <textarea value={questionFormData.answer} onChange={(e) => setQuestionFormData({...questionFormData, answer: e.target.value})} className="w-full p-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-slate-900 dark:text-white resize-none" rows={3} placeholder="輸入翻譯或解釋..." />
+                            <textarea value={questionFormData.answer} onChange={(e) => setQuestionFormData({...questionFormData, answer: e.target.value})} className="w-full p-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-hidden focus:ring-2 focus:ring-indigo-500 text-slate-900 dark:text-white resize-none" rows={3} placeholder="輸入翻譯或解釋..." />
                         </div>
                          <div>
                             <div className="flex justify-between items-center mb-1">
@@ -515,7 +515,7 @@ const LibraryMode: React.FC<Props> = ({ vocabData, courses, onSaveItem, onDelete
                                     {isGeneratingPhonetic ? '生成中...' : '自動生成'}
                                 </button>
                             </div>
-                            <input value={questionFormData.phonetic} onChange={(e) => setQuestionFormData({...questionFormData, phonetic: e.target.value})} className="w-full p-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-slate-900 dark:text-white font-mono text-sm" placeholder="/.../" />
+                            <input value={questionFormData.phonetic} onChange={(e) => setQuestionFormData({...questionFormData, phonetic: e.target.value})} className="w-full p-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-hidden focus:ring-2 focus:ring-indigo-500 text-slate-900 dark:text-white font-mono text-sm" placeholder="/.../" />
                         </div>
                     </div>
                     <div className="flex gap-3">

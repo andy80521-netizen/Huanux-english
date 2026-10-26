@@ -42,7 +42,7 @@ export default function GroupDetailView({ pattern, groupIndex, onBack, onEnterGr
       <div className="flex items-center gap-4 mb-6">
         <button
           onClick={onBack}
-          className="p-2 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 rounded-full shadow-sm hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+          className="p-2 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 rounded-full shadow-xs hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
         >
           <ChevronLeft size={24} />
         </button>
@@ -60,7 +60,7 @@ export default function GroupDetailView({ pattern, groupIndex, onBack, onEnterGr
         <span>已造句 {createdCount}/10・已精熟 {masteredCount}/10</span>
         <button
           onClick={onEnterGroup}
-          className="px-4 py-2 bg-indigo-600 text-white rounded-xl font-bold shadow-sm hover:bg-indigo-700 transition-colors flex items-center gap-1.5 shrink-0"
+          className="px-4 py-2 bg-indigo-600 text-white rounded-xl font-bold shadow-xs hover:bg-indigo-700 transition-colors flex items-center gap-1.5 shrink-0"
         >
           <PenTool size={16} />
           進入這一組
@@ -75,7 +75,7 @@ export default function GroupDetailView({ pattern, groupIndex, onBack, onEnterGr
           const isExpanded = expandedId === id;
 
           return (
-            <div key={id} className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+            <div key={id} className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
               <button
                 type="button"
                 onClick={() => canExpand && setExpandedId(isExpanded ? null : id)}

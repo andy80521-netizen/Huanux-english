@@ -553,7 +553,7 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
             <div className="flex items-center gap-4 mb-8">
                 <button 
                     onClick={onBack}
-                    className="p-2 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 rounded-full shadow-sm hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                    className="p-2 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 rounded-full shadow-xs hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
                 >
                     <ChevronLeft size={24} />
                 </button>
@@ -570,7 +570,7 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
             </div>
 
             {!isPromptReady ? (
-                <div className="bg-white dark:bg-slate-900 rounded-2xl p-8 shadow-sm border border-slate-200 dark:border-slate-800 flex flex-col items-center text-center">
+                <div className="bg-white dark:bg-slate-900 rounded-2xl p-8 shadow-xs border border-slate-200 dark:border-slate-800 flex flex-col items-center text-center">
                     {promptStatus === 'error' ? (
                         <>
                             <p className="text-red-500 dark:text-red-400 font-bold mb-6">
@@ -635,7 +635,7 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
                                 type="button"
                                 onClick={handleReplayPrompt}
                                 disabled={!promptAudioUrl}
-                                className="mt-4 flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800/60 rounded-xl shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                className="mt-4 flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800/60 rounded-xl shadow-xs transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 {promptAudioLoading ? (
                                     <>
@@ -739,7 +739,7 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
                     )}
 
                     {sessionState === 'scored' && scoreResult && (
-                        <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-800 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                        <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-xs border border-slate-200 dark:border-slate-800 animate-in fade-in slide-in-from-bottom-4 duration-500">
                             <div className="flex items-center justify-center gap-4 mb-6">
                                 <div className="text-center">
                                     <div className="text-4xl font-black text-indigo-600 dark:text-indigo-400">

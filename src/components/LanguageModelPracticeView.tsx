@@ -136,7 +136,7 @@ export default function LanguageModelPracticeView({ pattern, groupIndex, onBack 
         if (practiceTargetIndex === -1) {
             return (
                 <div className="flex flex-col h-full bg-slate-50 dark:bg-slate-950 p-6 overflow-y-auto">
-                    <div className="bg-white dark:bg-slate-900 rounded-2xl p-8 shadow-sm border border-slate-200 dark:border-slate-800 flex flex-col items-center text-center mt-20">
+                    <div className="bg-white dark:bg-slate-900 rounded-2xl p-8 shadow-xs border border-slate-200 dark:border-slate-800 flex flex-col items-center text-center mt-20">
                         <div className="w-16 h-16 bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded-full flex items-center justify-center mb-4">
                             <CheckCircle2 size={32} />
                         </div>
@@ -342,7 +342,7 @@ export default function LanguageModelPracticeView({ pattern, groupIndex, onBack 
             <div className="flex items-center gap-4 mb-8">
                 <button 
                     onClick={onBack}
-                    className="p-2 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 rounded-full shadow-sm hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                    className="p-2 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 rounded-full shadow-xs hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
                     disabled={isChecking}
                 >
                     <ChevronLeft size={24} />
@@ -368,7 +368,7 @@ export default function LanguageModelPracticeView({ pattern, groupIndex, onBack 
             </div>
 
             {isFinished ? (
-                <div className="bg-white dark:bg-slate-900 rounded-2xl p-8 shadow-sm border border-slate-200 dark:border-slate-800 flex flex-col items-center text-center">
+                <div className="bg-white dark:bg-slate-900 rounded-2xl p-8 shadow-xs border border-slate-200 dark:border-slate-800 flex flex-col items-center text-center">
                     <div className="w-16 h-16 bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded-full flex items-center justify-center mb-4">
                         <CheckCircle2 size={32} />
                     </div>
@@ -393,7 +393,7 @@ export default function LanguageModelPracticeView({ pattern, groupIndex, onBack 
                 </div>
             ) : (
                 <>
-                <div ref={composeAreaRef} className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-800 flex flex-col gap-6">
+                <div ref={composeAreaRef} className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-xs border border-slate-200 dark:border-slate-800 flex flex-col gap-6">
                     <div className="flex flex-col gap-2">
                         <label className="text-sm font-bold text-slate-700 dark:text-slate-300">
                             請用目標句型造一個英文句子：
@@ -402,7 +402,7 @@ export default function LanguageModelPracticeView({ pattern, groupIndex, onBack 
                             value={inputText}
                             onChange={handleTextChange}
                             placeholder="Type your sentence here..."
-                            className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl p-4 text-slate-800 dark:text-slate-200 resize-none h-32 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
+                            className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl p-4 text-slate-800 dark:text-slate-200 resize-none h-32 focus:outline-hidden focus:ring-2 focus:ring-indigo-500 font-medium"
                             disabled={isChecking}
                         />
                     </div>
@@ -479,7 +479,7 @@ export default function LanguageModelPracticeView({ pattern, groupIndex, onBack 
                                 {checkResult.suggestedRevision && (
                                     <button
                                         onClick={handleUseSuggestion}
-                                        className="flex-1 h-12 bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-700 rounded-xl font-bold shadow-sm hover:bg-indigo-50 dark:hover:bg-slate-700 transition-colors flex items-center justify-center gap-2"
+                                        className="flex-1 h-12 bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-700 rounded-xl font-bold shadow-xs hover:bg-indigo-50 dark:hover:bg-slate-700 transition-colors flex items-center justify-center gap-2"
                                     >
                                         <Edit3 size={18} />
                                         使用建議優化說法
@@ -520,7 +520,7 @@ export default function LanguageModelPracticeView({ pattern, groupIndex, onBack 
                     )}
                 </div>
 
-                    <div className="mt-6 bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-800 flex flex-col gap-4">
+                    <div className="mt-6 bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-xs border border-slate-200 dark:border-slate-800 flex flex-col gap-4">
                         <div className="flex items-center justify-between gap-2 flex-wrap">
                             <div className="flex items-baseline gap-2">
                                 <h3 className="text-base font-black text-slate-800 dark:text-white">
@@ -533,7 +533,7 @@ export default function LanguageModelPracticeView({ pattern, groupIndex, onBack 
                             <button
                                 onClick={handleRegenerateSeedsClick}
                                 disabled={regeneratingSeeds || addingSeed || isChecking}
-                                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-slate-800 border border-indigo-200 dark:border-indigo-800/60 rounded-xl transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-slate-800 border border-indigo-200 dark:border-indigo-800/60 rounded-xl transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 {regeneratingSeeds ? (
                                     <>
