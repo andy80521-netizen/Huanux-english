@@ -1,0 +1,73 @@
+# Gemini 程式審查（取代 Google 已停止的 Gemini Code Assist GitHub App）
+#   擁有者（或 Claude 代發）在 PR 留言「/gemini review」→ 審查整個 PR
+#   「/gemini review <舊SHA>..<新SHA>」→ 只審查這段範圍
+# 結果留言第一行：<!-- ai-gemini-review:sha=<head SHA> -->
+#
+# 安全：issue_comment 一律執行 main 上的工作流程與 ai_review.py；
+# PR 的修改只透過 GitHub API 當成資料讀取，不會被執行。只接受擁有者的留言、同一個 repo 的 PR。
+name: Gemini 程式審查
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: ai-review-${{ github.event.issue.number }}
+
+jobs:
+  review:
+    if: >-
+      github.event.issue.pull_request &&
+      startsWith(github.event.comment.body, '/gemini review') &&
+      github.event.comment.user.login == github.repository_owner
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PR: ${{ github.event.issue.number }}
+    steps:
+      - name: 取出 main 上的可信任版本
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: 確認是同一個 repo 的 PR
+        id: check
+        run: |
+          repo=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq '.head.repo.full_name')
+          if [ "$repo" = "$GITHUB_REPOSITORY" ]; then echo "ok=1" >> "$GITHUB_OUTPUT"; else echo "外部 fork 的 PR，不審查"; fi
+
+      - uses: actions/setup-python@v5
+        if: steps.check.outputs.ok == '1'
+        with:
+          python-version: "3.12"
+
+      - if: steps.check.outputs.ok == '1'
+        run: pip install requests
+
+      - name: 審查
+        if: steps.check.outputs.ok == '1'
+        env:
+          COUNCIL_GEMINI_API_KEY: ${{ secrets.COUNCIL_GEMINI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          AI_REVIEW_MODELS: ${{ vars.AI_REVIEW_MODELS }}
+          AI_REVIEW_MAX_CHARS: ${{ vars.AI_REVIEW_MAX_CHARS }}
+          COMMENT: ${{ github.event.comment.body }}
+        run: python .github/scripts/ai_review.py --pr "$PR" --comment "$COMMENT" --out ../review.md
+
+      - name: 發表結果
+        if: always() && steps.check.outputs.ok == '1'
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ ! -s ../review.md ]; then
+            sha=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq '.head.sha')
+            printf '%s\n' "<!-- ai-gemini-review:sha=$sha -->" "⚠️ Gemini 程式審查執行失敗（這不是審查結果），請查看 [Actions 紀錄]($RUN_URL)" > ../review.md
+          fi
+          gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body-file ../review.md

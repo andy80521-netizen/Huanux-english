@@ -1,7 +1,7 @@
 # PR 關卡：離線驗證 → 結果留言在 PR（附 commit SHA，讓 Claude 對應是哪一版）
 # Claude 的工作環境讀不到 Actions 紀錄，所以結果一律以 PR 留言回報。
 # 防作弊檢查在 ai-guard.yml（一律執行 main 上的可信任版本）。
-# 程式審查由 Codex 與 Gemini Code Assist 負責（由 Claude 在 PR 留言觸發），不在這裡執行。
+# 程式審查由 Codex 與 Gemini（ai-review.yml）負責（由 Claude 在 PR 留言觸發），不在這裡執行。
 #
 # 安全：verify 會執行 PR 的程式（測試、build），所以分成兩個 job、跑在兩台不同的機器上：
 #   - verify：完全沒有 GitHub token、不保留 git 憑證、npm ci 不執行套件腳本

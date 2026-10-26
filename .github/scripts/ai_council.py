@@ -23,14 +23,32 @@ import concurrent.futures as cf
 import os
 import re
 import sys
+import time
 
 import requests
 
 COMMENT_LIMIT = 60_000  # GitHub 留言上限約 65,536 字元，保留餘裕
+RETRY_WAITS = (20, 60)  # 暫時性錯誤（過載、限流、網路）時，等這些秒數後重試；共最多 3 次
+RETRY_STATUS = {408, 429, 500, 502, 503, 504}
+REQUEST_TIMEOUT = 600   # 單次請求最多 10 分鐘
+# 整體時間預算：工作流程 job 上限 30 分鐘，保留時間給備援模型與發表結果
+BUDGET_SEC = int(os.environ.get("AI_CALL_BUDGET_SEC") or 22 * 60)
+START = time.time()
+
+
+class Retryable(RuntimeError):
+    """暫時性錯誤：值得重試（例如 HTTP 503 過載、429 限流、連線逾時）"""
+
+
+def _check(r):
+    if r.status_code == 200:
+        return
+    err = Retryable if r.status_code in RETRY_STATUS else RuntimeError
+    raise err(f"HTTP {r.status_code}: {r.text[:300]}")
 
 
 # ---------------- 呼叫各家 API ----------------
-def call_openrouter(model, prompt):
+def call_openrouter(model, prompt, timeout=REQUEST_TIMEOUT):
     key = os.environ.get("OPENROUTER_API_KEY")
     if not key:
         raise RuntimeError("缺少 secret OPENROUTER_API_KEY")
@@ -38,14 +56,16 @@ def call_openrouter(model, prompt):
         "https://openrouter.ai/api/v1/chat/completions",
         headers={"Authorization": f"Bearer {key}"},
         json={"model": model, "messages": [{"role": "user", "content": prompt}]},
-        timeout=900,
+        timeout=timeout,
     )
-    if r.status_code != 200:
-        raise RuntimeError(f"HTTP {r.status_code}: {r.text[:300]}")
-    return r.json()["choices"][0]["message"]["content"].strip()
+    _check(r)
+    data = r.json()
+    if "choices" not in data:  # OpenRouter 有時以 200 回傳上游錯誤
+        raise Retryable(f"回傳格式不符：{str(data)[:300]}")
+    return (data["choices"][0]["message"].get("content") or "").strip()
 
 
-def call_google(model, prompt):
+def call_google(model, prompt, timeout=REQUEST_TIMEOUT):
     key = os.environ.get("COUNCIL_GEMINI_API_KEY")
     if not key:
         raise RuntimeError("缺少 secret COUNCIL_GEMINI_API_KEY")
@@ -53,21 +73,50 @@ def call_google(model, prompt):
         f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
         headers={"x-goog-api-key": key},
         json={"contents": [{"role": "user", "parts": [{"text": prompt}]}]},
-        timeout=900,
+        timeout=timeout,
     )
-    if r.status_code != 200:
-        raise RuntimeError(f"HTTP {r.status_code}: {r.text[:300]}")
-    parts = r.json()["candidates"][0]["content"]["parts"]
+    _check(r)
+    data = r.json()
+    if not data.get("candidates") or "content" not in data["candidates"][0]:
+        raise Retryable(f"回傳格式不符：{str(data)[:300]}")
+    parts = data["candidates"][0]["content"].get("parts", [])
     return "".join(p.get("text", "") for p in parts).strip()
 
 
-def call(member, prompt):
+def call_once(member, prompt, timeout=REQUEST_TIMEOUT):
     provider, _, model = member.partition(":")
     if provider == "google":
-        return call_google(model, prompt)
+        return call_google(model, prompt, timeout)
     if provider == "openrouter":
-        return call_openrouter(model, prompt)
-    return call_openrouter(member, prompt)  # 沒寫前綴視為 OpenRouter
+        return call_openrouter(model, prompt, timeout)
+    return call_openrouter(member, prompt, timeout)  # 沒寫前綴視為 OpenRouter
+
+
+MIN_TRY_SEC = 60  # 剩餘時間不到這麼多就不再嘗試
+
+
+def call(member, prompt, waits=RETRY_WAITS, deadline=None):
+    """呼叫一位成員；遇到暫時性錯誤（過載、限流、網路中斷、空白回覆）會等一下再重試。
+    deadline（time.time() 時間點，預設為整體預算終點）之前一定會返回，避免整個 job 逾時被取消。"""
+    deadline = deadline or START + BUDGET_SEC
+    err = RuntimeError("時間預算已用完，未呼叫")
+    for attempt in range(len(waits) + 1):
+        left = deadline - time.time()
+        if left < MIN_TRY_SEC:
+            break
+        try:
+            text = call_once(member, prompt, min(REQUEST_TIMEOUT, left))
+            if text:
+                return text
+            err = Retryable("空白回覆")
+        except (Retryable, requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+            err = e
+        if attempt < len(waits):
+            if deadline - time.time() - waits[attempt] < MIN_TRY_SEC:
+                break
+            print(f"  … {member} 暫時失敗（{str(err)[:80]}），{waits[attempt]} 秒後重試", file=sys.stderr)
+            time.sleep(waits[attempt])
+    raise RuntimeError(f"失敗（已重試或時間預算用完）：{err}")
 
 
 def _split(name):

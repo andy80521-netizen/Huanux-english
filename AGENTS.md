@@ -1,5 +1,7 @@
 # AGENTS.md — 給 Codex 等 AI 代理的規則
 
+（Gemini 程式審查 `.github/scripts/ai_review.py` 也使用本檔的 Code Review Rules）
+
 **一律用繁體中文回覆。**
 
 ## 你在這個專案的角色
