@@ -2,7 +2,7 @@
 
 - **級別**：中（修改評分判定邏輯；不改 Firestore 資料結構、不新增套件）
 - **PR**：#6
-- **狀態**：規劃中
+- **狀態**：審查中
 
 ## 目標
 v3.11 改成「單字比對」後，補審查（PR #4，Codex／DeepSeek）發現正規化會**誤判對錯**。修正後：
@@ -99,9 +99,15 @@ v3.11 改成「單字比對」後，補審查（PR #4，Codex／DeepSeek）發�
 
 ## 決策紀錄
 - 2026-10-27 擁有者：上方「擁有者已決定」5 點照 Claude 建議
+- 2026-10-27 擁有者核准規劃，另 3 題照建議：名詞後的 's 維持嚴格（`The dog's` 念 dog is 判錯）；年份／序數／金額這次不處理；`-5` 算 2 個字（漏念負號內容分數會下降）
 
 ## 進度紀錄
 - 2026-10-27：建立規劃，送委員會與 Codex 評估
 - 委員會第一輪：Nemotron ✅、Poolside ✅、DeepSeek ✅；Gemini Flash ❌ 503（備援修正 PR #5 尚未合併）
 - Codex 3 項 🟠（全部採納）：使用者端刪口頭禪會讓兩邊都有 Um 時判錯 → 改為「使用者多念免費」；數字正則不支援無逗號四位數以上 → 分開兩種格式；可選 and 需要編輯距離支援 → 加免費規則、不全域刪 and
 - 採納：Nemotron（U+2212 負號、輸入長度上限）、DeepSeek（How'd＝did、`src` 與多念分開顯示、既有 normalizeForCompare 測試不可破壞）、Poolside（抽純函式測試）
+- 驗收測試 commit：`6c5b290`（`tests/scoringNormalize.test.ts`，24 個測試；提交時因模組不存在而失敗）
+- 實作：`src/utils/scoring.ts`（tokenizeForCompare、集合比對、免費規則、原字分組顯示、canAccumulatePattern）、`src/utils/maintenanceLogic.ts`（computeMaintenanceOutcome，由 maintenance.ts 交易呼叫）、畫面文字改用常數
+- `check.sh` 通過（66 個測試）；驗收測試自 `6c5b290` 後未修改
+- 已知限制（不處理）：`5-6` 這類範圍寫法、`1990s` 這類數字加字尾保留原樣比對
+- 下一步：Codex／Gemini 審查

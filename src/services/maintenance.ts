@@ -3,12 +3,13 @@ import { db, auth, appId } from '../firebase';
 import { LanguagePattern, PatternExampleSentence } from '../types';
 import { getMasteredCount } from '../utils/patternStage';
 import { addSydneyCalendarDays, getSydneyDateString, isSydneyDateReached } from '../utils/sydneyTime';
+import { computeMaintenanceOutcome, maintenanceIntervalDays, MAINTENANCE_PASS_COUNT } from '../utils/maintenanceLogic';
+
+export { maintenanceIntervalDays, MAINTENANCE_PASS_COUNT };
 
 export const MAINTENANCE_SIZE = 3;       // 每次維持題抽 3 句
-export const MAINTENANCE_PASS_COUNT = 2; // 3 句中至少 2 句全對才算通過（v3.11 起以一字不差判斷）
 const START_MASTERED = 10;               // 精熟 10 句（達到「可用」）後開始維持複習
 const POSTPONE_DAYS = 30;
-const FAILED_MASTERY = 750;
 
 export interface MaintenanceOutcome {
   passed: boolean;
@@ -16,13 +17,6 @@ export interface MaintenanceOutcome {
   failedCount: number;
   level: number;
   dueAt: number;
-}
-
-// 通過後的新 level 對應下次間隔：0 → 30 天、1 → 90 天、2 以上 → 180 天
-export function maintenanceIntervalDays(level: number): number {
-  if (level <= 0) return 30;
-  if (level === 1) return 90;
-  return 180;
 }
 
 const patternDocRef = (uid: string, patternId: string) =>
@@ -82,29 +76,10 @@ export async function applyMaintenanceResult(patternId: string, results: Record<
   return await runTransaction(db, async (tx) => {
     const snap = await tx.get(ref);
     if (!snap.exists()) return null;
-    const data = snap.data() as LanguagePattern;
-    const m = data.maintenance;
-    if (!m || !isSydneyDateReached(m.dueAt, now)) return null;
-
-    const ids = Object.keys(results);
-    const passCount = ids.filter(id => results[id]).length;
-    const failedIds = new Set(ids.filter(id => !results[id]));
-    const passed = passCount >= MAINTENANCE_PASS_COUNT;
-    const level = passed ? (m.level || 0) + 1 : 0;
-    const dueAt = addSydneyCalendarDays(now, maintenanceIntervalDays(level));
-
-    // 沒有全對的句子：熟練度降為 750、移除等待時間，立即回到一般複習
-    const sentences = (data.exampleSentences || []).map(s => {
-      if (!failedIds.has(s.id)) return s;
-      const { nextAvailableAt, ...rest } = s;
-      return { ...rest, mastery: FAILED_MASTERY };
-    });
-
-    tx.update(ref, {
-      maintenance: { level, dueAt, lastReviewedAt: now },
-      exampleSentences: sentences
-    });
-    return { passed, passCount, failedCount: failedIds.size, level, dueAt };
+    const r = computeMaintenanceOutcome(snap.data() as LanguagePattern, results, now);
+    if (!r) return null;
+    tx.update(ref, { maintenance: r.maintenance, exampleSentences: r.exampleSentences });
+    return { passed: r.passed, passCount: r.passCount, failedCount: r.failedCount, level: r.level, dueAt: r.dueAt };
   });
 }
 

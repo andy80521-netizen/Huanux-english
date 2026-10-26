@@ -104,56 +104,219 @@ export const normalizeForCompare = (text: string): string[] => {
     return words;
 };
 
+// ===== 【v3.11 補強】token 化：每個字是一組「可接受的寫法」，兩邊有交集就算相同 =====
+// 規劃：docs/plans/scoring-normalize-fix.md
+
+interface Token {
+    alts: string[];          // 可接受的寫法（全小寫）
+    src: number;             // 來自原文第幾個字（以空白切分）
+    kind?: 'filler' | 'numAnd';
+}
+
+const NUMBER_WORDS = new Set([...ONES, ...TENS.filter(Boolean), 'hundred', 'thousand', 'million']);
+// 's 後面接 is／has 的字（其他名詞後的 's 視為所有格）
+const S_CONTRACTION_STEMS = new Set(['he', 'she', 'it', 'that', 'there', 'here', 'what', 'who', 'where', 'when', 'why', 'how',
+    'this', 'everyone', 'everybody', 'everything', 'someone', 'somebody', 'something', 'nobody', 'nothing', 'no one']);
+const DID_STEMS = new Set(['how', 'where', 'what', 'why', 'who', 'when']);
+const SPECIAL_CONTRACTIONS: Record<string, string[][]> = {
+    "won't": [['will'], ['not']], "can't": [['can'], ['not']], 'cannot': [['can'], ['not']],
+    "shan't": [['shall'], ['not']], "let's": [['let'], ['us']],
+};
+const MAX_INT = 999_999_999;
+// 完整數值：可帶負號（前面不能緊接字母數字）、千分位或無逗號整數、小數；後面不能緊接數字或字母
+const NUMBER_RE = /(?<![\w.,])(-)?(\d{1,3}(?:,\d{3})+|\d+)(\.\d+)?(?![\d\w])/g;
+
+const under1000 = (n: number): string[] => {
+    const out: string[] = [];
+    if (n >= 100) {
+        out.push(ONES[Math.floor(n / 100)], 'hundred');
+        n %= 100;
+    }
+    if (n > 0) out.push(...numberToWords(n));
+    return out;
+};
+
+const integerToWords = (n: number): string[] => {
+    if (n === 0) return ['zero'];
+    const out: string[] = [];
+    const millions = Math.floor(n / 1_000_000);
+    const thousands = Math.floor((n % 1_000_000) / 1000);
+    const rest = n % 1000;
+    if (millions) out.push(...under1000(millions), 'million');
+    if (thousands) out.push(...under1000(thousands), 'thousand');
+    if (rest) out.push(...under1000(rest));
+    return out;
+};
+
+const numberTokens = (neg: string | undefined, intPart: string, frac: string | undefined, src: number): Token[] => {
+    const tokens: Token[] = [];
+    if (neg) tokens.push({ alts: ['minus', 'negative'], src });
+    const n = parseInt(intPart.replace(/,/g, ''), 10);
+    const words = n <= MAX_INT ? integerToWords(n) : intPart.replace(/,/g, '').split('').map(d => ONES[+d]);
+    tokens.push(...words.map(w => ({ alts: [w], src })));
+    if (frac) {
+        tokens.push({ alts: ['point'], src });
+        tokens.push(...frac.slice(1).split('').map(d => ({ alts: [ONES[+d]], src })));
+    }
+    return tokens;
+};
+
+// 一般文字片段（不含數字）：處理縮寫、所有格、符號
+const wordTokens = (segment: string, src: number, side: 'target' | 'user'): Token[] => {
+    const tokens: Token[] = [];
+    const cleaned = segment.replace(/&/g, ' and ').replace(/%/g, ' percent ');
+    for (const raw of cleaned.split(/[^a-z']+/)) {
+        const w = raw.replace(/^'+|'+$/g, '');
+        if (!w) continue;
+        const one = (...alts: string[]) => tokens.push({ alts, src });
+        if (SPECIAL_CONTRACTIONS[w]) {
+            SPECIAL_CONTRACTIONS[w].forEach(a => one(...a));
+            continue;
+        }
+        const m = w.match(/^(.+?)(n't|'m|'re|'ll|'ve|'d|'s)$/);
+        if (m) {
+            const [, stem, suf] = m;
+            if (suf === "'s" && !S_CONTRACTION_STEMS.has(stem)) {
+                one(stem + 's');                         // 所有格：照念（john's ＝ johns）
+                continue;
+            }
+            one(stem.replace(/'/g, ''));
+            if (suf === "n't") one('not');
+            else if (suf === "'m") one('am');
+            else if (suf === "'re") one('are');
+            else if (suf === "'ll") one('will');
+            else if (suf === "'ve") one('have');
+            else if (suf === "'d") one(...(DID_STEMS.has(stem) ? ['would', 'had', 'did'] : ['would', 'had']));
+            else one('is', 'has');
+            continue;
+        }
+        const plain = w.replace(/'/g, '');
+        if (side === 'user' && FILLER_WORDS.has(plain)) tokens.push({ alts: [plain], src, kind: 'filler' });
+        else one(plain);
+    }
+    return tokens;
+};
+
+export const tokenizeForCompare = (text: string, side: 'target' | 'user'): { tokens: Token[]; words: string[] } => {
+    const words = (text || '').replace(/[‘’ʼ`]/g, "'").replace(/[−–—]/g, '-').split(/\s+/).filter(Boolean);
+    const tokens: Token[] = [];
+    words.forEach((word, src) => {
+        const lower = word.toLowerCase();
+        let last = 0;
+        for (const m of lower.matchAll(NUMBER_RE)) {
+            tokens.push(...wordTokens(lower.slice(last, m.index), src, side));
+            tokens.push(...numberTokens(m[1], m[2], m[3], src));
+            last = (m.index ?? 0) + m[0].length;
+        }
+        tokens.push(...wordTokens(lower.slice(last), src, side));
+    });
+    // 數字念法中 hundred／thousand／million 之後、下一個數字字之前的 and 可有可無
+    tokens.forEach((t, i) => {
+        if (t.alts.length === 1 && t.alts[0] === 'and' && i > 0 && i < tokens.length - 1
+            && ['hundred', 'thousand', 'million'].includes(tokens[i - 1].alts[0])
+            && NUMBER_WORDS.has(tokens[i + 1].alts[0])) {
+            t.kind = 'numAnd';
+        }
+    });
+    return { tokens, words };
+};
+
+const same = (a: Token, b: Token) => a.alts.some(x => b.alts.includes(x));
+const missingCost = (t: Token) => (t.kind === 'numAnd' ? 0 : 1);
+const extraCost = (u: Token) => (u.kind ? 0 : 1);   // 使用者多念的口頭禪、數字中的 and 不算錯
+const displayWord = (w: string) => w.replace(/^[(\[“"]+/, '').replace(/[)\]”".,!?;:]+$/, '') || w;
+
 export const compareWords = (userText: string, targetText: string): WordComparison => {
-    const t = normalizeForCompare(targetText);
-    const u = normalizeForCompare(userText);
+    const target = tokenizeForCompare(targetText, 'target');
+    const user = tokenizeForCompare(userText, 'user');
+    const t = target.tokens;
+    // 語音辨識異常輸出（例如重複幻覺）時截斷，避免大量計算；被截掉的部分本來就是錯的
+    const u = user.tokens.slice(0, t.length * 3 + 20);
     const n = t.length;
     const m = u.length;
 
-    // dp[i][j]：原句前 i 字與使用者前 j 字的最少錯誤數
+    // dp[i][j]：原句前 i 個 token 與使用者前 j 個 token 的最少錯誤數
     const dp: number[][] = [];
-    for (let i = 0; i <= n; i++) {
-        dp.push(new Array(m + 1).fill(0));
-        dp[i][0] = i;
-    }
-    for (let j = 0; j <= m; j++) dp[0][j] = j;
+    for (let i = 0; i <= n; i++) dp.push(new Array(m + 1).fill(0));
+    for (let i = 1; i <= n; i++) dp[i][0] = dp[i - 1][0] + missingCost(t[i - 1]);
+    for (let j = 1; j <= m; j++) dp[0][j] = dp[0][j - 1] + extraCost(u[j - 1]);
     for (let i = 1; i <= n; i++) {
         for (let j = 1; j <= m; j++) {
-            if (t[i - 1] === u[j - 1]) {
-                dp[i][j] = dp[i - 1][j - 1];
-            } else {
-                dp[i][j] = Math.min(dp[i - 1][j - 1], dp[i - 1][j], dp[i][j - 1]) + 1;
-            }
+            dp[i][j] = Math.min(
+                dp[i - 1][j - 1] + (same(t[i - 1], u[j - 1]) ? 0 : 1),
+                dp[i - 1][j] + missingCost(t[i - 1]),
+                dp[i][j - 1] + extraCost(u[j - 1])
+            );
         }
     }
 
-    // 回溯產生逐字結果（依原句順序）
-    const diff: WordDiff[] = [];
+    // 回溯：token 層級的結果（依原句順序）
+    type Op = { kind: 'ok' | 'wrong' | 'missing'; ti: number; uj?: number } | { kind: 'extra'; uj: number };
+    const ops: Op[] = [];
     let i = n;
     let j = m;
     while (i > 0 || j > 0) {
-        if (i > 0 && j > 0 && t[i - 1] === u[j - 1] && dp[i][j] === dp[i - 1][j - 1]) {
-            diff.push({ word: t[i - 1], type: 'ok' });
-            i--; j--;
-        } else if (i > 0 && j > 0 && dp[i][j] === dp[i - 1][j - 1] + 1) {
-            diff.push({ word: t[i - 1], type: 'wrong', said: u[j - 1] });
-            i--; j--;
-        } else if (i > 0 && dp[i][j] === dp[i - 1][j] + 1) {
-            diff.push({ word: t[i - 1], type: 'missing' });
+        if (i > 0 && j > 0 && same(t[i - 1], u[j - 1]) && dp[i][j] === dp[i - 1][j - 1]) {
+            ops.push({ kind: 'ok', ti: i - 1, uj: j - 1 }); i--; j--;
+        } else if (i > 0 && j > 0 && !same(t[i - 1], u[j - 1]) && dp[i][j] === dp[i - 1][j - 1] + 1) {
+            ops.push({ kind: 'wrong', ti: i - 1, uj: j - 1 }); i--; j--;
+        } else if (i > 0 && dp[i][j] === dp[i - 1][j] + missingCost(t[i - 1])) {
+            if (t[i - 1].kind !== 'numAnd') ops.push({ kind: 'missing', ti: i - 1 });
             i--;
         } else {
-            diff.push({ word: u[j - 1], type: 'extra' });
+            if (!u[j - 1].kind) ops.push({ kind: 'extra', uj: j - 1 });
             j--;
         }
     }
-    diff.reverse();
+    ops.reverse();
+
+    // 以原句的字為單位顯示（一個原字展開成多個 token 時，任一 token 錯就整個原字標錯）
+    const diff: WordDiff[] = [];
+    const userWordsOf = (ujs: number[]) => [...new Set(ujs.map(x => u[x].src))].map(s => displayWord(user.words[s])).join(' ');
+    let k = 0;
+    while (k < ops.length) {
+        const op = ops[k];
+        if (op.kind === 'extra') {
+            const ujs = [op.uj];
+            while (k + 1 < ops.length && ops[k + 1].kind === 'extra' && u[(ops[k + 1] as { uj: number }).uj].src === u[op.uj].src) {
+                ujs.push((ops[++k] as { uj: number }).uj);
+            }
+            diff.push({ word: userWordsOf(ujs), type: 'extra' });
+            k++;
+            continue;
+        }
+        const src = t[op.ti].src;
+        const group: Op[] = [];
+        // 同一個原字的 token，以及夾在其中的多念字
+        while (k < ops.length) {
+            const o = ops[k];
+            if (o.kind !== 'extra' && t[o.ti].src !== src) break;
+            if (o.kind === 'extra') {
+                const nextTarget = ops.slice(k + 1).find(x => x.kind !== 'extra') as { ti: number } | undefined;
+                if (!nextTarget || t[nextTarget.ti].src !== src) break;
+            }
+            group.push(o);
+            k++;
+        }
+        const word = displayWord(targetText.replace(/[‘’ʼ`]/g, "'").split(/\s+/).filter(Boolean)[src] ?? '');
+        if (group.every(g => g.kind === 'ok')) {
+            diff.push({ word, type: 'ok' });
+        } else {
+            const said = group.filter(g => g.uj !== undefined).map(g => g.uj as number);
+            diff.push(said.length ? { word, type: 'wrong', said: userWordsOf(said) } : { word, type: 'missing' });
+        }
+    }
 
     const errors = dp[n][m];
-    const contentScore = n === 0
-        ? (m === 0 ? 100 : 0)
-        : Math.max(0, Math.round(((n - errors) / n) * 100));
-    return { targetCount: n, errors, contentScore, diff };
+    const counted = t.filter(x => x.kind !== 'numAnd').length;
+    const contentScore = counted === 0
+        ? (m === 0 || errors === 0 ? 100 : 0)
+        : Math.max(0, Math.round(((counted - errors) / counted) * 100));
+    return { targetCount: counted, errors, contentScore, diff };
 };
+
+// 句型練習（精準背出原句）：一字不差才累加熟練度
+export const canAccumulatePattern = (scores: { errors: number }) => scores.errors === 0;
 
 const combineTotal = (content: number, fluency: number) => Math.round(content * 0.7 + fluency * 0.3);
 
