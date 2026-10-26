@@ -186,8 +186,10 @@ def found(signal, items, sha):
     if signal == "gemini-review":
         return [i for i in by("Actions") if first(i) == f"<!-- ai-gemini-review:sha={sha} -->"]
     if signal == "codex-review":
-        # Codex 沒發現問題時可能只留一般留言而不送正式審查，所以兩者都接受（仍須讀內容確認）
-        return [i for i in by("Codex") if (i["kind"] == "審查" and i.get("sha") == sha) or i["kind"] == "留言"]
+        # 正式審查（有行內意見時），或「沒發現問題」的回條（Reviewed commit: `<SHA 前 10 碼>`）。
+        # Codex 的狀態摘要留言（codex-review-state，含「執行中」）不算完成。
+        return [i for i in by("Codex") if (i["kind"] == "審查" and i.get("sha") == sha)
+                or (i["kind"] == "留言" and "codex-review-receipt" in i["body"] and f"`{sha[:10]}" in i["body"])]
     raise SystemExit(f"未知的訊號：{signal}")
 
 
