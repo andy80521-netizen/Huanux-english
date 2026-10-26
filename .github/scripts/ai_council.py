@@ -23,10 +23,24 @@ import concurrent.futures as cf
 import os
 import re
 import sys
+import time
 
 import requests
 
 COMMENT_LIMIT = 60_000  # GitHub 留言上限約 65,536 字元，保留餘裕
+RETRY_WAITS = (20, 60)  # 暫時性錯誤（過載、限流、網路）時，等這些秒數後重試；共最多 3 次
+RETRY_STATUS = {408, 429, 500, 502, 503, 504}
+
+
+class Retryable(RuntimeError):
+    """暫時性錯誤：值得重試（例如 HTTP 503 過載、429 限流、連線逾時）"""
+
+
+def _check(r):
+    if r.status_code == 200:
+        return
+    err = Retryable if r.status_code in RETRY_STATUS else RuntimeError
+    raise err(f"HTTP {r.status_code}: {r.text[:300]}")
 
 
 # ---------------- 呼叫各家 API ----------------
@@ -40,9 +54,11 @@ def call_openrouter(model, prompt):
         json={"model": model, "messages": [{"role": "user", "content": prompt}]},
         timeout=900,
     )
-    if r.status_code != 200:
-        raise RuntimeError(f"HTTP {r.status_code}: {r.text[:300]}")
-    return r.json()["choices"][0]["message"]["content"].strip()
+    _check(r)
+    data = r.json()
+    if "choices" not in data:  # OpenRouter 有時以 200 回傳上游錯誤
+        raise Retryable(f"回傳格式不符：{str(data)[:300]}")
+    return (data["choices"][0]["message"].get("content") or "").strip()
 
 
 def call_google(model, prompt):
@@ -55,19 +71,37 @@ def call_google(model, prompt):
         json={"contents": [{"role": "user", "parts": [{"text": prompt}]}]},
         timeout=900,
     )
-    if r.status_code != 200:
-        raise RuntimeError(f"HTTP {r.status_code}: {r.text[:300]}")
-    parts = r.json()["candidates"][0]["content"]["parts"]
+    _check(r)
+    data = r.json()
+    if not data.get("candidates") or "content" not in data["candidates"][0]:
+        raise Retryable(f"回傳格式不符：{str(data)[:300]}")
+    parts = data["candidates"][0]["content"].get("parts", [])
     return "".join(p.get("text", "") for p in parts).strip()
 
 
-def call(member, prompt):
+def call_once(member, prompt):
     provider, _, model = member.partition(":")
     if provider == "google":
         return call_google(model, prompt)
     if provider == "openrouter":
         return call_openrouter(model, prompt)
     return call_openrouter(member, prompt)  # 沒寫前綴視為 OpenRouter
+
+
+def call(member, prompt, waits=RETRY_WAITS):
+    """呼叫一位成員；遇到暫時性錯誤（過載、限流、網路中斷、空白回覆）會等一下再重試。"""
+    for attempt in range(len(waits) + 1):
+        try:
+            text = call_once(member, prompt)
+            if text:
+                return text
+            err = Retryable("空白回覆")
+        except (Retryable, requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+            err = e
+        if attempt < len(waits):
+            print(f"  … {member} 暫時失敗（{str(err)[:80]}），{waits[attempt]} 秒後重試", file=sys.stderr)
+            time.sleep(waits[attempt])
+    raise RuntimeError(f"重試 {len(waits)} 次後仍失敗：{err}")
 
 
 def _split(name):

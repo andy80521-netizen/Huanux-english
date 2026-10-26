@@ -6,6 +6,9 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 <!-- 容易出錯的地方、隱藏的相依關係、環境差異 -->
 - 預覽網站（Netlify deploy preview）連的是**正式 Firebase**（`src/firebase.ts` 寫死專案），試用一律用測試帳號
 - 預覽網站的 Netlify functions 使用正式的 Gemini／OpenAI 金鑰，試用會產生 API 費用
+- 預覽網站**無法用 GitHub 登入**（每個 PR 網址不同，不在 Firebase 授權網域）；手動試用一律用 **Email 測試帳號**
+- push 後幾秒內就轉正式審查，PR 驗證與防作弊檢查可能都變成 skipped；`gh_ai.py wait` 會自動偵測並關閉再重開 PR 重新觸發
+- Gemini Flash 免費版偶爾 HTTP 503（過載）；委員會與 Gemini 審查會自動重試，審查仍失敗時改用 DeepSeek
 - 只改 `docs/` 的推送不會重建預覽網站（`netlify.toml`），所以預覽網址可能停在上一個程式版本，這是正常的
 
 ## 防作弊機制的已知限制（2026-10-25 多輪攻擊測試後）

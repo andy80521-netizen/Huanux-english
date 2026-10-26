@@ -15,7 +15,7 @@
 - `bash scripts/check.sh` ＝ 型別檢查 → Vitest 測試（`tests/`，設定以受保護的 `vitest.config.ts` 為準）→ build。**這是「通過」的唯一定義**；有任何測試被跳過或 todo 也算失敗
 - 安裝套件一律用 `npm ci --ignore-scripts`（與 GitHub 驗證一致）
 - 畫面操作與 AI 生成內容無法自動驗證 → 列為「👀 手動試用」，寫清楚步驟
-- **預覽網站連的是正式 Firebase**：手動試用一律請擁有者用**測試帳號**
+- **預覽網站連的是正式 Firebase**：手動試用一律請擁有者用 **Email 測試帳號**登入。預覽網站**無法用 GitHub 登入**（每個 PR 網址不同，不在 Firebase 授權網域），也不應該用真實帳號
 
 ## 工作環境限制
 - **連不到 Gemini / OpenAI / OpenRouter 等 API**：其他 AI 一律透過 GitHub 參與
@@ -29,11 +29,11 @@
   G="python3 scripts/ai/gh_ai.py"
   $G now                                        # 目前 UTC 時間，給 --since 用
   $G comment <PR> 檔案.md [--ask]               # 以 Claude 身分留言
-  $G comment <PR> 檔案.md --trigger             # 呼叫 @codex 或 /gemini（指令在最前面；每則只呼叫一位）
+  $G comment <PR> 檔案.md --trigger             # 呼叫 @codex 或 /gemini review（指令在最前面；每則只呼叫一位）
   $G label <PR> ai-plan                         # 觸發規劃委員會（ai-ask：回應質詢）
   $G wait <PR> --need council --since <時間>     # 等委員會
-  $G wait <PR> --need verify,guard --sha <SHA>   # 等 PR 驗證與防作弊檢查
-  $G wait <PR> --need codex,gemini --since <時間> # 規劃階段：等 Codex / Gemini 的任何回覆
+  $G wait <PR> --need verify,guard --sha <SHA>   # 等 PR 驗證與防作弊檢查（被跳過時會自動重開 PR 重新觸發一次）
+  $G wait <PR> --need codex --since <時間>       # 規劃階段：等 Codex 的任何回覆
   $G wait <PR> --need codex-review,gemini-review --sha <SHA>  # 階段二：等針對這個版本的正式審查
   $G feed <PR> [--since <時間>]                  # 讀所有白名單意見（含行內審查）
   $G foreign-commits <分支>                      # 推送前檢查有沒有別人的 commit
@@ -79,13 +79,13 @@
    SINCE=$($G now)
    $G label <PR> ai-plan
    $G comment <PR> codex.md --trigger   # 內容：@codex 請閱讀 docs/plans/<檔名> 與相關程式碼，依 AGENTS.md 評估這份規劃（需求漏洞、邊界情況、做法、驗收條件、需要擁有者決定的問題）。只分析，不要修改檔案或推送 commit。
-   $G comment <PR> gemini.md --trigger  # 內容：/gemini 請閱讀 docs/plans/<檔名> 與相關程式碼，評估這份規劃（同上五點），用繁體中文回答。
-   $G wait <PR> --need council,codex,gemini --since $SINCE   # 沒到齊可再執行一次；總共最多等 18 分鐘
+   $G wait <PR> --need council,codex --since $SINCE   # 沒到齊可再執行一次；總共最多等 18 分鐘
    ```
-   逾時未回應的成員就不等了，在報告中註明
+   逾時未回應的成員就不等了，在報告中註明。Gemini 已是委員會成員（Gemini Flash），不需另外呼叫。
+   Codex 收到「評估規劃」的留言時會以「審查」形式回覆（行內意見＋嚴重度），一樣當成規劃意見處理
 5. **針對性質詢**（大級別、或有重要分歧時）：只挑真正的關鍵分歧，具體提問
    - 委員會：`$G comment <PR> q.md --ask` 再 `$G label <PR> ai-ask`
-   - Codex／Gemini：`$G comment <PR> 檔案 --trigger`，內容以 `@codex` 或 `/gemini` 開頭，加上問題與對方的論點
+   - Codex：`$G comment <PR> 檔案 --trigger`，內容以 `@codex` 開頭，加上問題與對方的論點
 6. **深度顧問**（大級別，選用）：產生一份「評估包」（需求＋規劃＋關鍵程式碼節錄＋要問的問題），請擁有者貼給 ChatGPT、Gemini App，再把回覆貼回對話
 7. **整合成規劃報告**交給擁有者（👤 擁有者核准）：
    - **共識**／**分歧**（各方說法 → 你的建議與理由）／**駁回的意見**（誰、為什麼）
@@ -103,7 +103,7 @@
    SINCE=$($G now); SHA=$(git rev-parse HEAD)
    gh api -X POST repos/andy80521-netizen/huanux-english/pulls/<PR>/ccr/ready_for_review
    $G comment <PR> codex.md --trigger    # 內容：@codex review
-   $G comment <PR> gemini.md --trigger   # 內容：/gemini review
+   $G comment <PR> gemini.md --trigger   # 內容：/gemini review（GitHub Actions 用 Gemini Flash 審查；失敗時改用 DeepSeek，留言會標明）
    $G wait <PR> --need verify,guard --sha $SHA                  # 最多等 20 分鐘
    $G wait <PR> --need codex-review,gemini-review --sha $SHA    # 最多等 15 分鐘，逾時就不等
    $G feed <PR> --since $SINCE                                  # 讀完整內容（含行內審查）
@@ -113,7 +113,7 @@
    - 驗證或防作弊檢查失敗 → 修正，回到步驟 2
    - 防作弊檢查的「⚠️ 注意事項」（mock、刪除斷言、對常數斷言、改設定）→ 逐條確認合理，並寫進完成報告
    - 真問題 → 修正（必要時補測試），回到步驟 2；之後的輪次請審查者**只看新的修改**：
-     `@codex review 只需檢查 <舊SHA>..<新SHA> 的修改` ／ `/gemini review`
+     `@codex review 只需檢查 <舊SHA>..<新SHA> 的修改` ／ `/gemini review <舊SHA>..<新SHA>`
    - 誤判 → 用 `$G comment` 逐條說明理由（標題「🧑‍⚖️ Claude 裁決」）
    - **要駁回 🔴 高嚴重度意見** → 不可自行結案，列入報告由擁有者決定
    - **大級別的爭議裁決** → 交給獨立複審：用 Agent 工具開一個全新的子代理，只給它 PR 編號、爭議清單、`AGENTS.md` 與規劃文件，請它讀程式碼後獨立判斷；採用它的結論或列給擁有者
@@ -128,7 +128,7 @@
 ```
 ## 完成度報告：<功能名稱>
 狀態：✅ 可以試用 / ⚠️ 部分完成 / ⛔ 需要你決定
-PR：<連結>　預覽網站：<網址>（請用測試帳號）
+PR：<連結>　預覽網站：<網址>（請用 Email 測試帳號登入）
 最終版本：`<SHA 前 7 碼>`（如果 PR 上出現比這更新的 commit，請先不要 Merge，告訴我）
 
 ### 驗收條件
@@ -157,7 +157,7 @@ PR：<連結>　預覽網站：<網址>（請用測試帳號）
 - 資料：<有改資料時：備份位置與還原方式；沒有則寫「本次未改動資料」>
 
 ### 下一步
-請用測試帳號在預覽網站試用 👀 項目，沒問題就在 GitHub 按 Merge。
+請在預覽網站用 Email 測試帳號登入，試用 👀 項目，沒問題就在 GitHub 按 Merge。
 ```
 
 ## 中途中斷時

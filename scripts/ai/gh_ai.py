@@ -5,12 +5,13 @@ gh_ai.py — Claude 在 Huanux 工作流程中與 GitHub 溝通的工具（只�
 Claude 的工作環境限制：不支援 GitHub GraphQL 與 Actions API、單一指令最多執行 10 分鐘。
 這支工具把所有 GitHub 互動集中在一起，並內建安全規則：
   - Claude 發的留言一律加上「🤖 Claude：」與 <!-- by-claude --> 標記（Claude 使用擁有者的帳號）
-  - 讀取時只採信白名單作者：擁有者、github-actions、Codex、Gemini Code Assist、Netlify
+  - 讀取時只採信白名單作者：擁有者、github-actions、Codex、Gemini、Netlify
   - 等待一次最多 9 分鐘，回傳目前狀態，由 Claude 決定是否繼續等
+  - 等待 verify／guard 時，若發現兩者都被跳過（push 後太快轉正式審查的競態），自動關閉再重開 PR 重新觸發一次
 
 用法：
   python3 scripts/ai/gh_ai.py comment <編號> <檔案> [--ask|--trigger]
-                                  以 Claude 身分留言（--ask：委員會質詢；--trigger：呼叫 @codex 或 /gemini，
+                                  以 Claude 身分留言（--ask：委員會質詢；--trigger：呼叫 @codex 或 /gemini review，
                                   指令放最前面。每則只呼叫一位）
   python3 scripts/ai/gh_ai.py label <編號> <標籤>             貼標籤（ai-plan / ai-ask）
   python3 scripts/ai/gh_ai.py feed <編號> [--since ISO時間]     列出白名單作者的留言、審查與行內意見
@@ -24,9 +25,9 @@ Claude 的工作環境限制：不支援 GitHub GraphQL 與 Actions API、單一
   verify          PR 驗證留言（<!-- ai-pr:sha=SHA -->），需要 --sha
   guard           防作弊檢查留言（<!-- ai-guard:sha=SHA -->），需要 --sha
   codex-review    Codex 對 --sha 這個版本提交的「正式審查」（階段二用）
-  gemini-review   Gemini Code Assist 對 --sha 提交的「正式審查」（階段二用）
+  gemini-review   Gemini 程式審查（ai-review.yml，留言第一行 <!-- ai-gemini-review:sha=SHA -->）（階段二用）
   codex           Codex 在 --since 之後的任何留言或審查（規劃階段用）
-  gemini          Gemini 在 --since 之後的任何留言或審查（規劃階段用）
+  gemini          （舊）Gemini 機器人的留言；Gemini Code Assist 已停止，規劃階段改由委員會中的 Gemini Flash 負責
   council         規劃委員會在 --since 之後的結果（plan / ask / error）
   「到齊」只代表有回覆，仍必須讀內容確認不是錯誤訊息（例如額度用完）。
   同一版本的 verify／guard 回報結果互相矛盾（有 ✅ 也有 ❌）時視為可能被偽造：exit 4，必須停下來回報擁有者。
@@ -183,7 +184,7 @@ def found(signal, items, sha):
     if signal in ("codex", "gemini"):
         return by(signal.capitalize())
     if signal == "gemini-review":
-        return [i for i in by("Gemini") if i["kind"] == "審查" and i.get("sha") == sha]
+        return [i for i in by("Actions") if first(i) == f"<!-- ai-gemini-review:sha={sha} -->"]
     if signal == "codex-review":
         # Codex 沒發現問題時可能只留一般留言而不送正式審查，所以兩者都接受（仍須讀內容確認）
         return [i for i in by("Codex") if (i["kind"] == "審查" and i.get("sha") == sha) or i["kind"] == "留言"]
@@ -197,17 +198,58 @@ def verdict(body):
     return "pass" if "✅" in body else "unknown"
 
 
+CHECK_JOBS = {"verify": "verify", "guard": "guard"}  # 訊號 → Actions job 名稱
+RETRIGGER_AFTER_SEC = 90
+
+
+def skipped_checks(n, sha, missing):
+    """PR 不是草稿、但 verify／guard 這個版本的執行全部是 skipped／cancelled（沒有執行中或成功的）→ 回傳被跳過的訊號。"""
+    names = {CHECK_JOBS[s] for s in missing if s in CHECK_JOBS}
+    if not names:
+        return []
+    runs = api(f"commits/{sha}/check-runs?filter=all&per_page=100").get("check_runs", [])
+    out = []
+    for s in missing:
+        job = CHECK_JOBS.get(s)
+        mine = [r for r in runs if r["name"] == job]
+        if mine and all(r["status"] == "completed" and r["conclusion"] in ("skipped", "cancelled") for r in mine):
+            out.append(s)
+    return out
+
+
+def retrigger(n):
+    """關閉再重開 PR（reopened 事件會重新觸發 PR 驗證與防作弊檢查；不需要新的 commit）。"""
+    api(f"pulls/{n}", "PATCH", {"state": "closed"})
+    time.sleep(3)
+    api(f"pulls/{n}", "PATCH", {"state": "open"})
+
+
 def cmd_wait(a):
     need = [s.strip() for s in a.need.split(",") if s.strip()]
     if {"verify", "guard", "codex-review", "gemini-review"} & set(need) and not a.sha:
         sys.exit("等待 verify / guard / *-review 需要 --sha")
-    deadline = time.time() + min(a.max_min, 9) * 60
+    if {"verify", "guard"} & set(need):
+        pr = api(f"pulls/{a.n}")
+        if pr.get("draft"):
+            print("⛔ PR 仍是草稿：PR 驗證與防作弊檢查只在正式審查狀態執行。請先轉正式審查再等待。")
+            sys.exit(3)
+        if pr["head"]["sha"] != a.sha:
+            print(f"⚠️ PR 目前的版本是 {pr['head']['sha'][:7]}，不是 --sha {a.sha[:7]}；只會等到這個版本的結果。")
+    start = time.time()
+    deadline = start + min(a.max_min, 9) * 60
+    retriggered = False
     while True:
         items, ignored = collect(a.n, a.since)
         status = {s: found(s, items, a.sha) for s in need}
         missing = [s for s, v in status.items() if not v]
         if not missing or time.time() >= deadline:
             break
+        if not retriggered and time.time() - start >= RETRIGGER_AFTER_SEC:
+            skipped = skipped_checks(a.n, a.sha, missing)
+            if skipped:
+                print(f"🔁 {', '.join(skipped)} 這個版本被跳過（推送後太快轉正式審查的競態），關閉再重開 PR 重新觸發")
+                retrigger(a.n)
+                retriggered = True
         time.sleep(POLL_SEC)
     print("=== 狀態：" + "、".join(f"{s}{'✅' if status[s] else '⏳'}" for s in need))
     print()
@@ -227,9 +269,15 @@ def cmd_wait(a):
 
 
 def cmd_foreign(a):
-    subprocess.run(["git", "fetch", "-q", "origin", f"+refs/heads/{a.branch}:refs/remotes/origin/{a.branch}",
-                    "+refs/heads/main:refs/remotes/origin/main"], check=True)
-    r = subprocess.run(["git", "log", "--format=%h%x09%ae%x09%an%x09%s", f"origin/main..origin/{a.branch}"],
+    subprocess.run(["git", "fetch", "-q", "origin", "+refs/heads/main:refs/remotes/origin/main"], check=True)
+    remote = subprocess.run(["git", "ls-remote", "--heads", "origin", a.branch], capture_output=True, text=True, check=True)
+    if remote.stdout.strip():
+        subprocess.run(["git", "fetch", "-q", "origin", f"+refs/heads/{a.branch}:refs/remotes/origin/{a.branch}"], check=True)
+        ref = f"origin/{a.branch}"
+    else:
+        print(f"（遠端還沒有分支 {a.branch}，這是第一次推送：檢查本機的 commit）")
+        ref = a.branch
+    r = subprocess.run(["git", "log", "--format=%h%x09%ae%x09%an%x09%s", f"origin/main..{ref}"],
                        capture_output=True, text=True, check=True)
     foreign = [l for l in r.stdout.splitlines() if l.split("\t")[1] != CLAUDE_EMAIL]
     if foreign:
@@ -251,7 +299,7 @@ def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("comment"); c.add_argument("n", type=int); c.add_argument("file"); c.add_argument("--ask", action="store_true")
-    c.add_argument("--trigger", action="store_true", help="呼叫 @codex 或 /gemini：指令放最前面")
+    c.add_argument("--trigger", action="store_true", help="呼叫 @codex 或 /gemini review：指令放最前面")
     l = sub.add_parser("label"); l.add_argument("n", type=int); l.add_argument("label")
     f = sub.add_parser("feed"); f.add_argument("n", type=int); f.add_argument("--since", default="1970-01-01T00:00:00Z")
     w = sub.add_parser("wait"); w.add_argument("n", type=int); w.add_argument("--need", required=True)
