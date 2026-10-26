@@ -22,7 +22,7 @@ import sys
 import requests
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from ai_council import call  # noqa: E402  共用 API 呼叫與重試
+from ai_council import BUDGET_SEC, START, call  # noqa: E402  共用 API 呼叫、重試與時間預算
 
 API = "https://api.github.com"
 DEFAULT_MODELS = "google:gemini-flash-latest,openrouter:deepseek/deepseek-v4.1-flash"
@@ -127,9 +127,11 @@ def main():
         return
 
     used, result, errors = None, None, []
-    for m in models:
+    # 主要模型最多用到預算的 55%，其餘留給備援模型（整體預算在 ai_council.BUDGET_SEC）
+    first_deadline = START + BUDGET_SEC * 0.55
+    for idx, m in enumerate(models):
         try:
-            result, used = call(m, prompt), m
+            result, used = call(m, prompt, deadline=first_deadline if idx == 0 and len(models) > 1 else None), m
             break
         except Exception as e:  # noqa: BLE001
             errors.append(f"- `{m}`：{str(e)[:300]}")
