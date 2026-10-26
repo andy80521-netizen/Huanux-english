@@ -6,6 +6,9 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 <!-- 容易出錯的地方、隱藏的相依關係、環境差異 -->
 - 預覽網站（Netlify deploy preview）連的是**正式 Firebase**（`src/firebase.ts` 寫死專案），試用一律用測試帳號
 - 預覽網站的 Netlify functions 使用正式的 Gemini／OpenAI 金鑰，試用會產生 API 費用
+- 預覽網站**無法用 GitHub 登入**（每個 PR 網址不同，不在 Firebase 授權網域）；手動試用一律用 **Email 測試帳號**登入（這也避免在預覽用到真實帳號）
+- push 後幾秒內就轉正式審查，PR 驗證與防作弊檢查會互相取消而變成 skipped；可用 REST `commits/<SHA>/check-runs` 查看，被跳過就再推一次
+- `gh_ai.py foreign-commits` 在分支第一次 push 前會報錯（遠端還沒有這個分支），可忽略後直接第一次 push
 - 只改 `docs/` 的推送不會重建預覽網站（`netlify.toml`），所以預覽網址可能停在上一個程式版本，這是正常的
 
 ## 防作弊機制的已知限制（2026-10-25 多輪攻擊測試後）
@@ -19,3 +22,7 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 <!-- 每個功能一行：功能｜成員｜提出真問題數／誤判數｜備註 -->
 | 功能 | 成員 | 真問題 | 誤判 | 備註 |
 |---|---|---|---|---|
+| 流程實測（PR #2） | Grok 4.7 | 3 | 0 | 最詳盡：型別、fallback 路徑、物件參考 |
+| 流程實測（PR #2） | Codex | 1 | 0 | 驗收條件無法證明實測成功（P1）；`@codex` 分析請求會被當成審查執行 |
+| 流程實測（PR #2） | Gemini Flash | 0 | 0 | HTTP 503 過載，未回覆 |
+| 流程實測（PR #2） | Nemotron／Poolside／DeepSeek | — | — | 皆正常回覆 |
