@@ -51,4 +51,6 @@
 - 委員會：Nemotron ✅、Poolside ✅、DeepSeek ✅、Grok ✅（最詳盡）；Gemini Flash ❌ HTTP 503（Google 端暫時過載，無重試機制）
 - Codex：Claude 的 `@codex` 留言成功觸發，但被當成「審查」執行（非自由回答）；提出 1 項 P1（補流程實測驗收條件）→ 已採納為驗收 5
 - 採納 Grok：空陣列標型別、單組改 `() => 'a'` 並測 `initialLastKey` 同組、改用句子物件驗證不修改輸入
-- 下一步：轉正式審查，等 PR 驗證、防作弊檢查、Codex 審查
+- 轉正式審查：Codex 審查 8401ab8 → 無問題 ✅
+- 發現：push 後幾秒內轉正式審查，PR 驗證與防作弊檢查都變成 skipped（草稿狀態的 synchronize 與 ready_for_review 互相取消）→ 再推一次觸發
+- 下一步：等 PR 驗證、防作弊檢查；請擁有者試預覽網站登入
