@@ -1,18 +1,20 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Volume2, ChevronRight, Activity, LogOut, AlertTriangle, Mail, Lock, LogIn, UserPlus, Loader2, Moon, Sun, User, Database, Save, X, Github, PlayCircle, RefreshCw, AlertCircle, ExternalLink } from 'lucide-react';
+import { Settings, Volume2, ChevronRight, Activity, LogOut, AlertTriangle, Mail, Lock, LogIn, UserPlus, Loader2, Moon, Sun, Monitor, User, Database, Save, X, Github, PlayCircle, RefreshCw, AlertCircle, ExternalLink } from 'lucide-react';
 import { User as FirebaseUser, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword, signInAnonymously, updateProfile, signInWithPopup } from 'firebase/auth';
 import { auth, isFirebaseReady, githubProvider, isUsingDefaultConfig } from '../firebase';
 import { getVoices, speakTextPromise } from '../utils';
+import { ThemeMode } from '../utils/theme';
+import SegmentedControl from './ui/SegmentedControl';
 
 interface Props {
   user: FirebaseUser | null;
   voicePrefs: { zh?: string, en?: string };
   setVoicePrefs: React.Dispatch<React.SetStateAction<{ zh: string, en: string }>>;
-  isDarkMode: boolean;
-  setIsDarkMode: React.Dispatch<React.SetStateAction<boolean>>;
+  themeMode: ThemeMode;
+  setThemeMode: (mode: ThemeMode) => void;
 }
 
-const PersonalMode: React.FC<Props> = ({ user, voicePrefs, setVoicePrefs, isDarkMode, setIsDarkMode }) => {
+const PersonalMode: React.FC<Props> = ({ user, voicePrefs, setVoicePrefs, themeMode, setThemeMode }) => {
     const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([]);
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
@@ -256,21 +258,18 @@ const PersonalMode: React.FC<Props> = ({ user, voicePrefs, setVoicePrefs, isDark
             <div className="min-h-full flex flex-col items-center justify-center p-6 pb-24">
                 <div className="w-full max-w-sm bg-white dark:bg-slate-900 rounded-3xl shadow-xl border border-slate-100 dark:border-slate-800 p-8 text-center transition-colors duration-300 relative">
                     
-                    {/* Theme Toggle */}
-                    <div className="mb-8 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl flex items-center">
-                        <button 
-                            onClick={() => setIsDarkMode(false)} 
-                            className={`flex-1 py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all ${!isDarkMode ? 'bg-white dark:bg-slate-700 shadow-xs text-indigo-600' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}
-                        >
-                            <Sun size={14} /> 白天模式
-                        </button>
-                        <button 
-                            onClick={() => setIsDarkMode(true)} 
-                            className={`flex-1 py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all ${isDarkMode ? 'bg-slate-700 text-white shadow-xs' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}
-                        >
-                            <Moon size={14} /> 夜間模式
-                        </button>
-                    </div>
+                    {/* 外觀：跟隨系統／淺色／深色 */}
+                    <SegmentedControl<ThemeMode>
+                        label="外觀"
+                        className="mb-8"
+                        value={themeMode}
+                        onChange={setThemeMode}
+                        options={[
+                            { value: 'system', label: '跟隨系統', icon: <Monitor size={14} aria-hidden="true" /> },
+                            { value: 'light', label: '淺色', icon: <Sun size={14} aria-hidden="true" /> },
+                            { value: 'dark', label: '深色', icon: <Moon size={14} aria-hidden="true" /> },
+                        ]}
+                    />
 
                     {user ? (
                         <>

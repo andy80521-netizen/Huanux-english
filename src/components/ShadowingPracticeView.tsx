@@ -418,7 +418,7 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
             <div className="bg-white dark:bg-slate-900 rounded-3xl p-8 shadow-xs border border-slate-200 dark:border-slate-800 text-center space-y-6 max-w-2xl mx-auto w-full">
                 
                 <div className="space-y-4 mb-6">
-                    <p className="text-2xl md:text-3xl font-black text-slate-800 dark:text-white leading-relaxed">
+                    <p lang="en" className="font-reading text-[28px] md:text-[32px] font-normal leading-[1.32] tracking-[-0.005em] text-slate-800 dark:text-white">
                         {sentence.text}
                     </p>
                     <p className="text-lg text-slate-500 dark:text-slate-400">
