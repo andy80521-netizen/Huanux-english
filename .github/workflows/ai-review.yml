@@ -58,6 +58,8 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           AI_REVIEW_MODELS: ${{ vars.AI_REVIEW_MODELS }}
           AI_REVIEW_MAX_CHARS: ${{ vars.AI_REVIEW_MAX_CHARS }}
+          AI_GEMINI_FALLBACK: ${{ vars.AI_GEMINI_FALLBACK }}
+          AI_CALL_BUDGET_SEC: ${{ vars.AI_CALL_BUDGET_SEC }}
           COMMENT: ${{ github.event.comment.body }}
         run: python .github/scripts/ai_review.py --pr "$PR" --comment "$COMMENT" --out ../review.md
 

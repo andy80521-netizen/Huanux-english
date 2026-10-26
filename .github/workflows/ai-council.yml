@@ -81,6 +81,8 @@ jobs:
           AI_COUNCIL: ${{ vars.AI_COUNCIL }}
           AI_COUNCIL_BIG: ${{ vars.AI_COUNCIL_BIG }}
           AI_COUNCIL_MAX_CHARS: ${{ vars.AI_COUNCIL_MAX_CHARS }}
+          AI_GEMINI_FALLBACK: ${{ vars.AI_GEMINI_FALLBACK }}
+          AI_CALL_BUDGET_SEC: ${{ vars.AI_CALL_BUDGET_SEC }}
           PLAN: ${{ steps.prep.outputs.plan }}
         run: |
           mode=plan; [ "$LABEL" = "ai-ask" ] && mode=ask
