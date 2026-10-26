@@ -8,7 +8,8 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 - 預覽網站的 Netlify functions 使用正式的 Gemini／OpenAI 金鑰，試用會產生 API 費用
 - 預覽網站**無法用 GitHub 登入**（每個 PR 網址不同，不在 Firebase 授權網域）；手動試用一律用 **Email 測試帳號**
 - push 後幾秒內就轉正式審查，PR 驗證與防作弊檢查可能都變成 skipped；`gh_ai.py wait` 會自動偵測並關閉再重開 PR 重新觸發
-- Gemini Flash 免費版偶爾 HTTP 503（過載）；委員會與 Gemini 審查會自動重試，審查仍失敗時改用 DeepSeek
+- Gemini Flash 免費版經常 HTTP 503（過載，PR #2、#4 都發生）；委員會與 Gemini 審查會自動重試，仍失敗時依序改用 `gemini-flash-lite-latest`、`gemini-2.5-flash`（可用 variable `AI_GEMINI_FALLBACK` 調整），審查最後才改用 DeepSeek
+- main 已設保護規則（必須透過 PR）：2026-10-27 有工作階段在 repo 剛加入、尚未讀到 CLAUDE.md 時直接推送到 main（ceb931e）
 - Codex 審查偶爾卡在「Running」超過 30 分鐘（PR #3）；超過 15 分鐘就推送新版本或再留言 `@codex review` 一次
 - 只改 `docs/` 的推送不會重建預覽網站（`netlify.toml`），所以預覽網址可能停在上一個程式版本，這是正常的
 
