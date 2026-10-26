@@ -74,4 +74,35 @@ describe('interleaveByKey', () => {
       expect(interleaveByKey(['a1', 'b1'], (s) => s[0], 'a')[0]).toBe('b1');
     }
   });
+
+  it('空陣列回傳空陣列', () => {
+    const items: string[] = [];
+    expect(interleaveByKey(items, (s) => s[0])).toEqual([]);
+    expect(interleaveByKey(items, (s) => s[0], 'a')).toEqual([]);
+  });
+
+  it('只有一組時回傳全部項目（含 initialLastKey 等於該組）', () => {
+    const items = ['a1', 'a2', 'a3', 'a4', 'a5'];
+    for (const last of [null, 'a']) {
+      const out = interleaveByKey(items, () => 'a', last);
+      expect(out).toHaveLength(5);
+      expect([...out].sort()).toEqual([...items].sort());
+    }
+  });
+
+  it('不會修改傳入的陣列與物件，回傳的是同一批物件', () => {
+    const items = [
+      { id: 1, groupIndex: 0, mastery: 300, checked: true },
+      { id: 2, groupIndex: 0, mastery: 0, checked: false },
+      { id: 3, groupIndex: 1, mastery: 1000, checked: true },
+      { id: 4, groupIndex: 2, mastery: 50, checked: false },
+    ];
+    const refs = [...items];
+    const snapshot = items.map((x) => ({ ...x }));
+    const out = interleaveByKey(items, (s) => String(s.groupIndex));
+    expect(items).toEqual(snapshot);
+    items.forEach((x, i) => expect(x).toBe(refs[i]));
+    expect(out).toHaveLength(items.length);
+    out.forEach((x) => expect(refs).toContain(x));
+  });
 });
