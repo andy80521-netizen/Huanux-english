@@ -79,6 +79,7 @@ jobs:
           COUNCIL_GEMINI_API_KEY: ${{ secrets.COUNCIL_GEMINI_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           AI_COUNCIL: ${{ vars.AI_COUNCIL }}
+          AI_COUNCIL_BIG: ${{ vars.AI_COUNCIL_BIG }}
           AI_COUNCIL_MAX_CHARS: ${{ vars.AI_COUNCIL_MAX_CHARS }}
           PLAN: ${{ steps.prep.outputs.plan }}
         run: |

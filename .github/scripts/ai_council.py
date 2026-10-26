@@ -13,6 +13,7 @@ ai_council.py — 規劃委員會（在 GitHub Actions 執行；Claude 的工作
               google:<模型>      → Google Gemini API（免費金鑰）
               openrouter:<模型>  → OpenRouter（免費模型以 :free 結尾）
             例：google:gemini-flash-latest,openrouter:nvidia/nemotron-3-ultra-550b-a55b:free
+  Variable  AI_COUNCIL_BIG  （選填）只在規劃文件標示「級別：大」時加入的成員，例：openrouter:x-ai/grok-4.7
   Variable  AI_COUNCIL_MAX_CHARS  （選填）送出的內容上限，預設 200000 字元
   Secret    COUNCIL_GEMINI_API_KEY、OPENROUTER_API_KEY
 """
@@ -20,6 +21,7 @@ ai_council.py — 規劃委員會（在 GitHub Actions 執行；Claude 的工作
 import argparse
 import concurrent.futures as cf
 import os
+import re
 import sys
 
 import requests
@@ -68,15 +70,28 @@ def call(member, prompt):
     return call_openrouter(member, prompt)  # 沒寫前綴視為 OpenRouter
 
 
-def members():
-    ms = [m.strip() for m in os.environ.get("AI_COUNCIL", "").split(",") if m.strip()]
+def _split(name):
+    return [m.strip() for m in os.environ.get(name, "").split(",") if m.strip()]
+
+
+def plan_level(plan_text):
+    """從規劃文件的「級別」欄位讀出 小／中／大（找不到時視為 中）。"""
+    m = re.search(r"級別\**\s*[:：]\s*\**\s*(小|中|大)", plan_text)
+    return m.group(1) if m else "中"
+
+
+def members(level="中"):
+    """基本委員（AI_COUNCIL）；大級別再加上 AI_COUNCIL_BIG（例如 Grok）。"""
+    ms = _split("AI_COUNCIL")
     if not ms:
         sys.exit("缺少 repo variable AI_COUNCIL")
+    if level == "大":
+        ms += [m for m in _split("AI_COUNCIL_BIG") if m not in ms]
     return ms
 
 
-def ask_all(prompt):
-    ms = members()
+def ask_all(prompt, level="中"):
+    ms = members(level)
     out = {}
     with cf.ThreadPoolExecutor(max_workers=len(ms)) as ex:
         futs = {ex.submit(call, m, prompt): m for m in ms}
@@ -207,13 +222,15 @@ def main():
     context, skipped = build_context(a.plan, a.owner_notes)
     note = f"⚠️ 因長度上限未附上：{', '.join(skipped)}" if skipped else ""
     if a.mode == "plan":
-        answers = ask_all(PLAN.format(context=context))
+        level = plan_level(read(a.plan))
+        print(f"級別：{level}")
+        answers = ask_all(PLAN.format(context=context), level)
         md = render("ai-council:plan", "🧭 規劃委員會：第一輪獨立評估", answers, note)
     else:
         question = read(a.question).strip()
         if not question:
             sys.exit("找不到質詢內容")
-        answers = ask_all(ASK.format(question=question, context=context))
+        answers = ask_all(ASK.format(question=question, context=context), plan_level(read(a.plan)))
         md = render("ai-council:ask", "❓ 規劃委員會：回應質詢", answers, note)
 
     with open(a.out, "w", encoding="utf-8") as f:
