@@ -43,25 +43,29 @@ v3.11 改成「單字比對」後，補審查（PR #4，Codex／DeepSeek）發�
 4. 逐字比對顯示原句原本的寫法（`I'm`、`25`），不是正規化後的小寫展開
 5. 補上核心邏輯測試：維持複習（3 句中 2 句全對才通過、沒全對降 750）、`errors === 0` 才累加
 
-## 做法（草案，請委員評估）
-1. **每個字改成「可接受寫法的集合」**：正規化結果從 `string[]` 改成 `{ alts: string[]; src: number }[]`（`src` ＝ 原句第幾個字）。比對時兩邊的集合**有交集**就算相同（取代 `===`）。編輯距離演算法不變
-2. **scoring.ts 自己的縮寫表**（不再呼叫 `utils.ts` 的 `expandContractions`，該函式保持不變）：
+## 做法（委員會第一輪後修訂）
+1. **token 化**：新增 `tokenizeForCompare(text, side)`，每個 token 為 `{ alts: string[]; src: number; kind?: 'filler' | 'numAnd' }`（`src`＝原句第幾個字）。比對時兩邊 `alts` **有交集**就算相同
+2. **縮寫表**（scoring.ts 自有，不修改 `utils.ts` 的 `expandContractions`）：
    - `'m`→am、`'re`→are、`'ll`→will、`'ve`→have、`n't`→not（`can't`→can not、`won't`→will not、`let's`→let us）
-   - `'d`→{would, had}
-   - `'s`：前一個字是代名詞／疑問詞／there／here／that／it 時 →{is, has}；其他字（名詞）視為所有格，保留成一個字（`john's`）
-3. **數字**：在清除標點**之前**辨識完整數值 `-?\d{1,3}(,\d{3})*(\.\d+)?`：
-   - 負號 → {minus, negative}；小數點 → point ＋逐位數字
-   - 整數支援到 999,999,999（hundred／thousand／million）；英文念法中 hundred 後面的 and 可有可無
-4. **口頭禪**：只在使用者那一邊移除
+   - `'d`→{would, had}；前一個字是 how／where／what／why／who 時另接受 did（`How'd`＝How did）
+   - `'s`：前一個字是代名詞／疑問詞／there／here／that／it 時 →{is, has}；其他字視為所有格，保留成一個字（`john's`）
+3. **數字**：先把 `−`（U+2212）、`–` 等換成 `-`，在清除標點**之前**辨識完整數值，分開兩種格式：無逗號整數 `\d+`、合法千分位 `\d{1,3}(,\d{3})+`，可接負號與小數（前後須是字的邊界）：
+   - 負號 → {minus, negative}；小數點 → point ＋逐位數字；整數支援到 999,999,999
+4. **編輯距離加上「免費」規則**（其餘每個替換／漏念／多念仍各算 1 錯）：
+   - 使用者多念的口頭禪（um、uh…）不算錯；原句裡的口頭禪兩邊都保留，**使用者漏念算 1 錯**，兩邊都有則 0 錯
+   - 數字念法中 hundred／thousand／million 後、下一個數字字之前的 `and`（`numAnd`）兩邊都可有可無；其他位置的 `and` 照常比對
 5. **其他符號**：`&` → and、`%` → percent（兩邊一致）
-6. **逐字顯示**：`WordDiff` 加上原句原字；`WordDiffView` 以原句的字為單位顯示（一個原字展開成多個 token 時，任一 token 錯就把該原字標錯）
-7. **測試**：把 `applyMaintenanceResult` 的判斷抽成純函式（例如 `computeMaintenanceOutcome(data, results, now)`），Firestore 交易只負責讀寫；補上單元測試
+6. **逐字顯示**：`WordDiff` 加上 `src`／原字；`WordDiffView` 以原句的字為單位顯示（一個原字展開成多個 token 時，任一 token 錯就整個原字標錯，括號內顯示使用者念的）；多念的字單獨顯示；免費的口頭禪不顯示
+7. **相容**：`normalizeForCompare()` 保留現有行為（既有測試不修改）；`compareWords()` 改用新 token 化
+8. **效能保護**：使用者 token 超過「原句 token × 3 ＋ 20」時截斷（避免語音辨識異常輸出造成大量計算）
+9. **測試**：`applyMaintenanceResult` 的判斷抽成純函式 `computeMaintenanceOutcome(data, results, now)`（未到期或無維持資料回傳 null），Firestore 交易只負責讀寫；`errors === 0` 的判斷抽成 `canAccumulatePattern(scores)`
 
 ## 驗收條件
 1. 上表 6 個情境的 errors 符合「應該」欄（✅ 自動測試）
 2. `I'd like tea`／`I would like tea`、`I'm here`／`I am here`、`It's gone`／`It has gone`… 互相 0 錯（✅）
-3. `-5`／`minus five`、`-5`／`negative five`、`3.14`／`three point one four`、`1,250`／`one thousand two hundred fifty`（含 and 版本）皆 0 錯；`-5`／`five` ≥ 1 錯（✅）
-4. 使用者念的 um／uh 不扣分；原句有 Um 但使用者沒念要扣 1（✅）
+3. `-5`／`minus five`、`−5`／`negative five`、`3.14`／`three point one four`、`1,250`／`1250`／`one thousand two hundred fifty`／`one thousand two hundred and fifty` 雙向皆 0 錯；`999999999` 正確展開；`-5`／`five` ≥ 1 錯；一般句子漏念 and 仍算 1 錯（✅）
+3b. `How'd you do that`／`How did you do that` 0 錯；`I'd`／`I did` ≥ 1 錯（✅）
+4. 口頭禪：只有使用者有 → 0 錯；兩邊都有 → 0 錯；只有原句有 → 1 錯（✅）
 5. `WordDiff` 顯示原句原字：原句 `I'm 25`、念 `I am twenty five` → 顯示 `I'm`、`25` 皆為正確（✅ 測試 diff 資料；👀 畫面）
 6. 維持複習：3 句中 2 句全對 → 通過、level +1；全對的句子不變；沒全對的句子 mastery＝750 且移除 `nextAvailableAt`；只有 1 句全對 → 不通過、level 歸 0（✅ 純函式測試）
 7. 句型練習只有 `errors === 0` 才算可累加（✅ 測試判斷函式）
@@ -98,3 +102,6 @@ v3.11 改成「單字比對」後，補審查（PR #4，Codex／DeepSeek）發�
 
 ## 進度紀錄
 - 2026-10-27：建立規劃，送委員會與 Codex 評估
+- 委員會第一輪：Nemotron ✅、Poolside ✅、DeepSeek ✅；Gemini Flash ❌ 503（備援修正 PR #5 尚未合併）
+- Codex 3 項 🟠（全部採納）：使用者端刪口頭禪會讓兩邊都有 Um 時判錯 → 改為「使用者多念免費」；數字正則不支援無逗號四位數以上 → 分開兩種格式；可選 and 需要編輯距離支援 → 加免費規則、不全域刪 and
+- 採納：Nemotron（U+2212 負號、輸入長度上限）、DeepSeek（How'd＝did、`src` 與多念分開顯示、既有 normalizeForCompare 測試不可破壞）、Poolside（抽純函式測試）
