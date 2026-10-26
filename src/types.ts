@@ -8,7 +8,8 @@ export interface MaterialSentence {
   lowConfidence?: boolean;
   needsReview?: boolean;  // 時間軸校驗:跟音量分析的真實停頓點誤差過大,建議使用者複核
   mastery: number;           // 沿用現有 mastery 累加機制
-  lastScores?: { pronunciation: number; fluency: number; stress: number; total: number };
+  // 【v3.11】內容／流暢度／總分；舊資料的 pronunciation、stress 保留，改為選填以相容讀取
+  lastScores?: { content?: number; fluency: number; total: number; pronunciation?: number; stress?: number };
   extracted?: boolean;  // 是否已萃取過語言模型句型
   deleted?: boolean;         // 已存檔教材的句子標記刪除（可復原），練習、進度、列表皆略過
 }

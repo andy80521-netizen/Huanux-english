@@ -5,8 +5,7 @@ import { getMasteredCount } from '../utils/patternStage';
 import { addSydneyCalendarDays, getSydneyDateString, isSydneyDateReached } from '../utils/sydneyTime';
 
 export const MAINTENANCE_SIZE = 3;       // 每次維持題抽 3 句
-export const MAINTENANCE_PASS_COUNT = 2; // 3 句中至少 2 句達標才算通過
-export const MAINTENANCE_PASS_SCORE = 70;
+export const MAINTENANCE_PASS_COUNT = 2; // 3 句中至少 2 句全對才算通過（v3.11 起以一字不差判斷）
 const START_MASTERED = 10;               // 精熟 10 句（達到「可用」）後開始維持複習
 const POSTPONE_DAYS = 30;
 const FAILED_MASTERY = 750;
@@ -73,9 +72,9 @@ export function pickMaintenanceSentences(p: LanguagePattern, now: number = Date.
     .map(x => x.s);
 }
 
-// 套用維持題結果：scores 為每句（最後一次錄音）的總分。
+// 套用維持題結果：results 為每句（最後一次錄音）是否一字不差。
 // 已經不是到期狀態（做過了或被延後）時不重複套用，回傳 null。
-export async function applyMaintenanceResult(patternId: string, scores: Record<string, number>): Promise<MaintenanceOutcome | null> {
+export async function applyMaintenanceResult(patternId: string, results: Record<string, boolean>): Promise<MaintenanceOutcome | null> {
   const uid = auth.currentUser?.uid;
   if (!uid) throw new Error('請先登入');
   const ref = patternDocRef(uid, patternId);
@@ -87,14 +86,14 @@ export async function applyMaintenanceResult(patternId: string, scores: Record<s
     const m = data.maintenance;
     if (!m || !isSydneyDateReached(m.dueAt, now)) return null;
 
-    const ids = Object.keys(scores);
-    const passCount = ids.filter(id => scores[id] >= MAINTENANCE_PASS_SCORE).length;
-    const failedIds = new Set(ids.filter(id => scores[id] < MAINTENANCE_PASS_SCORE));
+    const ids = Object.keys(results);
+    const passCount = ids.filter(id => results[id]).length;
+    const failedIds = new Set(ids.filter(id => !results[id]));
     const passed = passCount >= MAINTENANCE_PASS_COUNT;
     const level = passed ? (m.level || 0) + 1 : 0;
     const dueAt = addSydneyCalendarDays(now, maintenanceIntervalDays(level));
 
-    // 答錯的句子：熟練度降為 750、移除等待時間，立即回到一般複習
+    // 沒有全對的句子：熟練度降為 750、移除等待時間，立即回到一般複習
     const sentences = (data.exampleSentences || []).map(s => {
       if (!failedIds.has(s.id)) return s;
       const { nextAvailableAt, ...rest } = s;

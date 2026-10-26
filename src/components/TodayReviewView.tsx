@@ -47,7 +47,7 @@ export default function TodayReviewView() {
 
     // 維持複習
     const [maintenancePattern, setMaintenancePattern] = useState<LanguagePattern | null>(null);
-    const maintenanceScoresRef = useRef<Record<string, number>>({});
+    const maintenanceScoresRef = useRef<Record<string, boolean>>({});
     const [maintenanceSaving, setMaintenanceSaving] = useState(false);
     const [maintenanceResult, setMaintenanceResult] = useState<MaintenanceResultState | null>(null);
     const maintenanceInitRequestedRef = useRef<Set<string>>(new Set());
@@ -228,12 +228,12 @@ export default function TodayReviewView() {
         void prefetchSpeech(item.sentences.slice(1).reduce<string[]>((acc, s) => acc.concat([s.qaQuestion || '', s.situationalPrompt || '', s.text || '']), []));
     };
 
-    // 三句都做完才結算；任何一句沒有分數（例如跳過）就不計算，下次重做
+    // 三句都做完才結算；任何一句沒有結果（例如跳過）就不計算，下次重做
     const finishMaintenance = async (pattern: LanguagePattern, queue: ReviewItem[]) => {
-        const scores: Record<string, number> = {};
+        const scores: Record<string, boolean> = {};
         for (const it of queue) {
             const s = maintenanceScoresRef.current[it.sentence.id];
-            if (typeof s !== 'number') {
+            if (typeof s !== 'boolean') {
                 setMaintenanceResult({ kind: 'incomplete' });
                 return;
             }
@@ -316,7 +316,7 @@ export default function TodayReviewView() {
                         <div className="bg-slate-50 dark:bg-slate-800/60 rounded-2xl p-4 border border-slate-100 dark:border-slate-800 text-sm font-bold text-slate-600 dark:text-slate-300 leading-relaxed space-y-1">
                             {r.kind === 'result' && (
                                 <>
-                                    <p>{MAINTENANCE_SIZE} 句中 {r.outcome.passCount} 句達 70 分</p>
+                                    <p>{MAINTENANCE_SIZE} 句中 {r.outcome.passCount} 句全對</p>
                                     {r.outcome.passed ? (
                                         <p>已連續通過 {r.outcome.level} 次</p>
                                     ) : (
@@ -441,7 +441,7 @@ export default function TodayReviewView() {
                     ? `維持題・第 ${completedKeys.size + 1} / ${sessionQueue.length} 題`
                     : `第 ${completedKeys.size + 1} / ${sessionQueue.length} 題`}
                 onScored={maintenancePattern
-                    ? (sentenceId, total) => { maintenanceScoresRef.current[sentenceId] = total; }
+                    ? (sentenceId, _total, isExact) => { maintenanceScoresRef.current[sentenceId] = isExact; }
                     : undefined}
             />
         );
@@ -489,7 +489,7 @@ export default function TodayReviewView() {
                                     {(item.pattern.maintenance?.level || 0) > 0
                                         ? `已連續通過 ${item.pattern.maintenance?.level} 次`
                                         : item.pattern.maintenance?.lastReviewedAt ? '上次沒有通過' : '第一次維持複習'}
-                                    ・{MAINTENANCE_SIZE} 句中 2 句達 70 分即通過
+                                    ・{MAINTENANCE_SIZE} 句中 2 句全對即通過
                                 </div>
                             </div>
                         ))}

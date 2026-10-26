@@ -35,7 +35,7 @@ export async function requestSightingDetection(materialId: string): Promise<void
   }
 }
 
-// 跟讀含已學句型的句子拿到 70 分以上時呼叫：每句每個雪梨日最多記一次
+// 跟讀含已學句型的句子達到累加熟練度的條件（內容 ≥ 70 且總分 ≥ 70）時呼叫：每句每個雪梨日最多記一次
 export async function recordActiveSighting(materialId: string, sentenceId: string, patternIds: string[]): Promise<void> {
   const uid = auth.currentUser?.uid;
   if (!uid || patternIds.length === 0) return;

@@ -2,7 +2,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { LanguagePattern, PatternExampleSentence } from '../types';
 import { getSupportedMimeType } from '../utils/mediaRecorder';
 import { transcribeRecording } from '../services/gemini';
-import { calculateFinalScores } from '../utils/scoring';
+import { calculateFinalScores, PracticeScores } from '../utils/scoring';
+import WordDiffView from './WordDiffView';
 import { generateAndSavePracticePrompts } from '../services/practicePrompts';
 import { requestPracticeImages } from '../services/practiceImage';
 import { getSpeechUrl, prefetchSpeech } from '../services/speech';
@@ -20,7 +21,7 @@ interface Props {
   onNext: () => void;
   isLastSentence: boolean;
   progressLabel?: string;
-  onScored?: (sentenceId: string, total: number) => void; // 每次評分完成時回報（維持複習用）
+  onScored?: (sentenceId: string, total: number, isExact: boolean) => void; // 每次評分完成時回報（維持複習用）；isExact＝一字不差
 }
 
 type SessionState = 'idle' | 'recording' | 'scoring' | 'scored' | 'scoreError';
@@ -119,7 +120,7 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
     const [sessionState, setSessionState] = useState<SessionState>('idle');
     const [activePromptType, setActivePromptType] = useState<PromptType | null>(null);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
-    const [scoreResult, setScoreResult] = useState<{ pronunciation: number, fluency: number, stress: number, total: number } | null>(null);
+    const [scoreResult, setScoreResult] = useState<PracticeScores | null>(null);
     const [userText, setUserText] = useState<string>('');
     const [currentMastery, setCurrentMastery] = useState<number>(0);
     const [tierBlockInfo, setTierBlockInfo] = useState<{ blocked: boolean, waitDays: number } | null>(null);
@@ -385,9 +386,11 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
             setUserText(transcribedText);
             const scores = calculateFinalScores(transcribedText, sentenceObj.text, durationSec);
             setScoreResult(scores);
-            onScored?.(sentenceObj.id, scores.total);
+            // 【v3.11】精準背出原句：一字不差才累加熟練度
+            const isExact = scores.errors === 0;
+            onScored?.(sentenceObj.id, scores.total, isExact);
 
-            if (scores.total >= 70) {
+            if (isExact) {
                 const uid = auth.currentUser?.uid;
                 if (uid) {
                     const now = Date.now();
@@ -747,19 +750,20 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
                                 <div className="h-12 w-px bg-slate-200 dark:bg-slate-700"></div>
                                 <div className="flex gap-4">
                                     <div className="text-center">
-                                        <div className="text-xl font-bold text-slate-700 dark:text-slate-300">{scoreResult.pronunciation}</div>
-                                        <div className="text-[10px] font-bold text-slate-500">發音</div>
+                                        <div className="text-xl font-bold text-slate-700 dark:text-slate-300">{scoreResult.content}</div>
+                                        <div className="text-[10px] font-bold text-slate-500">內容</div>
                                     </div>
                                     <div className="text-center">
                                         <div className="text-xl font-bold text-slate-700 dark:text-slate-300">{scoreResult.fluency}</div>
                                         <div className="text-[10px] font-bold text-slate-500">流暢</div>
                                     </div>
-                                    <div className="text-center">
-                                        <div className="text-xl font-bold text-slate-700 dark:text-slate-300">{scoreResult.stress}</div>
-                                        <div className="text-[10px] font-bold text-slate-500">重音</div>
-                                    </div>
                                 </div>
                             </div>
+                            {scoreResult.errors > 0 && (
+                                <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl p-3 mb-4 text-amber-700 dark:text-amber-400 text-sm font-bold text-center">
+                                    有 {scoreResult.errors} 個字不一致，熟練度未增加
+                                </div>
+                            )}
                             
                             <div className="space-y-4 mb-6">
                                 <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-100 dark:border-slate-800">
@@ -767,9 +771,10 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
                                     <p className="font-bold text-slate-800 dark:text-slate-200">{sentenceObj.text}</p>
                                 </div>
                                 <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-100 dark:border-slate-800">
-                                    <p className="text-xs font-bold text-slate-500 mb-1">您的發音 (語音辨識)</p>
+                                    <p className="text-xs font-bold text-slate-500 mb-1">您念的內容 (語音辨識)</p>
                                     <p className="font-bold text-slate-800 dark:text-slate-200">{userText}</p>
                                 </div>
+                                <WordDiffView diff={scoreResult.diff} />
                                 {hasAnswerAudio && (
                                     <button
                                         onClick={handleReplayAnswer}

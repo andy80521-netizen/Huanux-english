@@ -2,7 +2,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Material } from '../types';
 import { ChevronLeft, Mic, AlertCircle, RotateCcw, Send, Loader2, Headphones, Check } from 'lucide-react';
 import { transcribeRecording } from '../services/gemini';
-import { calculateShadowingScores } from '../utils/scoring';
+import { calculateShadowingScores, isShadowingPass, PracticeScores, SHADOWING_PASS_CONTENT } from '../utils/scoring';
+import WordDiffView from './WordDiffView';
 import { getSupportedMimeType } from '../utils/mediaRecorder';
 import { auth, db, appId } from '../firebase';
 import { doc, updateDoc } from 'firebase/firestore';
@@ -30,7 +31,7 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
     const [error, setError] = useState<string | null>(null);
     const [bufferCount, setBufferCount] = useState(6);
     const [recordedBlobUrl, setRecordedBlobUrl] = useState<string | null>(null);
-    const [scoreResult, setScoreResult] = useState<{ pronunciation: number, fluency: number, stress: number, total: number } | null>(null);
+    const [scoreResult, setScoreResult] = useState<PracticeScores | null>(null);
     const [userText, setUserText] = useState<string>('');
     const [userSpeechSec, setUserSpeechSec] = useState<number>(0);
     
@@ -332,14 +333,16 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                 throw new Error("無法取得使用者資訊，請重新登入。");
             }
             
+            // 【v3.11】內容 ≥ 70 且總分 ≥ 70 才累加熟練度
+            const passed = isShadowingPass(scores);
             let newMastery = sentence.mastery;
-            if (scores.total >= 70) {
+            if (passed) {
                 newMastery = Math.min(1000, sentence.mastery + scores.total);
             }
             
             const updatedSentences = material.sentences.map((s, i) =>
                 i === sentenceIndex
-                    ? { ...s, mastery: newMastery, lastScores: scores }
+                    ? { ...s, mastery: newMastery, lastScores: { content: scores.content, fluency: scores.fluency, total: scores.total } }
                     : s
             );
             
@@ -347,8 +350,8 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                 sentences: updatedSentences
             });
 
-            // 這句含有已學句型且達 70 分：記錄一次「親口念過」（不影響任何熟練度）
-            if (scores.total >= 70 && sightingPatternIds && sightingPatternIds.length > 0) {
+            // 這句含有已學句型且達到累加熟練度的條件：記錄一次「親口念過」（不影響任何熟練度）
+            if (passed && sightingPatternIds && sightingPatternIds.length > 0) {
                 void recordActiveSighting(material.id, sentence.id, sightingPatternIds);
             }
             
@@ -471,25 +474,30 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                         <div className="w-full text-left space-y-6">
                             <div className="bg-indigo-50 dark:bg-indigo-900/20 p-6 rounded-2xl border border-indigo-100 dark:border-indigo-800/50">
                                 <h3 className="text-center font-black text-slate-800 dark:text-slate-200 mb-6 text-xl">評分結果</h3>
-                                <div className="grid grid-cols-4 gap-4 text-center">
+                                <div className="grid grid-cols-3 gap-4 text-center">
                                     <div>
-                                        <div className="text-2xl font-black text-indigo-600 dark:text-indigo-400">{scoreResult.pronunciation}</div>
-                                        <div className="text-xs font-bold text-slate-500 mt-1">發音</div>
+                                        <div className="text-2xl font-black text-indigo-600 dark:text-indigo-400">{scoreResult.content}</div>
+                                        <div className="text-xs font-bold text-slate-500 mt-1">內容</div>
                                     </div>
                                     <div>
                                         <div className="text-2xl font-black text-indigo-600 dark:text-indigo-400">{scoreResult.fluency}</div>
                                         <div className="text-xs font-bold text-slate-500 mt-1">流暢度</div>
-                                    </div>
-                                    <div>
-                                        <div className="text-2xl font-black text-indigo-600 dark:text-indigo-400">{scoreResult.stress}</div>
-                                        <div className="text-xs font-bold text-slate-500 mt-1">重音/語調</div>
                                     </div>
                                     <div className="border-l border-indigo-200 dark:border-indigo-800">
                                         <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400">{scoreResult.total}</div>
                                         <div className="text-xs font-bold text-slate-500 mt-1">總分</div>
                                     </div>
                                 </div>
+                                {!isShadowingPass(scoreResult) && (
+                                    <p className="mt-4 text-center text-sm font-bold text-amber-600 dark:text-amber-400">
+                                        {scoreResult.content < SHADOWING_PASS_CONTENT
+                                            ? `內容未達 70 分（錯 ${scoreResult.errors} 個字），熟練度未增加`
+                                            : '總分未達 70 分，熟練度未增加'}
+                                    </p>
+                                )}
                             </div>
+
+                            <WordDiffView diff={scoreResult.diff} />
                             
                             <div className="bg-slate-100 dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700">
                                 <p className="text-xs font-bold text-slate-500 mb-2">您實際念的內容：</p>
