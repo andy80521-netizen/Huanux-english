@@ -1,0 +1,174 @@
+/*
+ * Huanux 設計系統：A「靜讀」
+ * - 語意色（ground、surface、ink…）寫在 :root（淺色）與 .dark（深色），隨主題切換
+ * - 既有程式大量使用的 indigo／slate 色階，在 @theme 改成玉綠與帶綠中性灰；
+ *   這兩組是「靜態」的，不隨深色模式切換（既有寫法已經是 bg-slate-50 dark:bg-slate-950）
+ * - ⚠️ ground 的色值也寫在 index.html 的首屏樣式，修改時要一起改（tests/themeContrast.test.ts 會檢查）
+ */
+@import "tailwindcss";
+
+/* 深色模式由 <html class="dark"> 控制（主題設定可選跟隨系統／淺色／深色） */
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --ground: #EEF1EC;
+  --surface: #FBFCFA;
+  --surface-2: #F6F8F5;
+  --ink: #1D2B28;
+  --muted: #5B6B66;
+  --line: #E3E9E5;
+  --accent: #1F7A5C;
+  --on-accent: #FFFFFF;
+  --accent-soft: #DCEBE3;
+  --gold: #8A6416;
+  --warn: #9C4A08;
+  --danger: #B42318;
+}
+
+.dark {
+  --ground: #0F1916;
+  --surface: #16231F;
+  --surface-2: #1B2925;
+  --ink: #E7EEEA;
+  --muted: #9DB0A8;
+  --line: #22302C;
+  --accent: #5CC8A0;
+  --on-accent: #0E1A16;
+  --accent-soft: #1E3A31;
+  --gold: #E2B356;
+  --warn: #F2A65A;
+  --danger: #F28B82;
+}
+
+@theme {
+  /* 語意色：bg-ground、text-ink、bg-accent… */
+  --color-ground: var(--ground);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-accent: var(--accent);
+  --color-on-accent: var(--on-accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-gold: var(--gold);
+  --color-warn: var(--warn);
+  --color-danger: var(--danger);
+
+  /* 既有 indigo → 玉綠 */
+  --color-indigo-50: #EBF5F0;
+  --color-indigo-100: #D5EBE0;
+  --color-indigo-200: #ACD8C4;
+  --color-indigo-300: #7FC4A8;
+  --color-indigo-400: #4FB48C;
+  --color-indigo-500: #2E9874;
+  --color-indigo-600: #1F7A5C;
+  --color-indigo-700: #17634A;
+  --color-indigo-800: #124E3B;
+  --color-indigo-900: #0E3B2D;
+  --color-indigo-950: #082219;
+
+  /* 既有 slate → 帶綠中性灰（850 是舊設定保留下來的中間階） */
+  --color-slate-50: #EEF1EC;
+  --color-slate-100: #E3E9E5;
+  --color-slate-200: #D2DBD6;
+  --color-slate-300: #B5C2BC;
+  --color-slate-400: #8A9B94;
+  --color-slate-500: #5B6B66;
+  --color-slate-600: #4A5B56;
+  --color-slate-700: #384843;
+  --color-slate-800: #263632;
+  --color-slate-850: #1B2925;
+  --color-slate-900: #16231F;
+  --color-slate-950: #0F1916;
+
+  /* 字體：介面中文、英文練習句 */
+  --font-sans: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+  --font-reading: "Newsreader", Georgia, "Times New Roman", serif;
+
+  /* 動效 */
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur-fast: 150ms;
+  --dur-base: 240ms;
+
+  /* Tailwind v3（舊 CDN）ring 預設 3px，v4 改 1px：恢復舊預設，避免既有 focus:ring 變細 */
+  --default-ring-width: 3px;
+  --default-ring-color: var(--color-indigo-500);
+}
+
+@layer base {
+  /* v3 → v4 相容：未指定顏色的 border 在 v3 是淺灰，v4 改成文字色 */
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-slate-200, currentColor);
+  }
+
+  /* v3 → v4 相容：按鈕游標 */
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  html {
+    background-color: var(--ground);
+    color-scheme: light;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  html.dark {
+    color-scheme: dark;
+  }
+
+  body {
+    margin: 0;
+    font-family: var(--font-sans);
+    color: var(--ink);
+    background-color: var(--ground);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background-color: var(--accent-soft);
+    color: var(--ink);
+  }
+}
+
+@utility pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+@utility pt-safe {
+  padding-top: env(safe-area-inset-top);
+}
+
+@keyframes spin-slow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@utility animate-spin-slow {
+  animation: spin-slow 3s linear infinite;
+}
+
+/* 系統開啟「減少動態效果」：轉場與裝飾動畫降到近 0，但保留載入中的轉圈（否則評分中看起來像當掉） */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .animate-spin,
+  .animate-spin-slow {
+    animation-duration: 1s !important;
+    animation-iteration-count: infinite !important;
+  }
+}
