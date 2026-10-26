@@ -119,6 +119,35 @@ def call(member, prompt, waits=RETRY_WAITS, deadline=None):
     raise RuntimeError(f"失敗（已重試或時間預算用完）：{err}")
 
 
+# Gemini 免費版常因過載回 503：主要模型重試仍失敗時，依序改用這些 Gemini 模型（不存在的模型會立即跳過）
+GEMINI_FALLBACK = [m.strip() for m in (os.environ.get("AI_GEMINI_FALLBACK")
+                   or "gemini-flash-lite-latest,gemini-2.5-flash").split(",") if m.strip()]
+
+
+def chain(member):
+    """一位成員實際會依序嘗試的模型：google 成員自動接上備援 Gemini 模型。"""
+    if not member.startswith("google:"):
+        return [member]
+    return [member] + [f"google:{m}" for m in GEMINI_FALLBACK if f"google:{m}" != member]
+
+
+def call_member(member, prompt, deadline=None):
+    """依 chain() 依序嘗試，回傳 (回覆, 實際使用的模型)。主要模型最多用剩餘時間的一半，其餘平分給備援。"""
+    deadline = deadline or START + BUDGET_SEC
+    alts, errors = chain(member), []
+    for i, alt in enumerate(alts):
+        left = deadline - time.time()
+        if left < MIN_TRY_SEC:
+            break
+        share = left if i == len(alts) - 1 else (left * 0.5 if i == 0 else left / (len(alts) - i))
+        try:
+            return call(alt, prompt, deadline=time.time() + share), alt
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"{alt}：{str(e)[:200]}")
+            print(f"  ✗ {alt}：{str(e)[:120]}", file=sys.stderr)
+    raise RuntimeError("；".join(errors) or "時間預算已用完，未呼叫")
+
+
 def _split(name):
     return [m.strip() for m in os.environ.get(name, "").split(",") if m.strip()]
 
@@ -143,12 +172,14 @@ def ask_all(prompt, level="中"):
     ms = members(level)
     out = {}
     with cf.ThreadPoolExecutor(max_workers=len(ms)) as ex:
-        futs = {ex.submit(call, m, prompt): m for m in ms}
+        futs = {ex.submit(call_member, m, prompt): m for m in ms}
         for f in cf.as_completed(futs):
             m = futs[f]
             try:
-                out[m] = f.result() or "（空白回覆）"
-                print(f"  ✓ {m}")
+                text, used = f.result()
+                note = f"⚠️ 主要模型暫時無法使用，改由 `{used}` 回答。\n\n" if used != m else ""
+                out[m] = note + (text or "（空白回覆）")
+                print(f"  ✓ {m}（{used}）")
             except Exception as e:  # noqa: BLE001
                 out[m] = f"⚠️ 此成員呼叫失敗：{e}"
                 print(f"  ✗ {m}：{e}", file=sys.stderr)
