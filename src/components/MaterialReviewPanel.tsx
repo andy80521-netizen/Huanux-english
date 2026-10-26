@@ -186,7 +186,7 @@ export default function MaterialReviewPanel({
     };
 
     return (
-        <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-800">
+        <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-xs border border-slate-200 dark:border-slate-800">
             <div className="flex flex-col justify-between gap-4 mb-6">
                 <div>
                     <h3 className="text-xl font-bold text-slate-800 dark:text-white">校對內容</h3>
@@ -201,7 +201,7 @@ export default function MaterialReviewPanel({
                                 onClick={() => handleCoverChoiceChange('photo')}
                                 className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all ${
                                     coverChoice === 'photo'
-                                        ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                                        ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-xs'
                                         : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
                                 }`}
                             >
@@ -212,7 +212,7 @@ export default function MaterialReviewPanel({
                                 onClick={() => handleCoverChoiceChange('anime')}
                                 className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all ${
                                     coverChoice === 'anime'
-                                        ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                                        ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-xs'
                                         : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
                                 }`}
                             >
@@ -223,7 +223,7 @@ export default function MaterialReviewPanel({
                                 onClick={() => handleCoverChoiceChange('none')}
                                 className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all ${
                                     coverChoice === 'none'
-                                        ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                                        ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-xs'
                                         : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
                                 }`}
                             >
@@ -287,7 +287,7 @@ export default function MaterialReviewPanel({
                         <button
                             onClick={executeSave}
                             disabled={isSaving}
-                            className="px-3 py-1.5 bg-amber-600 text-white font-bold rounded-lg hover:bg-amber-700 transition-colors text-xs disabled:opacity-50 shadow-sm"
+                            className="px-3 py-1.5 bg-amber-600 text-white font-bold rounded-lg hover:bg-amber-700 transition-colors text-xs disabled:opacity-50 shadow-xs"
                         >
                             確定存檔
                         </button>
@@ -345,7 +345,7 @@ export default function MaterialReviewPanel({
                                         <textarea
                                             value={s.text}
                                             onChange={(e) => updateSentence(s.internalId, 'text', e.target.value)}
-                                            className="w-full p-2.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 focus:ring-1 focus:ring-indigo-500 outline-none resize-none leading-relaxed"
+                                            className="w-full p-2.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 focus:ring-1 focus:ring-indigo-500 outline-hidden resize-none leading-relaxed"
                                             rows={source === 'upload' ? 3 : 2}
                                         />
                                     </div>
@@ -358,7 +358,7 @@ export default function MaterialReviewPanel({
                                             <textarea
                                                 value={s.translation || ''}
                                                 onChange={(e) => updateSentence(s.internalId, 'translation', e.target.value)}
-                                                className="w-full p-2.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 focus:ring-1 focus:ring-indigo-500 outline-none resize-none leading-relaxed"
+                                                className="w-full p-2.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 focus:ring-1 focus:ring-indigo-500 outline-hidden resize-none leading-relaxed"
                                                 rows={2}
                                             />
                                         </div>

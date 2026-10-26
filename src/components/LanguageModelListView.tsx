@@ -334,7 +334,7 @@ export default function LanguageModelListView({ onPatternClick, filters, onFilte
 
             {/* 選取模式操作列（批次刪除） */}
             {selectMode && (
-                <div className="sticky top-0 z-10 mb-4 px-3 py-3 rounded-2xl bg-white/95 dark:bg-slate-900/95 backdrop-blur border border-indigo-200 dark:border-indigo-800 shadow-sm flex flex-wrap items-center gap-2">
+                <div className="sticky top-0 z-10 mb-4 px-3 py-3 rounded-2xl bg-white/95 dark:bg-slate-900/95 backdrop-blur border border-indigo-200 dark:border-indigo-800 shadow-xs flex flex-wrap items-center gap-2">
                     <span className="text-sm font-black text-slate-700 dark:text-slate-200 flex-1 min-w-[5rem]">
                         已選 {selectedExisting.length} 個
                     </span>
@@ -379,7 +379,7 @@ export default function LanguageModelListView({ onPatternClick, filters, onFilte
             )}
 
             {/* 篩選區 */}
-            <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 shadow-sm border border-slate-200 dark:border-slate-800 mb-6 space-y-4">
+            <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 shadow-xs border border-slate-200 dark:border-slate-800 mb-6 space-y-4">
                 {/* 關鍵字搜尋框 */}
                 <div className="relative flex items-center">
                     <Search size={18} className="absolute left-3.5 text-slate-400 pointer-events-none" />
@@ -388,7 +388,7 @@ export default function LanguageModelListView({ onPatternClick, filters, onFilte
                         value={filters.search}
                         onChange={(e) => handleSearchChange(e.target.value)}
                         placeholder="搜尋句型或中文語意..."
-                        className="w-full pl-10 pr-9 py-2.5 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 rounded-xl text-sm font-medium text-slate-800 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all"
+                        className="w-full pl-10 pr-9 py-2.5 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 rounded-xl text-sm font-medium text-slate-800 dark:text-slate-100 placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all"
                     />
                     {filters.search && (
                         <button
@@ -414,7 +414,7 @@ export default function LanguageModelListView({ onPatternClick, filters, onFilte
                                     onClick={() => handleCategorySelect(catKey)}
                                     className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all shrink-0 ${
                                         isSelected
-                                            ? 'bg-indigo-600 text-white shadow-sm'
+                                            ? 'bg-indigo-600 text-white shadow-xs'
                                             : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
                                     }`}
                                 >
@@ -433,7 +433,7 @@ export default function LanguageModelListView({ onPatternClick, filters, onFilte
                             onClick={() => handlePrimaryCategorySelect('all')}
                             className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all shrink-0 flex items-center gap-1.5 ${
                                 effectivePrimaryCategory === 'all'
-                                    ? 'bg-indigo-600 text-white shadow-sm'
+                                    ? 'bg-indigo-600 text-white shadow-xs'
                                     : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
                             }`}
                         >
@@ -456,7 +456,7 @@ export default function LanguageModelListView({ onPatternClick, filters, onFilte
                                     onClick={() => handlePrimaryCategorySelect(cat)}
                                     className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all shrink-0 flex items-center gap-1.5 ${
                                         isSelected
-                                            ? 'bg-indigo-600 text-white shadow-sm'
+                                            ? 'bg-indigo-600 text-white shadow-xs'
                                             : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
                                     }`}
                                 >
@@ -490,7 +490,7 @@ export default function LanguageModelListView({ onPatternClick, filters, onFilte
                                                 onClick={() => handleSituationTagClick(tag)}
                                                 className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-all shrink-0 flex items-center gap-1 ${
                                                     isSelected
-                                                        ? 'bg-indigo-600 text-white shadow-sm'
+                                                        ? 'bg-indigo-600 text-white shadow-xs'
                                                         : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
                                                 }`}
                                             >
@@ -514,7 +514,7 @@ export default function LanguageModelListView({ onPatternClick, filters, onFilte
 
             {/* 篩選結果列表 或 無結果提示 */}
             {finalFilteredPatterns.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-16 text-center bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-8 shadow-sm">
+                <div className="flex flex-col items-center justify-center py-16 text-center bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-8 shadow-xs">
                     <div className="w-14 h-14 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center mb-4 text-slate-400">
                         <Search size={28} />
                     </div>
@@ -556,7 +556,7 @@ export default function LanguageModelListView({ onPatternClick, filters, onFilte
                                         <div 
                                             key={pattern.id}
                                             onClick={() => (selectMode ? toggleSelected(pattern.id) : onPatternClick(pattern.id))}
-                                            className={`bg-white dark:bg-slate-900 rounded-xl p-4 shadow-sm border hover:shadow-md transition-all cursor-pointer group flex flex-col ${
+                                            className={`bg-white dark:bg-slate-900 rounded-xl p-4 shadow-xs border hover:shadow-md transition-all cursor-pointer group flex flex-col ${
                                                 isSelected
                                                     ? 'border-indigo-500 ring-2 ring-indigo-500/30'
                                                     : 'border-slate-200 dark:border-slate-800 hover:border-indigo-200 dark:hover:border-indigo-800'

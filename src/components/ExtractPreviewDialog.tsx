@@ -40,7 +40,7 @@ export default function ExtractPreviewDialog({ candidates, note, saving, onConfi
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-xs p-4 animate-in fade-in duration-200">
       <div className="bg-white dark:bg-slate-900 rounded-3xl w-full max-w-md max-h-[85vh] flex flex-col shadow-2xl border border-slate-100 dark:border-slate-800">
         <div className="px-5 pt-5 pb-3 border-b border-slate-100 dark:border-slate-800">
           <h3 className="text-lg font-black text-slate-800 dark:text-white flex items-center gap-2">

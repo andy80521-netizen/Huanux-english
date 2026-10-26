@@ -326,7 +326,7 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
             <div className="flex items-center gap-4 mb-6">
                 <button 
                     onClick={onBack}
-                    className="p-2 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 rounded-full shadow-sm hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                    className="p-2 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 rounded-full shadow-xs hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
                 >
                     <ChevronLeft size={24} />
                 </button>
@@ -335,7 +335,7 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
                 </h2>
                 <button
                     onClick={() => setShowTrash(true)}
-                    className="p-2 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 rounded-full shadow-sm hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors relative"
+                    className="p-2 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 rounded-full shadow-xs hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors relative"
                     title="垃圾桶"
                 >
                     <Trash2 size={24} />
@@ -349,7 +349,7 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
 
             {/* 封面區 */}
             <div className="mb-6 space-y-3">
-                <div className="aspect-video w-full rounded-2xl overflow-hidden bg-slate-100 dark:bg-slate-800 relative flex items-center justify-center border border-slate-200 dark:border-slate-800 shadow-sm">
+                <div className="aspect-video w-full rounded-2xl overflow-hidden bg-slate-100 dark:bg-slate-800 relative flex items-center justify-center border border-slate-200 dark:border-slate-800 shadow-xs">
                     {material.coverUrl && material.coverStatus !== 'generating' ? (
                         <img
                             src={material.coverUrl}
@@ -378,7 +378,7 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
                                 onClick={() => handleCoverStyleChange('photo')}
                                 className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all ${
                                     coverStyle === 'photo'
-                                        ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                                        ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-xs'
                                         : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
                                 }`}
                             >
@@ -389,7 +389,7 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
                                 onClick={() => handleCoverStyleChange('anime')}
                                 className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all ${
                                     coverStyle === 'anime'
-                                        ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                                        ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-xs'
                                         : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
                                 }`}
                             >
@@ -401,7 +401,7 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
                     <button
                         onClick={handleGenerateCover}
                         disabled={isCoverGenerating}
-                        className="px-4 py-2 bg-indigo-600 text-white font-bold rounded-xl shadow-sm hover:bg-indigo-700 transition-all active:scale-95 disabled:opacity-50 disabled:pointer-events-none flex items-center gap-2 text-sm"
+                        className="px-4 py-2 bg-indigo-600 text-white font-bold rounded-xl shadow-xs hover:bg-indigo-700 transition-all active:scale-95 disabled:opacity-50 disabled:pointer-events-none flex items-center gap-2 text-sm"
                     >
                         {isCoverGenerating ? (
                             <>
@@ -435,7 +435,7 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
                                 ? '上次比對沒有完成，可以重新比對'
                                 : '還沒比對過';
                 return (
-                    <div className="mb-6 p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm flex items-center justify-between gap-3">
+                    <div className="mb-6 p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs flex items-center justify-between gap-3">
                         <div className="min-w-0">
                             <p className="text-sm font-bold text-slate-700 dark:text-slate-200">已學句型比對</p>
                             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{statusText}</p>
@@ -459,7 +459,7 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
             />
 
             {extractMessage && (
-                <div className={`mb-6 text-sm px-4 py-3 rounded-xl shadow-sm border animate-in slide-in-from-top-2 font-bold text-center ${
+                <div className={`mb-6 text-sm px-4 py-3 rounded-xl shadow-xs border animate-in slide-in-from-top-2 font-bold text-center ${
                     extractMessage.isError 
                         ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 border-red-100 dark:border-red-800' 
                         : 'bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 border-indigo-100 dark:border-indigo-800'
@@ -480,7 +480,7 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
                     if (s.deleted) return null;
                     const isCompleted = s.mastery >= 1000;
                     return (
-                        <div key={s.id} className="p-5 rounded-2xl bg-white dark:bg-slate-900 shadow-sm border border-slate-200 dark:border-slate-800 flex flex-col gap-4">
+                        <div key={s.id} className="p-5 rounded-2xl bg-white dark:bg-slate-900 shadow-xs border border-slate-200 dark:border-slate-800 flex flex-col gap-4">
                             <div className="w-full space-y-2">
                                 <div className="flex flex-wrap items-center gap-2 mb-2">
                                     {s.lowConfidence && (
@@ -523,7 +523,7 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
                                     <button
                                         onClick={() => handleExtract(i)}
                                         disabled={extractingIndex !== null}
-                                        className="shrink-0 px-4 h-12 rounded-xl flex items-center justify-center gap-2 transition-all shadow-sm bg-purple-50 text-purple-600 hover:bg-purple-100 dark:bg-purple-900/30 dark:text-purple-400 dark:hover:bg-purple-900/50 font-bold text-sm disabled:opacity-50"
+                                        className="shrink-0 px-4 h-12 rounded-xl flex items-center justify-center gap-2 transition-all shadow-xs bg-purple-50 text-purple-600 hover:bg-purple-100 dark:bg-purple-900/30 dark:text-purple-400 dark:hover:bg-purple-900/50 font-bold text-sm disabled:opacity-50"
                                     >
                                         {extractingIndex === i ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}
                                         萃取語言模型
@@ -534,7 +534,7 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
                                         onClick={() => handleExtract(i)}
                                         disabled={extractingIndex !== null}
                                         title="已萃取過，可重新萃取（與既有句型重複的會自動略過）"
-                                        className="shrink-0 px-4 h-12 rounded-xl flex items-center justify-center gap-2 shadow-sm bg-slate-50 text-slate-500 hover:bg-slate-100 dark:bg-slate-800/50 dark:text-slate-400 dark:hover:bg-slate-800 font-bold text-sm border border-slate-200 dark:border-slate-700 transition-all disabled:opacity-50"
+                                        className="shrink-0 px-4 h-12 rounded-xl flex items-center justify-center gap-2 shadow-xs bg-slate-50 text-slate-500 hover:bg-slate-100 dark:bg-slate-800/50 dark:text-slate-400 dark:hover:bg-slate-800 font-bold text-sm border border-slate-200 dark:border-slate-700 transition-all disabled:opacity-50"
                                     >
                                         {extractingIndex === i ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}
                                         已萃取・重新萃取
@@ -542,14 +542,14 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
                                 )}
                                 <button
                                     onClick={() => setPracticeIndex(i)}
-                                    className="shrink-0 px-4 h-12 rounded-xl flex items-center justify-center gap-2 transition-all shadow-sm bg-indigo-50 text-indigo-600 hover:bg-indigo-100 dark:bg-indigo-900/30 dark:text-indigo-400 dark:hover:bg-indigo-900/50 font-bold text-sm"
+                                    className="shrink-0 px-4 h-12 rounded-xl flex items-center justify-center gap-2 transition-all shadow-xs bg-indigo-50 text-indigo-600 hover:bg-indigo-100 dark:bg-indigo-900/30 dark:text-indigo-400 dark:hover:bg-indigo-900/50 font-bold text-sm"
                                 >
                                     <Mic size={18} />
                                     跟讀
                                 </button>
                                 <button
                                     onClick={() => playingIndex === i ? handlePause() : handlePlaySegment(i)}
-                                    className={`shrink-0 w-12 h-12 rounded-xl flex items-center justify-center transition-all shadow-sm ${playingIndex === i ? 'bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-100' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 hover:text-slate-800 dark:hover:bg-slate-700 dark:hover:text-slate-100'}`}
+                                    className={`shrink-0 w-12 h-12 rounded-xl flex items-center justify-center transition-all shadow-xs ${playingIndex === i ? 'bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-100' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 hover:text-slate-800 dark:hover:bg-slate-700 dark:hover:text-slate-100'}`}
                                 >
                                     {playingIndex === i ? <Pause size={20} className="fill-current" /> : <Play size={20} className="fill-current ml-1" />}
                                 </button>
@@ -557,7 +557,7 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
                                     onClick={() => setPendingDeleteIndex(i)}
                                     disabled={activeIndices.length <= 1}
                                     title={activeIndices.length <= 1 ? "至少需保留 1 句" : "刪除句子"}
-                                    className="shrink-0 w-12 h-12 rounded-xl flex items-center justify-center transition-all shadow-sm text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/30 disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-red-500"
+                                    className="shrink-0 w-12 h-12 rounded-xl flex items-center justify-center transition-all shadow-xs text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/30 disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-red-500"
                                 >
                                     <Trash2 size={20} />
                                 </button>
@@ -593,7 +593,7 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
             {/* 垃圾桶視窗 */}
             {showTrash && (
                 <div 
-                    className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4 animate-in fade-in duration-200"
+                    className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-xs p-4 animate-in fade-in duration-200"
                     onClick={() => setShowTrash(false)}
                 >
                     <div 
@@ -640,7 +640,7 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
                                             </div>
                                             <button
                                                 onClick={() => handleRestoreSentence(i)}
-                                                className="self-end px-3 py-1.5 bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-950 font-bold text-xs flex items-center gap-1.5 transition-colors shrink-0 shadow-sm"
+                                                className="self-end px-3 py-1.5 bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-950 font-bold text-xs flex items-center gap-1.5 transition-colors shrink-0 shadow-xs"
                                             >
                                                 <RotateCcw size={14} />
                                                 復原

@@ -18,7 +18,7 @@ export default function GroupSelectionView({ pattern, onBack, onSelectGroup, onV
       <div className="flex items-center gap-4 mb-8">
         <button 
           onClick={onBack}
-          className="p-2 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 rounded-full shadow-sm hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+          className="p-2 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 rounded-full shadow-xs hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
         >
           <ChevronLeft size={24} />
         </button>
@@ -44,7 +44,7 @@ export default function GroupSelectionView({ pattern, onBack, onSelectGroup, onV
               key={groupIndex}
               className={`relative flex flex-col rounded-2xl border overflow-hidden transition-all ${
                 unlocked 
-                  ? 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-indigo-400 dark:hover:border-indigo-600 shadow-sm' 
+                  ? 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-indigo-400 dark:hover:border-indigo-600 shadow-xs' 
                   : 'bg-slate-100/50 dark:bg-slate-950/50 border-slate-200 dark:border-slate-800 opacity-60'
               }`}
             >

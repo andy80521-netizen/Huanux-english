@@ -1,18 +1,20 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Volume2, ChevronRight, Activity, LogOut, AlertTriangle, Mail, Lock, LogIn, UserPlus, Loader2, Moon, Sun, User, Database, Save, X, Github, PlayCircle, RefreshCw, AlertCircle, ExternalLink } from 'lucide-react';
+import { Settings, Volume2, ChevronRight, Activity, LogOut, AlertTriangle, Mail, Lock, LogIn, UserPlus, Loader2, Moon, Sun, Monitor, User, Database, Save, X, Github, PlayCircle, RefreshCw, AlertCircle, ExternalLink } from 'lucide-react';
 import { User as FirebaseUser, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword, signInAnonymously, updateProfile, signInWithPopup } from 'firebase/auth';
 import { auth, isFirebaseReady, githubProvider, isUsingDefaultConfig } from '../firebase';
 import { getVoices, speakTextPromise } from '../utils';
+import { ThemeMode } from '../utils/theme';
+import SegmentedControl from './ui/SegmentedControl';
 
 interface Props {
   user: FirebaseUser | null;
   voicePrefs: { zh?: string, en?: string };
   setVoicePrefs: React.Dispatch<React.SetStateAction<{ zh: string, en: string }>>;
-  isDarkMode: boolean;
-  setIsDarkMode: React.Dispatch<React.SetStateAction<boolean>>;
+  themeMode: ThemeMode;
+  setThemeMode: (mode: ThemeMode) => void;
 }
 
-const PersonalMode: React.FC<Props> = ({ user, voicePrefs, setVoicePrefs, isDarkMode, setIsDarkMode }) => {
+const PersonalMode: React.FC<Props> = ({ user, voicePrefs, setVoicePrefs, themeMode, setThemeMode }) => {
     const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([]);
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
@@ -200,7 +202,7 @@ const PersonalMode: React.FC<Props> = ({ user, voicePrefs, setVoicePrefs, isDark
         <div className="h-full bg-slate-50 dark:bg-slate-950 overflow-y-auto transition-colors duration-300 relative">
             {/* Config Modal Overlay */}
             {showConfig && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6 animate-in fade-in duration-200">
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-6 animate-in fade-in duration-200">
                     <div className="bg-white dark:bg-slate-900 w-full max-w-sm rounded-3xl p-6 shadow-2xl border border-slate-100 dark:border-slate-800 animate-in zoom-in-95 duration-200">
                         <div className="flex justify-between items-center mb-4">
                             <h3 className="text-lg font-black text-slate-800 dark:text-white flex items-center gap-2">
@@ -223,7 +225,7 @@ const PersonalMode: React.FC<Props> = ({ user, voicePrefs, setVoicePrefs, isDark
                         <textarea 
                             value={configJson}
                             onChange={(e) => setConfigJson(e.target.value)}
-                            className="w-full h-32 p-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-mono focus:ring-2 focus:ring-indigo-500 outline-none text-slate-900 dark:text-white resize-none mb-4"
+                            className="w-full h-32 p-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-mono focus:ring-2 focus:ring-indigo-500 outline-hidden text-slate-900 dark:text-white resize-none mb-4"
                             placeholder={`請貼上完整的程式碼，例如：\nconst firebaseConfig = {\n  apiKey: "AIza...",\n  authDomain: "..."\n};`}
                         />
                         
@@ -256,25 +258,22 @@ const PersonalMode: React.FC<Props> = ({ user, voicePrefs, setVoicePrefs, isDark
             <div className="min-h-full flex flex-col items-center justify-center p-6 pb-24">
                 <div className="w-full max-w-sm bg-white dark:bg-slate-900 rounded-3xl shadow-xl border border-slate-100 dark:border-slate-800 p-8 text-center transition-colors duration-300 relative">
                     
-                    {/* Theme Toggle */}
-                    <div className="mb-8 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl flex items-center">
-                        <button 
-                            onClick={() => setIsDarkMode(false)} 
-                            className={`flex-1 py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all ${!isDarkMode ? 'bg-white dark:bg-slate-700 shadow-sm text-indigo-600' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}
-                        >
-                            <Sun size={14} /> 白天模式
-                        </button>
-                        <button 
-                            onClick={() => setIsDarkMode(true)} 
-                            className={`flex-1 py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all ${isDarkMode ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}
-                        >
-                            <Moon size={14} /> 夜間模式
-                        </button>
-                    </div>
+                    {/* 外觀：跟隨系統／淺色／深色 */}
+                    <SegmentedControl<ThemeMode>
+                        label="外觀"
+                        className="mb-8"
+                        value={themeMode}
+                        onChange={setThemeMode}
+                        options={[
+                            { value: 'system', label: '跟隨系統', icon: <Monitor size={14} aria-hidden="true" /> },
+                            { value: 'light', label: '淺色', icon: <Sun size={14} aria-hidden="true" /> },
+                            { value: 'dark', label: '深色', icon: <Moon size={14} aria-hidden="true" /> },
+                        ]}
+                    />
 
                     {user ? (
                         <>
-                            <div className="w-20 h-20 bg-indigo-100 dark:bg-indigo-900/30 rounded-full flex items-center justify-center mx-auto mb-6 text-indigo-600 dark:text-indigo-400 shadow-sm">
+                            <div className="w-20 h-20 bg-indigo-100 dark:bg-indigo-900/30 rounded-full flex items-center justify-center mx-auto mb-6 text-indigo-600 dark:text-indigo-400 shadow-xs">
                                 {user.photoURL ? <img src={user.photoURL} alt="User" className="w-full h-full rounded-full object-cover" /> : <Settings size={40} />}
                             </div>
                             <h2 className="text-2xl font-bold text-slate-800 dark:text-white mb-2">設定與個人</h2>
@@ -346,7 +345,7 @@ const PersonalMode: React.FC<Props> = ({ user, voicePrefs, setVoicePrefs, isDark
                                             type="text" 
                                             value={name} 
                                             onChange={(e) => setName(e.target.value)}
-                                            className="w-full pl-10 pr-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none text-slate-900 dark:text-white" 
+                                            className="w-full pl-10 pr-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-hidden text-slate-900 dark:text-white" 
                                             placeholder="您的暱稱" 
                                             required={!isLoginMode}
                                         />
@@ -358,7 +357,7 @@ const PersonalMode: React.FC<Props> = ({ user, voicePrefs, setVoicePrefs, isDark
                                         type="email" 
                                         value={email} 
                                         onChange={(e) => setEmail(e.target.value)}
-                                        className="w-full pl-10 pr-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none text-slate-900 dark:text-white" 
+                                        className="w-full pl-10 pr-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-hidden text-slate-900 dark:text-white" 
                                         placeholder="電子郵件" 
                                         required 
                                     />
@@ -369,7 +368,7 @@ const PersonalMode: React.FC<Props> = ({ user, voicePrefs, setVoicePrefs, isDark
                                         type="password" 
                                         value={password} 
                                         onChange={(e) => setPassword(e.target.value)}
-                                        className="w-full pl-10 pr-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none text-slate-900 dark:text-white" 
+                                        className="w-full pl-10 pr-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-hidden text-slate-900 dark:text-white" 
                                         placeholder="密碼" 
                                         required 
                                     />

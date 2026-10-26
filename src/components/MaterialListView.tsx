@@ -17,7 +17,7 @@ const ConfirmDialog: React.FC<{
 }> = ({ isOpen, title, message, onConfirm, onCancel, confirmText = "確定", cancelText = "取消" }) => {
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-xs p-4 animate-in fade-in duration-200">
       <div className="bg-white dark:bg-slate-900 rounded-[2rem] p-8 w-full max-w-xs shadow-2xl animate-in zoom-in-95 duration-200 text-center border border-slate-100 dark:border-slate-800">
         <div className="w-16 h-16 bg-red-50 dark:bg-red-900/20 rounded-full flex items-center justify-center mx-auto mb-6">
           <AlertTriangle className="text-red-500 dark:text-red-400" size={32} />
@@ -162,7 +162,7 @@ export default function MaterialListView({ onAddClick, onMaterialClick }: { onAd
             </div>
 
             {error && (
-                <div className="mb-6 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm px-4 py-3 rounded-xl flex items-center gap-2 shadow-sm border border-red-100 dark:border-red-800">
+                <div className="mb-6 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm px-4 py-3 rounded-xl flex items-center gap-2 shadow-xs border border-red-100 dark:border-red-800">
                     <AlertCircle size={16} className="shrink-0" />
                     <span className="font-bold leading-relaxed">{error}</span>
                 </div>
@@ -191,7 +191,7 @@ export default function MaterialListView({ onAddClick, onMaterialClick }: { onAd
                         const activeSentences = m.sentences.filter(s => !s.deleted);
                         const completedCount = activeSentences.filter(s => s.mastery >= 1000).length;
                         return (
-                            <div key={m.id} className="bg-white dark:bg-slate-900 rounded-2xl p-3 shadow-sm border border-slate-200 dark:border-slate-800 hover:shadow-md transition-shadow flex gap-3 items-stretch cursor-pointer overflow-hidden" onClick={() => onMaterialClick(m)}>
+                            <div key={m.id} className="bg-white dark:bg-slate-900 rounded-2xl p-3 shadow-xs border border-slate-200 dark:border-slate-800 hover:shadow-md transition-shadow flex gap-3 items-stretch cursor-pointer overflow-hidden" onClick={() => onMaterialClick(m)}>
                                 {/* 16:9 封面縮圖 */}
                                 <div className="w-36 shrink-0 aspect-video self-center rounded-xl overflow-hidden bg-slate-100 dark:bg-slate-800 relative flex items-center justify-center">
                                     {m.coverUrl && m.coverStatus !== 'generating' ? (

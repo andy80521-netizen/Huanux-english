@@ -129,7 +129,7 @@ export default function LanguageModelDetailView({ patternId, onBack }: { pattern
             <div className="flex items-center gap-4 mb-8">
                 <button 
                     onClick={onBack}
-                    className="p-2 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 rounded-full shadow-sm hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                    className="p-2 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 rounded-full shadow-xs hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
                 >
                     <ChevronLeft size={24} />
                 </button>
@@ -147,7 +147,7 @@ export default function LanguageModelDetailView({ patternId, onBack }: { pattern
                 <button
                     onClick={() => setShowDeleteConfirm(true)}
                     disabled={deleting}
-                    className="p-2 bg-white dark:bg-slate-900 text-red-500 hover:text-red-600 dark:text-red-400 dark:hover:text-red-300 rounded-full shadow-sm hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                    className="p-2 bg-white dark:bg-slate-900 text-red-500 hover:text-red-600 dark:text-red-400 dark:hover:text-red-300 rounded-full shadow-xs hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                     title="刪除句型"
                 >
                     {deleting ? <Loader2 size={24} className="animate-spin" /> : <Trash2 size={24} />}
@@ -160,7 +160,7 @@ export default function LanguageModelDetailView({ patternId, onBack }: { pattern
                 </div>
             )}
 
-            <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-800 mb-6">
+            <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-xs border border-slate-200 dark:border-slate-800 mb-6">
                 <h2 className="text-3xl sm:text-4xl font-black text-slate-800 dark:text-white mb-6 leading-tight">
                     {pattern.text}
                 </h2>
@@ -241,7 +241,7 @@ export default function LanguageModelDetailView({ patternId, onBack }: { pattern
                     <button
                         onClick={handleRegenerateClick}
                         disabled={regenerating}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-slate-800 border border-indigo-200 dark:border-indigo-800/60 rounded-xl transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-slate-800 border border-indigo-200 dark:border-indigo-800/60 rounded-xl transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         {regenerating ? (
                             <>
@@ -266,7 +266,7 @@ export default function LanguageModelDetailView({ patternId, onBack }: { pattern
                 {pattern.seedExamples && pattern.seedExamples.length > 0 ? (
                     <div className="space-y-3">
                         {pattern.seedExamples.map((ex, idx) => (
-                            <div key={idx} className="bg-white dark:bg-slate-900 rounded-xl p-4 shadow-sm border border-slate-200 dark:border-slate-800">
+                            <div key={idx} className="bg-white dark:bg-slate-900 rounded-xl p-4 shadow-xs border border-slate-200 dark:border-slate-800">
                                 <p className="font-bold text-slate-800 dark:text-slate-200 mb-1">{ex.en}</p>
                                 <p className="text-sm font-bold text-slate-500 dark:text-slate-400">{ex.zh}</p>
                             </div>

@@ -85,7 +85,7 @@ export default function RetellFeedbackPanel({ feedback, targetPatterns, onPlayMo
               <button
                 onClick={onPlayModel}
                 disabled={modelLoading}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800/60 rounded-xl shadow-sm disabled:opacity-50"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800/60 rounded-xl shadow-xs disabled:opacity-50"
               >
                 {modelLoading ? <Loader2 size={14} className="animate-spin" /> : <Volume2 size={14} />}
                 {modelLoading ? '語音準備中…' : '播放示範'}

@@ -222,7 +222,7 @@ export default function RetellView({ material, segment, segmentIndex, targetPatt
         <button
           onClick={onBack}
           disabled={phase === 'recording' || phase === 'processing'}
-          className="p-2 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 rounded-full shadow-sm hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors disabled:opacity-50"
+          className="p-2 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 rounded-full shadow-xs hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors disabled:opacity-50"
         >
           <ChevronLeft size={24} />
         </button>
@@ -232,7 +232,7 @@ export default function RetellView({ material, segment, segmentIndex, targetPatt
         </div>
       </div>
 
-      <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-slate-800 mb-6 space-y-4">
+      <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 shadow-xs border border-slate-200 dark:border-slate-800 mb-6 space-y-4">
         <p className="text-sm font-bold text-slate-600 dark:text-slate-300 leading-relaxed">
           聽完這一段之後，用自己的話、以英文說出這段在講什麼。不用逐字背誦，講出重點就好。
         </p>
@@ -317,7 +317,7 @@ export default function RetellView({ material, segment, segmentIndex, targetPatt
       )}
 
       {phase === 'done' && feedback && (
-        <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-slate-800 mb-6 space-y-5">
+        <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 shadow-xs border border-slate-200 dark:border-slate-800 mb-6 space-y-5">
           {transcript && (
             <div>
               <p className="text-xs font-black text-slate-500 dark:text-slate-400 mb-1">你說的（語音辨識）</p>
@@ -350,7 +350,7 @@ export default function RetellView({ material, segment, segmentIndex, targetPatt
           {history.map(r => {
             const expanded = expandedHistoryId === r.id;
             return (
-              <div key={r.id} className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+              <div key={r.id} className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
                 <button
                   onClick={() => setExpandedHistoryId(expanded ? null : r.id)}
                   className="w-full p-4 flex items-center justify-between gap-3 text-left"

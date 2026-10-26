@@ -70,7 +70,7 @@ export default function BadgeMode() {
             </div>
 
             {patterns.length === 0 ? (
-                <div className="py-20 text-center text-slate-400 dark:text-slate-500 border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-[3rem] bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm">
+                <div className="py-20 text-center text-slate-400 dark:text-slate-500 border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-[3rem] bg-white/50 dark:bg-slate-900/50 backdrop-blur-xs">
                     <Sparkles className="mx-auto mb-6 opacity-20 text-indigo-400" size={64} />
                     <h4 className="font-black text-slate-600 dark:text-slate-300 text-lg mb-2">尚未開始任何句型</h4>
                     <p className="text-sm font-bold opacity-60 px-8 leading-relaxed">
@@ -83,7 +83,7 @@ export default function BadgeMode() {
                         const finishedCount = getMasteredCount(pattern);
                         
                         return (
-                            <div key={pattern.id} className="bg-white dark:bg-slate-900 rounded-2xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm">
+                            <div key={pattern.id} className="bg-white dark:bg-slate-900 rounded-2xl p-6 border border-slate-200 dark:border-slate-800 shadow-xs">
                                 <h3 className="text-lg font-black text-slate-800 dark:text-slate-100 mb-4 truncate">{pattern.text}</h3>
                                 <p className="text-xs font-bold text-slate-500 mb-6">已精熟句數：<span className="text-indigo-600 dark:text-indigo-400 text-base">{finishedCount}</span></p>
                                 

@@ -731,7 +731,7 @@ export default function MaterialImportMode() {
                         setCurrentView('list');
                     }}
                     disabled={loadingState === 'translating'}
-                    className="p-2 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 rounded-full shadow-sm hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors disabled:opacity-50"
+                    className="p-2 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 rounded-full shadow-xs hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors disabled:opacity-50"
                 >
                     <ChevronLeft size={24} />
                 </button>
@@ -739,14 +739,14 @@ export default function MaterialImportMode() {
             </div>
 
             {error && (
-                <div className="mb-6 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm px-4 py-3 rounded-xl flex items-center gap-2 shadow-sm border border-red-100 dark:border-red-800 animate-in slide-in-from-top-2">
+                <div className="mb-6 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm px-4 py-3 rounded-xl flex items-center gap-2 shadow-xs border border-red-100 dark:border-red-800 animate-in slide-in-from-top-2">
                     <AlertCircle size={16} className="shrink-0" />
                     <span className="font-bold leading-relaxed">{error}</span>
                 </div>
             )}
 
             {whisperError && (
-                <div className="mb-6 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm p-4 rounded-xl flex flex-col justify-between gap-3 shadow-sm border border-red-100 dark:border-red-800 animate-in slide-in-from-top-2">
+                <div className="mb-6 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm p-4 rounded-xl flex flex-col justify-between gap-3 shadow-xs border border-red-100 dark:border-red-800 animate-in slide-in-from-top-2">
                     <div className="flex items-center gap-2">
                         <AlertCircle size={18} className="shrink-0" />
                         <span className="font-bold leading-relaxed">{whisperError}</span>
@@ -770,7 +770,7 @@ export default function MaterialImportMode() {
 
             <div className="grid grid-cols-1 gap-6 mb-8">
                 {/* 路徑一：音訊上傳 */}
-                <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-800">
+                <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-xs border border-slate-200 dark:border-slate-800">
                     <div className="flex items-center gap-3 mb-4">
                         <div className="w-10 h-10 rounded-xl bg-orange-50 dark:bg-orange-900/30 flex items-center justify-center text-orange-500">
                             <Headphones size={20} />
@@ -798,7 +798,7 @@ export default function MaterialImportMode() {
                 </div>
 
                 {/* 路徑二：文字 / PDF 上傳 */}
-                <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-800">
+                <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-xs border border-slate-200 dark:border-slate-800">
                     <div className="flex items-center gap-3 mb-4">
                         <div className="w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
                             <FileText size={20} />
@@ -810,7 +810,7 @@ export default function MaterialImportMode() {
                         value={textInput}
                         onChange={(e) => setTextInput(e.target.value)}
                         placeholder="在此貼上英文文本..."
-                        className="w-full h-32 p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 mb-4 focus:ring-2 focus:ring-indigo-500 outline-none resize-none text-slate-800 dark:text-slate-200"
+                        className="w-full h-32 p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 mb-4 focus:ring-2 focus:ring-indigo-500 outline-hidden resize-none text-slate-800 dark:text-slate-200"
                         disabled={loadingState !== 'idle'}
                     />
 
@@ -843,7 +843,7 @@ export default function MaterialImportMode() {
                 </div>
                 
                 {/* 路徑三：從舊題庫匯入 */}
-                <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-800 flex flex-col">
+                <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-xs border border-slate-200 dark:border-slate-800 flex flex-col">
                     <div className="flex items-center gap-3 mb-4 shrink-0">
                         <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-900/30 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
                             <FolderOpen size={20} />
@@ -919,7 +919,7 @@ export default function MaterialImportMode() {
 
             
             {saveSuccess && !timestampWarning && (
-                <div className="mb-6 bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400 text-sm px-4 py-4 rounded-xl flex items-center gap-3 shadow-sm border border-green-100 dark:border-green-800 animate-in slide-in-from-top-2">
+                <div className="mb-6 bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400 text-sm px-4 py-4 rounded-xl flex items-center gap-3 shadow-xs border border-green-100 dark:border-green-800 animate-in slide-in-from-top-2">
                     <CheckCircle size={20} className="shrink-0" />
                     <span className="font-bold leading-relaxed">
                         已儲存成功！您的語音教材已經建立，您可以隨時至主畫面開始跟讀練習。
@@ -927,7 +927,7 @@ export default function MaterialImportMode() {
                 </div>
             )}
             {saveSuccess && timestampWarning && (
-                <div className="mb-6 bg-yellow-50 dark:bg-yellow-900/20 text-yellow-600 dark:text-yellow-400 text-sm px-4 py-4 rounded-xl flex items-center gap-3 shadow-sm border border-yellow-100 dark:border-yellow-800 animate-in slide-in-from-top-2">
+                <div className="mb-6 bg-yellow-50 dark:bg-yellow-900/20 text-yellow-600 dark:text-yellow-400 text-sm px-4 py-4 rounded-xl flex items-center gap-3 shadow-xs border border-yellow-100 dark:border-yellow-800 animate-in slide-in-from-top-2">
                     <AlertCircle size={20} className="shrink-0" />
                     <span className="font-bold leading-relaxed">
                         已儲存成功，但時間軸自動抓取失敗，已暫時使用預設值 0 儲存，之後需要手動校正時間軸。
@@ -936,7 +936,7 @@ export default function MaterialImportMode() {
             )}
 
             {translationError && (
-                <div className="mb-6 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm px-4 py-3 rounded-xl flex items-center gap-2 shadow-sm border border-red-100 dark:border-red-800 animate-in slide-in-from-top-2">
+                <div className="mb-6 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm px-4 py-3 rounded-xl flex items-center gap-2 shadow-xs border border-red-100 dark:border-red-800 animate-in slide-in-from-top-2">
                     <AlertCircle size={16} className="shrink-0" />
                     <span className="font-bold leading-relaxed">{translationError}</span>
                 </div>
@@ -957,7 +957,7 @@ export default function MaterialImportMode() {
 
             {loadingState === 'idle' && results.length > 0 && !saveSuccess && !pendingMaterial && (
 
-                <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-800">
+                <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-xs border border-slate-200 dark:border-slate-800">
                     <div className="flex flex-col justify-between gap-4 mb-6">
                         <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-4">解析結果 (共 {results.length} 句)</h3>
                         <div className="flex gap-2">

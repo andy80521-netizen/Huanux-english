@@ -1,12 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  Trophy, Activity, User, FolderOpen, Loader2, AlertCircle, BookOpen, Sparkles
+import {
+  Trophy, User, Loader2, AlertCircle, BookOpen, Sparkles
 } from 'lucide-react';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { collection, doc, setDoc, onSnapshot, query, orderBy, deleteDoc, getDoc } from 'firebase/firestore';
 import { auth, db, appId } from './firebase';
 import { INITIAL_DATA, INITIAL_COURSES, VocabItem } from './constants';
 import { checkVocabContainment } from './utils';
+import {
+  ThemeMode, readThemeMode, writeThemeMode, resolveIsDark, getBrowserStorage, LEGACY_DARK_KEY
+} from './utils/theme';
 
 import BadgeMode from './components/BadgeMode';
 import PersonalMode from './components/PersonalMode';
@@ -21,30 +24,57 @@ const App: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const vocabDataRef = useRef<VocabItem[]>([]); 
   const [voicePrefs, setVoicePrefs] = useState({ zh: '', en: '' });
-  const [isDarkMode, setIsDarkMode] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
 
-  // 1. 載入本地設定 (語音 & 夜間模式)
+  // 主題：一開始就讀好設定（不先用預設值再改），與 index.html 首屏腳本的結果一致，避免閃爍
+  const [themeMode, setThemeModeState] = useState<ThemeMode>(() => readThemeMode(getBrowserStorage()));
+  const [systemDark, setSystemDark] = useState<boolean>(() => {
+    try { return !!window.matchMedia?.('(prefers-color-scheme: dark)').matches; } catch { return false; }
+  });
+  const isDark = resolveIsDark(themeMode, systemDark);
+
+  const setThemeMode = (mode: ThemeMode) => {
+    setThemeModeState(mode);
+    writeThemeMode(getBrowserStorage(), mode);
+  };
+
+  // 1. 載入本地設定 (語音)；移除舊版的夜間模式設定
   useEffect(() => {
     const savedVoice = localStorage.getItem('voicePrefs');
     if (savedVoice) setVoicePrefs(JSON.parse(savedVoice));
-
-    const savedDark = localStorage.getItem('isDarkMode');
-    if (savedDark) {
-        setIsDarkMode(JSON.parse(savedDark));
-    } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-        // 如果沒有存過設定，但系統偏好是深色，預設開啟
-        setIsDarkMode(true);
-    }
+    try { getBrowserStorage()?.removeItem(LEGACY_DARK_KEY); } catch { /* 無法存取時略過 */ }
   }, []);
 
   useEffect(() => {
     localStorage.setItem('voicePrefs', JSON.stringify(voicePrefs));
   }, [voicePrefs]);
 
+  // 跟隨系統時，系統切換深淺色就即時跟著變
   useEffect(() => {
-    localStorage.setItem('isDarkMode', JSON.stringify(isDarkMode));
-  }, [isDarkMode]);
+    if (themeMode !== 'system') return;
+    let mq: MediaQueryList | undefined;
+    try { mq = window.matchMedia?.('(prefers-color-scheme: dark)'); } catch { mq = undefined; }
+    if (!mq) return;
+    setSystemDark(mq.matches);
+    const onChange = (e: MediaQueryListEvent) => setSystemDark(e.matches);
+    if (mq.addEventListener) mq.addEventListener('change', onChange);
+    else mq.addListener(onChange);
+    return () => {
+      if (mq!.removeEventListener) mq!.removeEventListener('change', onChange);
+      else mq!.removeListener(onChange);
+    };
+  }, [themeMode]);
+
+  // 深色 class 掛在 <html>，讓頁面底色、捲軸、原生表單元件一起切換
+  useEffect(() => {
+    const root = document.documentElement;
+    root.classList.toggle('dark', isDark);
+    root.style.colorScheme = isDark ? 'dark' : 'light';
+    const ground = getComputedStyle(root).getPropertyValue('--ground').trim();
+    if (ground) {
+      document.querySelectorAll('meta[name="theme-color"]').forEach((m) => m.setAttribute('content', ground));
+    }
+  }, [isDark]);
 
   // 2. 監聽登入狀態
   useEffect(() => { 
@@ -281,42 +311,106 @@ const App: React.FC = () => {
     }
   };
 
-  if (loading) return <div className="flex items-center justify-center h-screen bg-slate-50 dark:bg-slate-950"><Loader2 className="animate-spin text-indigo-600" size={40} /></div>;
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-dvh bg-ground" role="status" aria-label="載入中">
+        <Loader2 className="animate-spin text-accent" size={32} />
+      </div>
+    );
+  }
+
+  const tabs = [
+    { id: 'material', label: '啟蒙的開始', Icon: BookOpen },
+    { id: 'languageModel', label: '語言模型', Icon: Sparkles },
+    { id: 'badges', label: '勳章房', Icon: Trophy },
+    { id: 'personal', label: '個人', Icon: User },
+  ] as const;
+
+  const wordmark = (
+    <span className="flex items-baseline gap-2 select-none">
+      <span className="font-reading text-[22px] leading-none tracking-[-0.01em] text-ink">Huanux</span>
+      <span className="text-[11px] tracking-[0.16em] text-muted">ENGLISH</span>
+    </span>
+  );
 
   return (
-    <div className={`${isDarkMode ? 'dark' : ''} h-full`}>
-        <div className="fixed inset-0 bg-slate-200 dark:bg-slate-950 flex justify-center overflow-hidden font-sans text-slate-900 dark:text-slate-100 selection:bg-indigo-100 dark:selection:bg-indigo-900/50">
-          <div className="w-full max-w-lg h-full bg-white dark:bg-slate-900 shadow-2xl flex flex-col relative overflow-hidden sm:rounded-none md:rounded-2xl md:my-4 md:h-[calc(100%-2rem)] md:border border-slate-300 dark:border-slate-800 transition-colors duration-300">
-            <div className="bg-white/90 dark:bg-slate-900/90 backdrop-blur-md z-20 px-6 py-4 flex flex-col justify-between border-b border-slate-100 dark:border-slate-800 sticky top-0 transition-colors duration-300">
-              <div className="flex justify-between items-center w-full">
-                <div><h1 className="text-lg font-black text-slate-800 dark:text-white tracking-tight flex items-center gap-2"><Activity className="text-indigo-600 dark:text-indigo-400" size={24} />Huanux <span className="text-indigo-600 dark:text-indigo-400">ENGLISH</span></h1></div>
-              </div>
-              {syncError && (
-                 <div className="mt-2 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-[10px] px-3 py-2 rounded-lg flex items-center gap-2 animate-in slide-in-from-top-2">
-                    <AlertCircle size={12} />
-                    <span className="font-bold">{syncError}</span>
-                 </div>
-              )}
-            </div>
-            <div className="flex-1 overflow-hidden relative bg-slate-50 dark:bg-slate-950 transition-colors duration-300">
-              {activeTab === 'material' && <MaterialImportMode />}
-              {activeTab === 'languageModel' && <LanguageModelMode />}
-              {activeTab === 'badges' && <BadgeMode />}
-              {activeTab === 'personal' && <PersonalMode user={user} voicePrefs={voicePrefs} setVoicePrefs={setVoicePrefs} isDarkMode={isDarkMode} setIsDarkMode={setIsDarkMode} />}
-            </div>
-            <div className="bg-white dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800 px-2 py-2 flex justify-around items-center z-20 pb-safe shadow-[0_-5px_20px_rgba(0,0,0,0.02)] dark:shadow-none transition-colors duration-300">
-              <button onClick={() => setActiveTab('material')} className={`flex flex-col items-center gap-1 p-2 rounded-2xl transition-all min-w-[3.5rem] duration-300 ${activeTab === 'material' ? 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 font-bold -translate-y-1' : 'text-slate-400 dark:text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800'}`}><BookOpen size={20} strokeWidth={activeTab === 'material' ? 2.5 : 2} /><span className="text-[10px]">啟蒙的開始</span></button>
-              <button onClick={() => setActiveTab('languageModel')} className={`flex flex-col items-center gap-1 p-2 rounded-2xl transition-all min-w-[3.5rem] duration-300 ${activeTab === 'languageModel' ? 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 font-bold -translate-y-1' : 'text-slate-400 dark:text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800'}`}><Sparkles size={20} strokeWidth={activeTab === 'languageModel' ? 2.5 : 2} /><span className="text-[10px]">語言模型</span></button>
-              <button onClick={() => setActiveTab('badges')} className={`flex flex-col items-center gap-1 p-2 rounded-2xl transition-all min-w-[3.5rem] duration-300 ${activeTab === 'badges' ? 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 font-bold -translate-y-1' : 'text-slate-400 dark:text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800'}`}><Trophy size={20} strokeWidth={activeTab === 'badges' ? 2.5 : 2} /><span className="text-[10px]">勳章房</span></button>
-              <button onClick={() => setActiveTab('personal')} className={`flex flex-col items-center gap-1 p-2 rounded-2xl transition-all min-w-[3.5rem] duration-300 ${activeTab === 'personal' ? 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 font-bold -translate-y-1' : 'text-slate-400 dark:text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800'}`}><User size={20} strokeWidth={activeTab === 'personal' ? 2.5 : 2} /><span className="text-[10px]">個人</span></button>
+    <div className="h-dvh flex flex-col lg:flex-row bg-ground text-ink overflow-hidden selection:bg-accent-soft">
+
+      {/* 桌機：左側導覽欄 */}
+      <aside className="hidden lg:flex w-58 shrink-0 flex-col gap-10 border-r border-line px-4 py-8">
+        <div className="px-3">{wordmark}</div>
+        <nav aria-label="主要分頁" className="flex flex-col gap-1">
+          {tabs.map(({ id, label, Icon }) => {
+            const active = activeTab === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setActiveTab(id)}
+                aria-current={active ? 'page' : undefined}
+                className={`flex h-11 items-center gap-3 rounded-xl px-3 text-[15px] text-left transition-colors duration-[var(--dur-fast)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${
+                  active
+                    ? 'bg-accent-soft text-indigo-800 dark:text-accent font-bold'
+                    : 'text-slate-600 dark:text-slate-400 hover:bg-surface-2 hover:text-ink'
+                }`}
+              >
+                <Icon size={19} strokeWidth={active ? 2.2 : 1.8} aria-hidden="true" />
+                <span>{label}</span>
+              </button>
+            );
+          })}
+        </nav>
+      </aside>
+
+      {/* 手機：頂部頁首 */}
+      <header className="lg:hidden shrink-0 pt-safe border-b border-line bg-ground">
+        <div className="flex h-13 items-center px-5">{wordmark}</div>
+      </header>
+
+      {/* 內容 */}
+      <div className="flex-1 min-h-0 min-w-0 flex flex-col">
+        {syncError && (
+          <div className="shrink-0 px-4 pt-3 lg:px-8 lg:pt-6">
+            <div role="alert" className="mx-auto flex w-full max-w-3xl items-center gap-2 rounded-xl bg-danger/10 px-4 py-2.5 text-[13px] font-medium text-danger">
+              <AlertCircle size={15} className="shrink-0" aria-hidden="true" />
+              <span>{syncError}</span>
             </div>
           </div>
-          <style>{`
-            .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
-            @keyframes spin-slow { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-            .animate-spin-slow { animation: spin-slow 3s linear infinite; }
-          `}</style>
-        </div>
+        )}
+        <main className="relative flex-1 min-h-0 overflow-hidden">
+          <div className="mx-auto h-full w-full lg:max-w-3xl">
+            {activeTab === 'material' && <MaterialImportMode />}
+            {activeTab === 'languageModel' && <LanguageModelMode />}
+            {activeTab === 'badges' && <BadgeMode />}
+            {activeTab === 'personal' && <PersonalMode user={user} voicePrefs={voicePrefs} setVoicePrefs={setVoicePrefs} themeMode={themeMode} setThemeMode={setThemeMode} />}
+          </div>
+        </main>
+      </div>
+
+      {/* 手機：底部分頁 */}
+      <nav aria-label="主要分頁" className="lg:hidden shrink-0 grid grid-cols-4 border-t border-line bg-surface pb-safe">
+        {tabs.map(({ id, label, Icon }) => {
+          const active = activeTab === id;
+          return (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setActiveTab(id)}
+              aria-current={active ? 'page' : undefined}
+              className={`relative flex min-h-14 flex-col items-center justify-center gap-1 pt-1.5 pb-1 text-[11px] transition-colors duration-[var(--dur-fast)] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent ${
+                active ? 'text-accent font-bold' : 'text-slate-600 dark:text-slate-400'
+              }`}
+            >
+              <span
+                aria-hidden="true"
+                className={`absolute top-0 h-0.5 w-8 rounded-full bg-accent transition-opacity duration-[var(--dur-base)] ${active ? 'opacity-100' : 'opacity-0'}`}
+              />
+              <Icon size={22} strokeWidth={active ? 2.2 : 1.8} aria-hidden="true" />
+              <span>{label}</span>
+            </button>
+          );
+        })}
+      </nav>
     </div>
   );
 };
