@@ -1,0 +1,98 @@
+# 規劃委員會（只在規劃階段使用）
+#   PR 貼上 ai-plan → 各成員獨立評估 PR 中的規劃文件（docs/plans/*.md）
+#   PR 貼上 ai-ask  → 各成員回應 Claude 最新一則質詢留言（含 <!-- claude:ask -->）
+# 結果留言在 PR。只有協作者能貼標籤；外部 fork 的 PR 不會執行。
+#
+# 安全：使用 pull_request_target，一律執行 main 上「可信任」版本的工作流程與 ai_council.py；
+# PR 的內容（規劃文件、程式碼）只被當成「資料」讀取，不會被執行，因此 API 金鑰不會暴露給 PR 修改過的程式。
+name: 規劃委員會
+
+on:
+  pull_request_target:
+    types: [labeled]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: ai-council-${{ github.event.pull_request.number }}
+
+jobs:
+  council:
+    if: >-
+      (github.event.label.name == 'ai-plan' || github.event.label.name == 'ai-ask') &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PR: ${{ github.event.pull_request.number }}
+      LABEL: ${{ github.event.label.name }}
+      OWNER: ${{ github.repository_owner }}
+    steps:
+      - name: 取出 main 上的可信任版本（要執行的程式）
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          path: trusted
+          persist-credentials: false
+
+      - name: 取出 PR 內容（只當資料讀取，不執行）
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: pr
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install requests
+
+      - name: 準備規劃文件與擁有者留言
+        id: prep
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        working-directory: pr
+        run: |
+          plan=$(git diff --name-only --diff-filter=AM "$BASE_SHA...HEAD" -- 'docs/plans/*.md' | grep -v '_template' | head -1 || true)
+          if [ -z "$plan" ]; then
+            printf '%s\n' "<!-- ai-council:error -->" "⚠️ 這個 PR 沒有新增或修改 \`docs/plans/*.md\` 規劃文件，委員會無法執行。" > ../result.md
+            exit 0
+          fi
+          echo "plan=$plan" >> "$GITHUB_OUTPUT"
+          # 擁有者的留言（排除 Claude 用擁有者帳號發的留言：含 <!-- by-claude -->）
+          gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/comments" \
+            --jq ".[] | select(.user.login == \"$OWNER\") | select(.body | contains(\"<!-- by-claude\") | not) | \"### \(.created_at)\n\(.body)\n\"" > ../owner_notes.md || true
+          # Claude 最新一則質詢
+          gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/comments" \
+            --jq "[.[] | select(.user.login == \"$OWNER\") | select(.body | contains(\"<!-- claude:ask -->\"))] | last | .body // \"\"" > ../question.md || true
+
+      - name: 委員會討論
+        if: steps.prep.outputs.plan != ''
+        working-directory: pr
+        env:
+          COUNCIL_GEMINI_API_KEY: ${{ secrets.COUNCIL_GEMINI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          AI_COUNCIL: ${{ vars.AI_COUNCIL }}
+          AI_COUNCIL_BIG: ${{ vars.AI_COUNCIL_BIG }}
+          AI_COUNCIL_MAX_CHARS: ${{ vars.AI_COUNCIL_MAX_CHARS }}
+          PLAN: ${{ steps.prep.outputs.plan }}
+        run: |
+          mode=plan; [ "$LABEL" = "ai-ask" ] && mode=ask
+          python ../trusted/.github/scripts/ai_council.py "$mode" --plan "$PLAN" \
+            --owner-notes ../owner_notes.md --question ../question.md --out ../result.md
+
+      - name: 發表結果並移除標籤
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          [ -s result.md ] || printf '%s\n' "<!-- ai-council:error -->" "⚠️ 規劃委員會執行失敗，請查看 [Actions 紀錄]($RUN_URL)" > result.md
+          gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body-file result.md
+          gh pr edit "$PR" --repo "$GITHUB_REPOSITORY" --remove-label "$LABEL" || true

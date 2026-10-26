@@ -1,0 +1,15 @@
+# Gemini Code Assist（GitHub）設定
+# 開 PR 時不自動審查：規劃階段的草稿 PR 只有文件，審查時機由 Claude 留言 /gemini review 決定。
+# ⚠️ 欄位名稱依 Gemini Code Assist 文件撰寫，導入後需實測是否生效。
+have_fun: false
+code_review:
+  disable: false
+  comment_severity_threshold: MEDIUM
+  max_review_comments: -1
+  pull_request_opened:
+    help: false
+    summary: false
+    code_review: false
+ignore_patterns:
+  - "package-lock.json"
+  - "dist/**"

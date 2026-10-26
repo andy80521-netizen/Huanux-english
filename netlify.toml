@@ -2,3 +2,9 @@
   command = "npm run build"
   publish = "dist"
   functions = "netlify/functions"
+
+# 預覽網站：只改 docs/（例如規劃文件）的推送不重新建置，節省建置額度。
+# 只在「有上次建置紀錄、且這次只改了 docs/」時才略過；任何不確定的情況（第一次建置、git 失敗）都照常建置。
+# 正式版（production）不受影響。
+[context.deploy-preview]
+  ignore = "[ -n \"$CACHED_COMMIT_REF\" ] && [ \"$CACHED_COMMIT_REF\" != \"$COMMIT_REF\" ] && git diff --quiet \"$CACHED_COMMIT_REF\" \"$COMMIT_REF\" -- . ':(exclude)docs'"
