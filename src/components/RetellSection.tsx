@@ -9,10 +9,12 @@ interface Props {
   material: Material;
   bySentence?: Record<string, string[]>;
   onStart: (segmentIndex: number, segment: RetellSegment, targetPatterns: RetellTargetPattern[]) => void;
+  /** 放在詳情頁的工具卡片裡時不畫自己的外框 */
+  embedded?: boolean;
 }
 
 // 教材詳情頁：複述練習區塊（分段清單與每段最近一次的分數）
-export default function RetellSection({ material, bySentence, onStart }: Props) {
+export default function RetellSection({ material, bySentence, onStart, embedded = false }: Props) {
   const [segmentsDoc, setSegmentsDoc] = useState<MaterialSegments | null | undefined>(undefined);
   const [segmenting, setSegmenting] = useState(false);
   const [segmentError, setSegmentError] = useState<string | null>(null);
@@ -73,71 +75,74 @@ export default function RetellSection({ material, bySentence, onStart }: Props) 
   const valid = segmentsDoc ? isSegmentsValid(material, segmentsDoc) : false;
 
   return (
-    <div className="mb-6 p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs space-y-3">
+    <div className={embedded ? 'px-4 py-3.5 space-y-3' : 'mb-6 p-4 rounded-2xl bg-surface border border-line space-y-3'}>
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-sm font-bold text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
-            <MessageSquareText size={16} className="text-indigo-500" />
+          <p className="text-sm font-medium text-ink flex items-center gap-1.5">
+            {!embedded && <MessageSquareText size={16} className="text-accent" aria-hidden="true" />}
             複述練習
           </p>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">聽完一段，用自己的話說出重點</p>
+          <p className="text-xs text-muted mt-0.5">聽完一段，用自己的話說出重點</p>
         </div>
         {segmentsDoc && (
           <button
+            type="button"
             onClick={runSegmenting}
             disabled={segmenting}
-            className="shrink-0 flex items-center gap-1 text-xs font-bold text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 disabled:opacity-50"
+            className="shrink-0 flex min-h-10 items-center gap-1 rounded-full px-2 text-xs text-muted hover:text-ink disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-accent"
           >
-            {segmenting ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+            {segmenting ? <Loader2 size={12} className="animate-spin" aria-hidden="true" /> : <RefreshCw size={12} aria-hidden="true" />}
             重新分段
           </button>
         )}
       </div>
 
-      {segmentError && <p className="text-xs font-bold text-red-500">{segmentError}</p>}
+      {segmentError && <p role="alert" className="text-xs font-medium text-danger">{segmentError}</p>}
 
       {(segmentsDoc === undefined || (segmenting && !segmentsDoc)) && (
-        <div className="flex items-center gap-2 text-xs font-bold text-slate-500 dark:text-slate-400 py-2">
-          <Loader2 size={14} className="animate-spin" />
+        <div className="flex items-center gap-2 text-xs text-muted py-2" role="status">
+          <Loader2 size={14} className="animate-spin" aria-hidden="true" />
           {segmentsDoc === undefined ? '載入中…' : '依主題分段中…'}
         </div>
       )}
 
       {segmentsDoc === null && !segmenting && (
         <button
+          type="button"
           onClick={runSegmenting}
-          className="w-full py-2.5 text-sm font-bold bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-xl"
+          className="w-full min-h-10 text-sm font-medium bg-accent-soft text-ink rounded-full hover:brightness-[0.97] dark:hover:brightness-110 focus-visible:outline-2 focus-visible:outline-accent"
         >
           開始分段
         </button>
       )}
 
       {segmentsDoc && !valid && (
-        <p className="text-xs font-bold text-amber-600 dark:text-amber-400">教材句子有變動，建議按「重新分段」</p>
+        <p className="text-xs font-medium text-warn">教材句子有變動，建議按「重新分段」</p>
       )}
 
       {segmentsDoc && (
-        <div className="divide-y divide-slate-100 dark:divide-slate-800">
+        <div className="space-y-3">
           {segmentsDoc.segments.map((seg, index) => {
             const first = activeIds.indexOf(seg.sentenceIds[0]) + 1;
             const last = activeIds.indexOf(seg.sentenceIds[seg.sentenceIds.length - 1]) + 1;
             const segRecords = records.filter(r => r.segmentIndex === index);
             const latest = segRecords[0];
             return (
-              <div key={index} className="py-3 first:pt-1 last:pb-0 flex items-center justify-between gap-3">
+              <div key={index} className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="text-sm font-bold text-slate-800 dark:text-slate-100 line-clamp-1">{index + 1}. {seg.title}</p>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  <p className="text-[13px] font-medium text-ink line-clamp-1">{index + 1}. {seg.title}</p>
+                  <p className="text-xs text-muted mt-0.5">
                     {first > 0 && last > 0 ? `第 ${first}–${last} 句` : `${seg.sentenceIds.length} 句`}
                     {latest ? `・上次 內容 ${latest.feedback?.contentScore ?? '-'}／語言 ${latest.feedback?.languageScore ?? '-'}（共 ${segRecords.length} 次）` : '・尚未複述'}
                   </p>
                 </div>
                 <button
+                  type="button"
                   onClick={() => handleStart(index, seg)}
                   disabled={startingIndex !== null || !valid}
-                  className="shrink-0 px-3 py-2 text-xs font-bold bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                  className="shrink-0 flex min-h-10 items-center gap-1.5 rounded-full bg-accent-soft px-4 text-xs font-medium text-ink transition-[filter] hover:brightness-[0.97] dark:hover:brightness-110 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-accent"
                 >
-                  {startingIndex === index ? <Loader2 size={14} className="animate-spin" /> : null}
+                  {startingIndex === index ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : null}
                   複述
                 </button>
               </div>

@@ -378,7 +378,8 @@ const App: React.FC = () => {
           </div>
         )}
         <main className="relative flex-1 min-h-0 overflow-hidden">
-          <div className="mx-auto h-full w-full lg:max-w-3xl">
+          {/* 「啟蒙的開始」已改版成寬版（列表三欄、詳情兩欄、跟讀側欄），其他分頁改版前維持 768px */}
+          <div className={`mx-auto h-full w-full ${activeTab === 'material' ? 'lg:max-w-[1200px]' : 'lg:max-w-3xl'}`}>
             {activeTab === 'material' && <MaterialImportMode />}
             {activeTab === 'languageModel' && <LanguageModelMode />}
             {activeTab === 'badges' && <BadgeMode />}

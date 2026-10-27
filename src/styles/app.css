@@ -84,7 +84,7 @@
 
   /* 字體：介面中文、英文練習句 */
   --font-sans: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
-  --font-reading: "Newsreader", Georgia, "Times New Roman", serif;
+  --font-reading: "Newsreader", "Noto Sans TC", Georgia, "Times New Roman", serif;
 
   /* 動效 */
   --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
@@ -153,6 +153,37 @@
 
 @utility animate-spin-slow {
   animation: spin-slow 3s linear infinite;
+}
+
+/* 評分通過時的金色光點：只播一次、不擋操作 */
+@keyframes sparkle {
+  0% { opacity: 0; transform: scale(0.4) translateY(4px); }
+  35% { opacity: 1; transform: scale(1) translateY(0); }
+  100% { opacity: 0; transform: scale(0.8) translateY(-6px); }
+}
+
+@utility animate-sparkle {
+  animation: sparkle 1100ms var(--ease-out-soft) both;
+}
+
+/* 錄音中的呼吸燈 */
+@keyframes breathe {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.85); }
+}
+
+@utility animate-breathe {
+  animation: breathe 1.6s ease-in-out infinite;
+}
+
+/* 結果出現時，逐字比對依序淡入 */
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@utility animate-rise-in {
+  animation: rise-in 360ms var(--ease-out-soft) both;
 }
 
 /* 系統開啟「減少動態效果」：轉場與裝飾動畫降到近 0，但保留載入中的轉圈（否則評分中看起來像當掉） */

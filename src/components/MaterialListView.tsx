@@ -3,45 +3,13 @@ import { Material } from '../types';
 import { auth, db, storage, appId } from '../firebase';
 import { collection, query, onSnapshot, deleteDoc, doc, orderBy } from 'firebase/firestore';
 import { ref, deleteObject } from 'firebase/storage';
-import { Plus, Trash2, AlertTriangle, BookOpen, AlertCircle, User, Loader2 } from 'lucide-react';
+import { Plus, Trash2, BookOpen, AlertCircle, User, Loader2 } from 'lucide-react';
+import ConfirmDialog from './ConfirmDialog';
+import Button from './ui/Button';
+import IconButton from './ui/IconButton';
+import ProgressBar from './ui/ProgressBar';
+import { materialProgress } from '../utils/materialProgress';
 import { deleteMaterialSightings } from '../services/sightings';
-
-const ConfirmDialog: React.FC<{
-  isOpen: boolean;
-  title: string;
-  message: string;
-  onConfirm: () => void;
-  onCancel: () => void;
-  confirmText?: string;
-  cancelText?: string;
-}> = ({ isOpen, title, message, onConfirm, onCancel, confirmText = "確定", cancelText = "取消" }) => {
-  if (!isOpen) return null;
-  return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-xs p-4 animate-in fade-in duration-200">
-      <div className="bg-white dark:bg-slate-900 rounded-[2rem] p-8 w-full max-w-xs shadow-2xl animate-in zoom-in-95 duration-200 text-center border border-slate-100 dark:border-slate-800">
-        <div className="w-16 h-16 bg-red-50 dark:bg-red-900/20 rounded-full flex items-center justify-center mx-auto mb-6">
-          <AlertTriangle className="text-red-500 dark:text-red-400" size={32} />
-        </div>
-        <h3 className="text-2xl font-black text-slate-800 dark:text-white mb-2">{title}</h3>
-        <p className="text-slate-500 dark:text-slate-400 mb-8 leading-relaxed">{message}</p>
-        <div className="flex gap-4">
-          <button 
-            onClick={onCancel} 
-            className="flex-1 py-3.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold rounded-2xl hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
-          >
-            {cancelText}
-          </button>
-          <button 
-            onClick={onConfirm} 
-            className="flex-1 py-3.5 bg-red-500 text-white font-bold rounded-2xl shadow-lg shadow-red-200 dark:shadow-none hover:bg-red-600 transition-all active:scale-95"
-          >
-            {confirmText}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
 
 export default function MaterialListView({ onAddClick, onMaterialClick }: { onAddClick: () => void, onMaterialClick: (m: Material) => void }) {
     const [materials, setMaterials] = useState<Material[]>([]);
@@ -128,7 +96,7 @@ export default function MaterialListView({ onAddClick, onMaterialClick }: { onAd
 
     if (loading) {
         return (
-            <div className="flex flex-col h-full bg-slate-50 dark:bg-slate-950 p-6 items-center justify-center text-slate-400">
+            <div className="flex flex-col h-full p-6 items-center justify-center text-muted" role="status">
                 載入中...
             </div>
         );
@@ -136,12 +104,12 @@ export default function MaterialListView({ onAddClick, onMaterialClick }: { onAd
 
     if (uid === null) {
         return (
-            <div className="flex flex-col h-full bg-slate-50 dark:bg-slate-950 p-6 items-center justify-center text-center">
-                <div className="w-20 h-20 bg-slate-200 dark:bg-slate-800 rounded-full flex items-center justify-center mb-6 text-slate-400 dark:text-slate-500">
-                    <User size={40} />
+            <div className="flex flex-col h-full p-6 items-center justify-center text-center">
+                <div className="size-20 rounded-full bg-surface-2 border border-line flex items-center justify-center mb-6 text-muted">
+                    <User size={36} strokeWidth={1.6} aria-hidden="true" />
                 </div>
-                <h3 className="text-xl font-bold text-slate-700 dark:text-slate-300 mb-2">請先登入</h3>
-                <p className="text-slate-500 dark:text-slate-400 max-w-sm">
+                <h3 className="text-xl font-bold text-ink mb-2">請先登入</h3>
+                <p className="text-muted max-w-sm leading-relaxed">
                     請先至「個人」頁面登入才能使用教材匯入與跟讀練習功能。
                 </p>
             </div>
@@ -149,105 +117,100 @@ export default function MaterialListView({ onAddClick, onMaterialClick }: { onAd
     }
 
     return (
-        <div className="flex flex-col h-full bg-slate-50 dark:bg-slate-950 p-6 overflow-y-auto pb-20">
-            <div className="flex items-center justify-between mb-8">
-                <h2 className="text-2xl font-black text-slate-800 dark:text-white">我的教材庫</h2>
-                <button 
-                    onClick={onAddClick}
-                    className="px-4 py-2 bg-indigo-600 text-white font-bold rounded-xl shadow-md hover:bg-indigo-700 transition-colors flex items-center gap-2"
-                >
-                    <Plus size={18} />
+        <div className="flex flex-col h-full overflow-y-auto px-5 pt-6 pb-24 sm:px-8 lg:px-12 lg:pt-12 lg:pb-16">
+            <div className="flex items-end justify-between gap-4 mb-6 lg:mb-8">
+                <div className="flex flex-col gap-1 min-w-0">
+                    <h2 className="text-2xl lg:text-[28px] font-bold tracking-wide text-ink">我的教材庫</h2>
+                    {materials.length > 0 && <span className="text-[13px] lg:text-sm text-muted">{materials.length} 份教材</span>}
+                </div>
+                <Button onClick={onAddClick} icon={<Plus size={18} aria-hidden="true" />} className="shrink-0">
                     匯入新教材
-                </button>
+                </Button>
             </div>
 
             {error && (
-                <div className="mb-6 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm px-4 py-3 rounded-xl flex items-center gap-2 shadow-xs border border-red-100 dark:border-red-800">
-                    <AlertCircle size={16} className="shrink-0" />
-                    <span className="font-bold leading-relaxed">{error}</span>
+                <div role="alert" className="mb-6 flex items-center gap-2 rounded-xl bg-danger/10 px-4 py-3 text-sm font-medium text-danger">
+                    <AlertCircle size={16} className="shrink-0" aria-hidden="true" />
+                    <span className="leading-relaxed break-words">{error}</span>
                 </div>
             )}
 
             {materials.length === 0 ? (
                 <div className="flex flex-col items-center justify-center flex-1 py-20 text-center">
-                    <div className="w-20 h-20 bg-slate-200 dark:bg-slate-800 rounded-full flex items-center justify-center mb-6 text-slate-400 dark:text-slate-500">
-                        <BookOpen size={40} />
+                    <div className="size-20 rounded-full bg-surface-2 border border-line flex items-center justify-center mb-6 text-muted">
+                        <BookOpen size={36} strokeWidth={1.6} aria-hidden="true" />
                     </div>
-                    <h3 className="text-xl font-bold text-slate-700 dark:text-slate-300 mb-2">尚無任何教材</h3>
-                    <p className="text-slate-500 dark:text-slate-400 mb-8 max-w-sm">
+                    <h3 className="text-xl font-bold text-ink mb-2">尚無任何教材</h3>
+                    <p className="text-muted mb-8 max-w-sm leading-relaxed">
                         點擊上方按鈕匯入新教材，開始您的跟讀訓練與語言學習。
                     </p>
-                    <button 
-                        onClick={onAddClick}
-                        className="px-6 py-3 bg-indigo-600 text-white font-bold rounded-xl shadow-lg shadow-indigo-200 dark:shadow-none hover:bg-indigo-700 transition-all active:scale-95 flex items-center gap-2"
-                    >
-                        <Plus size={20} />
+                    <Button onClick={onAddClick} size="lg" icon={<Plus size={20} aria-hidden="true" />}>
                         立即匯入
-                    </button>
+                    </Button>
                 </div>
             ) : (
-                <div className="grid grid-cols-1 gap-3">
+                <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 lg:gap-6">
                     {materials.map((m) => {
-                        const activeSentences = m.sentences.filter(s => !s.deleted);
-                        const completedCount = activeSentences.filter(s => s.mastery >= 1000).length;
+                        const { total, completed } = materialProgress(m.sentences);
+                        const coverGenerating = m.coverStatus === 'generating' && m.coverRequestedAt && (Date.now() - m.coverRequestedAt < 5 * 60 * 1000);
                         return (
-                            <div key={m.id} className="bg-white dark:bg-slate-900 rounded-2xl p-3 shadow-xs border border-slate-200 dark:border-slate-800 hover:shadow-md transition-shadow flex gap-3 items-stretch cursor-pointer overflow-hidden" onClick={() => onMaterialClick(m)}>
-                                {/* 16:9 封面縮圖 */}
-                                <div className="w-36 shrink-0 aspect-video self-center rounded-xl overflow-hidden bg-slate-100 dark:bg-slate-800 relative flex items-center justify-center">
+                            <article key={m.id} className="group relative overflow-hidden rounded-[18px] border border-line bg-surface transition-[border-color,box-shadow] duration-[var(--dur-base)] hover:border-muted/40 hover:shadow-[0_12px_32px_-16px_rgb(0_0_0/0.25)]">
+                                {/* 16:9 封面 */}
+                                <div className="relative aspect-video w-full overflow-hidden bg-surface-2 flex items-center justify-center">
                                     {m.coverUrl && m.coverStatus !== 'generating' ? (
                                         <img
                                             src={m.coverUrl}
-                                            alt={m.title}
+                                            alt=""
                                             loading="lazy"
-                                            className="w-full h-full object-cover"
+                                            width={640}
+                                            height={360}
+                                            className="h-full w-full object-cover transition-transform duration-[600ms] ease-[var(--ease-out-soft)] group-hover:scale-[1.02]"
                                         />
-                                    ) : m.coverStatus === 'generating' && m.coverRequestedAt && (Date.now() - m.coverRequestedAt < 5 * 60 * 1000) ? (
-                                        <div className="flex flex-col items-center justify-center gap-1 text-indigo-500 dark:text-indigo-400">
-                                            <Loader2 size={20} className="animate-spin" />
-                                            <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400">封面產生中</span>
+                                    ) : coverGenerating ? (
+                                        <div className="flex flex-col items-center justify-center gap-2 text-accent">
+                                            <Loader2 size={22} className="animate-spin" aria-hidden="true" />
+                                            <span className="text-xs text-muted">封面產生中</span>
                                         </div>
                                     ) : (
-                                        <div className="w-full h-full bg-gradient-to-br from-indigo-50 to-slate-100 dark:from-slate-850 dark:to-slate-800 flex items-center justify-center text-slate-300 dark:text-slate-600">
-                                            <BookOpen size={28} />
-                                        </div>
+                                        <BookOpen size={32} strokeWidth={1.4} className="text-muted/50" aria-hidden="true" />
                                     )}
                                 </div>
-
-                                <div className="flex-1 min-w-0 flex flex-col justify-between gap-2">
+                                <div className="flex flex-col gap-3 px-4 pt-4 pb-4 lg:px-5">
                                     <div className="flex items-start gap-1">
-                                        <h3 className="flex-1 min-w-0 text-base font-bold text-slate-800 dark:text-white line-clamp-2 leading-snug">{m.title}</h3>
-                                        <button
-                                            onClick={(e) => { e.stopPropagation(); setDeleteModal({ isOpen: true, materialId: m.id, title: m.title }); }}
-                                            className="p-1.5 -mr-1 -mt-1 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors shrink-0"
+                                        <h3 className="flex-1 min-w-0 font-reading text-[21px] leading-[1.25] text-ink line-clamp-2 break-words">
+                                            {/* 標題按鈕的點擊範圍延伸到整張卡片（::after），刪除鈕疊在上層、與它同層而不是包在裡面 */}
+                                            <button
+                                                type="button"
+                                                onClick={() => onMaterialClick(m)}
+                                                className="text-left after:absolute after:inset-0 after:rounded-[18px] after:content-[''] focus-visible:outline-hidden focus-visible:after:outline-2 focus-visible:after:-outline-offset-2 focus-visible:after:outline-accent"
+                                            >
+                                                {m.title}
+                                            </button>
+                                        </h3>
+                                        <IconButton
+                                            aria-label="刪除教材"
                                             title="刪除教材"
+                                            onClick={() => setDeleteModal({ isOpen: true, materialId: m.id, title: m.title })}
+                                            className="relative z-10 -mt-2 -mr-2 text-muted hover:text-danger hover:bg-danger/10"
                                         >
-                                            <Trash2 size={16} />
-                                        </button>
+                                            <Trash2 size={17} strokeWidth={1.8} aria-hidden="true" />
+                                        </IconButton>
                                     </div>
-                                    <div>
-                                        <div className="flex items-center justify-between text-xs mb-1">
-                                            <span className="text-slate-400 dark:text-slate-500 font-medium">
-                                                {new Date(m.createdAt).toLocaleDateString()}
-                                            </span>
-                                            <span className="font-bold text-slate-600 dark:text-slate-300">
-                                                進度 {completedCount}/{activeSentences.length} 句
-                                            </span>
+                                    <div className="flex flex-col gap-2">
+                                        <div className="flex items-center justify-between text-[13px] text-muted">
+                                            <span>{new Date(m.createdAt).toLocaleDateString()}</span>
+                                            <span><span className="font-medium text-ink">{completed}</span> / {total} 句畢業</span>
                                         </div>
-                                        <div className="w-full h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                                            <div
-                                                className="h-full bg-indigo-500 rounded-full transition-all duration-300"
-                                                style={{ width: `${activeSentences.length > 0 ? Math.round((completedCount / activeSentences.length) * 100) : 0}%` }}
-                                            />
-                                        </div>
+                                        <ProgressBar value={completed} max={total} label={`${m.title} 進度`} size="sm" />
                                     </div>
                                 </div>
-                            </div>
+                            </article>
                         );
                     })}
                 </div>
             )}
 
-            <ConfirmDialog 
+            <ConfirmDialog
                 isOpen={deleteModal.isOpen}
                 title="確認刪除"
                 message={`確定要刪除教材「${deleteModal.title}」嗎？此動作將連同音檔一併刪除，無法復原。`}
