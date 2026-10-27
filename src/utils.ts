@@ -1,4 +1,3 @@
-import { BADGE_LEVELS, BadgeLevel } from './constants';
 import { calculateSimilarity } from './utils/scoring';
 
 export const getVoices = (): Promise<SpeechSynthesisVoice[]> => {
@@ -91,47 +90,6 @@ export const speakTextPromise = async (text: string, rate = 1.0, voicePrefs: { z
         window.speechSynthesis.speak(utterance);
     }, 50);
   });
-};
-
-export const fetchIPA = async (text: string) => {
-  if (!text) return '';
-  const words = text.split(/\s+/);
-  const results = await Promise.all(words.map(async (word) => {
-    const cleanWord = word.replace(/[^a-zA-Z]/g, '');
-    if (!cleanWord) return word;
-    try {
-      const res = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${cleanWord}`);
-      if (!res.ok) throw new Error('Not found');
-      const data = await res.json();
-      if (Array.isArray(data) && data.length > 0) {
-         const entry = data[0];
-         const phonetic = entry.phonetic || entry.phonetics?.find((p: any) => p.text)?.text;
-         if (phonetic) return phonetic;
-      }
-      return cleanWord;
-    } catch (e) { return cleanWord; }
-  }));
-  return results.join(' ');
-};
-
-export const getBadgeInfo = (mastery: number, levels: BadgeLevel[] = BADGE_LEVELS) => {
-    let currentBadge = levels[0];
-    let nextBadge = levels[1] || null; 
-    for (let i = levels.length - 1; i >= 0; i--) {
-        if (mastery >= levels[i].threshold) {
-            currentBadge = levels[i];
-            nextBadge = levels[i+1] || null; 
-            break;
-        }
-    }
-    return { currentBadge, nextBadge };
-};
-
-export const calculateTierProgress = (score: number, currentThreshold: number, nextThreshold: number | undefined) => {
-    if (!nextThreshold) return 100;
-    const range = nextThreshold - currentThreshold;
-    const progress = score - currentThreshold;
-    return Math.max(0, Math.min(100, (progress / range) * 100));
 };
 
 export const checkVocabContainment = (container: string, content: string): boolean => {
