@@ -84,3 +84,4 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 | UI 改版④（PR #16，規劃） | Nemotron／Poolside／Gemini Lite | 3 | 3 | ConfirmDialog 是 alertdialog 不能直接套用、motion-safe、左欄 sticky；誤判：App 其他分頁也有舊色（Poolside）、印章放符號、移除閃爍；Grok 本輪未出現 |
 | UI 改版④（PR #16，審查） | Codex | 1 | 0 | 空集合後監聽失敗會卡在空狀態（🟠） |
 | UI 改版④（PR #16，審查） | Gemini Flash／Lite | 0 | 0 | 兩輪皆無意見，漏掉 Codex 的 🟠 |
+| 刪除舊單字庫（PR #17，審查） | Codex／Gemini Lite | 0 | 0 | 第 1 輪皆無意見 |
