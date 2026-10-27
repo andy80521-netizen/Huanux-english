@@ -216,8 +216,15 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
 
         setError(null);
         cleanupAudio();
+        // 等待麥克風權限期間可能已換句或離開（桌機可點右側句子）：每個 await 之後都檢查，過期就釋放資源並結束，不啟動舊句子的錄音
+        const startToken = scoringTokenRef.current;
+        const isStale = () => startToken !== scoringTokenRef.current;
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+            if (isStale()) {
+                stream.getTracks().forEach(track => track.stop());
+                return;
+            }
             streamRef.current = stream;
             
             const mimeType = getSupportedMimeType();
@@ -230,6 +237,10 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
             const audioCtx = new AudioContextClass();
             audioContextRef.current = audioCtx;
             await audioCtx.resume().catch(console.warn);
+            if (isStale()) {
+                cleanupAudio();
+                return;
+            }
 
             const source = audioCtx.createMediaStreamSource(stream);
             sourceRef.current = source;
@@ -287,6 +298,7 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
 
         } catch (err: any) {
             console.error("Mic access error:", err);
+            if (isStale()) return;
             cleanupAudio();
             setError("無法取得麥克風權限，請確認瀏覽器已允許使用麥克風。");
         }
