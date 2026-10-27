@@ -55,3 +55,25 @@ export function groupMasteryBars(
     return { id, created: true, mastery, gain, mastered: mastery >= MASTERY_MAX };
   });
 }
+
+// ── ③b：句型的 10×10 熟練度地圖 ──────────────────────────────
+
+/** 10 組 × 10 格；第 g 列是 groupMasteryBars(sentences, g) */
+export function patternMasteryMap(sentences: PatternExampleSentence[] | undefined | null): GroupMasteryBar[][] {
+  return Array.from({ length: GROUP_SIZE }, (_, g) => groupMasteryBars(sentences, g));
+}
+
+/** 每組已精熟句數（0～10），由地圖推出，與地圖用同一套編號規則 */
+export function groupMasteredCounts(sentences: PatternExampleSentence[] | undefined | null): number[] {
+  return patternMasteryMap(sentences).map((row) => row.filter((c) => c.mastered).length);
+}
+
+/** 地圖格子深淺：0＝0、1＝1～399、2＝400～699、3＝700～999、4＝1000（只給畫面用） */
+export function masteryLevel(mastery: number): 0 | 1 | 2 | 3 | 4 {
+  const m = clamp(mastery);
+  if (m >= MASTERY_MAX) return 4;
+  if (m >= 700) return 3;
+  if (m >= 400) return 2;
+  if (m > 0) return 1;
+  return 0;
+}

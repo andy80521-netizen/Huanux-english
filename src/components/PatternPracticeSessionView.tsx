@@ -819,7 +819,10 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
             {/* 動作列：手機固定在練習畫面捲動區底部，題目很長也按得到 */}
             {isPromptReady && (
                 <div className="sticky bottom-0 z-10 border-t border-line/70 bg-ground/95 @[60rem]:static px-6 pt-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] backdrop-blur-md sm:px-10 lg:px-14 @[60rem]:border-t-0 @[60rem]:bg-transparent @[60rem]:backdrop-blur-none">
-                    <div className="max-w-[680px] @[60rem]:ml-auto @[60rem]:w-[440px] @[60rem]:max-w-none">
+                    <div className={`max-w-[680px] ${scored || sessionState === 'scoreError'
+                        // 有結果時按鈕在右欄結果下方；待錄音、錄音中、評分中時錄音鈕在左欄題目下方
+                        ? '@[60rem]:ml-auto @[60rem]:w-[440px] @[60rem]:max-w-none'
+                        : '@[60rem]:mr-auto @[60rem]:w-[min(100%,560px)]'}`}>
                         {sessionState === 'idle' && (
                             <div className="flex flex-col items-center gap-2">
                                 <button

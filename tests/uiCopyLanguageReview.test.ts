@@ -59,9 +59,10 @@ describe('本 PR 的元件不再使用舊色階 class', () => {
 });
 
 describe('版面', () => {
-  it('語言模型外框用 SegmentedControl；③b 畫面暫時維持 max-w-3xl', () => {
+  // ③b（PR #14）已拿掉 ③a 的暫時寬度；擁有者 2026-10-27 同意把這條改成新狀態
+  it('語言模型外框用 SegmentedControl；③b 已拿掉 max-w-3xl 暫時寬度', () => {
     expect(src.mode).toContain('SegmentedControl');
-    expect(src.mode).toContain('max-w-3xl');
+    expect(src.mode).not.toContain('max-w-3xl');
   });
   it('App：語言模型分頁桌機寬度 1200px', () => {
     expect(app).toMatch(/WIDE_TABS\s*=\s*\[[^\]]*'languageModel'/);

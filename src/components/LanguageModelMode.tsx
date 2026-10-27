@@ -41,13 +41,10 @@ export default function LanguageModelMode() {
 
     if (currentView === 'detail' && selectedPatternId) {
         return (
-            // 句型詳情還沒改版（③b），維持原本寬度
-            <div className="mx-auto h-full w-full max-w-3xl">
-                <LanguageModelDetailView
-                    patternId={selectedPatternId}
-                    onBack={() => setCurrentView('list')}
-                />
-            </div>
+            <LanguageModelDetailView
+                patternId={selectedPatternId}
+                onBack={() => setCurrentView('list')}
+            />
         );
     }
 
@@ -56,19 +53,14 @@ export default function LanguageModelMode() {
     }
 
     return (
-        // 句型庫還沒改版（③b），維持原本寬度
-        <div className="mx-auto flex h-full w-full max-w-3xl flex-col">
-            <div className="px-6 pt-6 pb-2">{tabs}</div>
-            <div className="flex-1 overflow-hidden">
-                <LanguageModelListView
-                    onPatternClick={(id) => {
-                        setSelectedPatternId(id);
-                        setCurrentView('detail');
-                    }}
-                    filters={filters}
-                    onFiltersChange={setFilters}
-                />
-            </div>
-        </div>
+        <LanguageModelListView
+            tabs={tabs}
+            onPatternClick={(id) => {
+                setSelectedPatternId(id);
+                setCurrentView('detail');
+            }}
+            filters={filters}
+            onFiltersChange={setFilters}
+        />
     );
 }
