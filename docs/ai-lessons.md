@@ -14,6 +14,9 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 - 只改 `docs/` 的推送不會重建預覽網站（`netlify.toml`），所以預覽網址可能停在上一個程式版本，這是正常的
 - 2026-10-27 起 Tailwind 為 v4 建置（`src/styles/app.css`），不再用 CDN。v4 與舊 v3 同名但大小不同：`shadow-sm`、`blur-sm`、`backdrop-blur-sm`、`outline-none` 要用 `-xs`／`outline-hidden`；`flex-shrink-*`、`flex-grow-*` 已移除（改 `shrink-*`、`grow-*`）。官方 `@tailwindcss/upgrade` 在沒有 v3 設定檔時不會做這些改名，要自己處理並對照 build 出來的 CSS
 - `indigo`／`slate` 色階已改成 A「靜讀」的玉綠／帶綠中性灰（靜態、不隨深色模式變），新程式優先用語意色 `bg-ground`、`text-ink`、`bg-accent` 等
+- `ShadowingPracticeView` 的「Cleanup on unmount」effect 依賴 `recordedBlobUrl`，**每次錄音結束都會重跑**，不是只在離開時跑；要在離開時才做的事（例如換句計數）必須放在 `[]` 依賴的 effect
+- 會讓使用者在非同步流程中途換畫面的功能（例如跳句），要逐一檢查每個 `await`（`getUserMedia`、`audioCtx.resume`、轉錄、寫入）回來後是否已過期
+- 畫面自檢可用本機假資料預覽：另建 vite 設定，把 `../firebase`、`firebase/firestore`、`firebase/storage`、`services/gemini` 換成模擬模組，Chromium 加 `--use-fake-device-for-media-stream` 可跑完整錄音流程；Tailwind 要用 `@source` 指到 repo 的 `src`
 - 本機 build 沒有 `GEMINI_API_KEY` 時整頁空白（Gemini SDK 載入時就拋錯），本機截圖要用 `GEMINI_API_KEY=placeholder… npx vite build`；沙盒連不到 Google Fonts 與 Firebase，截圖會是備援字體＋未登入畫面
 
 ## 防作弊機制的已知限制（2026-10-25 多輪攻擊測試後）
@@ -38,3 +41,8 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 | UI 改版①（PR #7，規劃） | DeepSeek | 3 | 0 | warn 對比、字重不足、v3/v4 取捨 |
 | UI 改版①（PR #7，規劃） | Nemotron／Poolside／Gemini Lite | 2 | 2 | color-scheme、鍵盤操作；誤判：@custom-variant 不支援（Poolside）、要沿用舊 isDarkMode（Gemini） |
 | UI 改版①（PR #7，審查） | Codex／Gemini Lite | 0 | 0 | 第 1 輪皆無意見 |
+| UI 改版②a（PR #8，規劃） | Codex | 4 | 0 | 評分中跳句覆蓋（🔴）、跳句原音不停、gain 定義錯、按鈕巢狀 |
+| UI 改版②a（PR #8，規劃） | Grok | 8 | 0 | 文案變更沒列清單、寬度分層、中文 fallback、舊熟練度來源、RetellSection 雙框、JS 動畫要另判減少動態等 |
+| UI 改版②a（PR #8，規劃） | DeepSeek／Nemotron／Poolside／Gemini | 2 | 1 | RetellSection 雙框、色階遺漏；誤判：objectURL 未釋放（Gemini，現行已釋放） |
+| UI 改版②a（PR #8，審查） | Codex | 1 | 0 | 等待麥克風權限期間跳句會啟動舊錄音（🔴） |
+| UI 改版②a（PR #8，審查） | Gemini Lite | 0 | 0 | 兩輪皆無意見，漏掉 Codex 的 🔴 |
