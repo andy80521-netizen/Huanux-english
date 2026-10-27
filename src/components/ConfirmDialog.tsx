@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useId, useRef } from 'react';
 import { AlertTriangle } from 'lucide-react';
 
 const ConfirmDialog: React.FC<{
@@ -10,25 +10,48 @@ const ConfirmDialog: React.FC<{
   confirmText?: string;
   cancelText?: string;
 }> = ({ isOpen, title, message, onConfirm, onCancel, confirmText = "確定", cancelText = "取消" }) => {
+  const titleId = useId();
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  // 呼叫端每次重繪都會傳新的 onCancel，用 ref 保存，避免下面的 effect 重跑而把焦點搶回「取消」
+  const onCancelRef = useRef(onCancel);
+  onCancelRef.current = onCancel;
+
+  // 開啟時把焦點放在「取消」（較安全的選項），Esc 等同取消
+  useEffect(() => {
+    if (!isOpen) return;
+    cancelRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onCancelRef.current(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isOpen]);
+
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-xs p-4 animate-in fade-in duration-200">
-      <div className="bg-white dark:bg-slate-900 rounded-[2rem] p-8 w-full max-w-xs shadow-2xl animate-in zoom-in-95 duration-200 text-center border border-slate-100 dark:border-slate-800">
-        <div className="w-16 h-16 bg-red-50 dark:bg-red-900/20 rounded-full flex items-center justify-center mx-auto mb-6">
-          <AlertTriangle className="text-red-500 dark:text-red-400" size={32} />
+    <div className="fixed inset-0 z-100 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+      <div
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className="w-full max-w-xs rounded-3xl border border-line bg-surface p-7 text-center shadow-[0_24px_48px_-12px_rgb(0_0_0/0.25)]"
+      >
+        <div className="mx-auto mb-5 flex size-14 items-center justify-center rounded-full bg-danger/10">
+          <AlertTriangle className="text-danger" size={26} aria-hidden="true" />
         </div>
-        <h3 className="text-2xl font-black text-slate-800 dark:text-white mb-2">{title}</h3>
-        <p className="text-slate-500 dark:text-slate-400 mb-8 leading-relaxed whitespace-pre-line break-words">{message}</p>
-        <div className="flex gap-4">
-          <button 
-            onClick={onCancel} 
-            className="flex-1 py-3.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold rounded-2xl hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+        <h3 id={titleId} className="mb-2 text-xl font-bold text-ink">{title}</h3>
+        <p className="mb-7 text-[15px] leading-relaxed text-muted whitespace-pre-line break-words">{message}</p>
+        <div className="flex gap-3">
+          <button
+            ref={cancelRef}
+            type="button"
+            onClick={onCancel}
+            className="min-h-12 flex-1 rounded-full border border-line text-[15px] text-ink transition-colors hover:bg-surface-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
           >
             {cancelText}
           </button>
-          <button 
-            onClick={onConfirm} 
-            className="flex-1 py-3.5 bg-red-500 text-white font-bold rounded-2xl shadow-lg shadow-red-200 dark:shadow-none hover:bg-red-600 transition-all active:scale-95"
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="min-h-12 flex-1 rounded-full bg-danger text-[15px] font-medium text-white dark:text-ground transition-[filter,transform] hover:brightness-110 active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-danger"
           >
             {confirmText}
           </button>

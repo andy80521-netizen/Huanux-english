@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { Material, CoverStyle } from '../types';
-import { ChevronLeft, Play, Pause, CheckCircle2, Mic, Loader2, Sparkles, Trash2, RotateCcw, BookOpen, X, Search } from 'lucide-react';
+import { ChevronLeft, Play, Pause, Mic, Loader2, Sparkles, Trash2, RotateCcw, BookOpen, X, Search, RefreshCw } from 'lucide-react';
 import { auth, db, appId } from '../firebase';
 import { doc, onSnapshot, collection, setDoc, updateDoc, getDoc } from 'firebase/firestore';
 import ShadowingPracticeView from './ShadowingPracticeView';
@@ -14,6 +14,11 @@ import { requestSightingDetection, MaterialSightings } from '../services/sightin
 import RetellSection from './RetellSection';
 import RetellView from './RetellView';
 import { RetellSegment, RetellTargetPattern } from '../services/retell';
+import Button from './ui/Button';
+import IconButton from './ui/IconButton';
+import ProgressBar from './ui/ProgressBar';
+import SegmentedControl from './ui/SegmentedControl';
+import { materialProgress, MASTERY_MAX } from '../utils/materialProgress';
 
 export default function MaterialDetailView({ materialId, onBack }: { materialId: string, onBack: () => void }) {
     const [material, setMaterial] = useState<Material | null>(null);
@@ -103,9 +108,9 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
 
     if (!material) {
         return (
-            <div className="flex flex-col h-full bg-slate-50 dark:bg-slate-950 p-6 items-center justify-center">
-                <Loader2 className="animate-spin text-indigo-600 mb-4" size={40} />
-                <p className="text-slate-500 font-bold">載入中...</p>
+            <div className="flex flex-col h-full p-6 items-center justify-center" role="status">
+                <Loader2 className="animate-spin text-accent mb-4" size={32} aria-hidden="true" />
+                <p className="text-muted">載入中...</p>
             </div>
         );
     }
@@ -117,6 +122,8 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
 
     if (retellTarget) {
         return (
+            // 複述練習頁還沒改版（②b），維持原本寬度
+            <div className="mx-auto h-full w-full max-w-3xl">
             <RetellView
                 material={material}
                 segment={retellTarget.segment}
@@ -124,6 +131,7 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
                 targetPatterns={retellTarget.targetPatterns}
                 onBack={() => setRetellTarget(null)}
             />
+            </div>
         );
     }
 
@@ -138,6 +146,7 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
                     const next = activeIndices.find(i => i > prev);
                     return next !== undefined ? next : prev;
                 })}
+                onJump={(index) => setPracticeIndex(index)}
                 isLastSentence={practiceIndex === lastActiveIndex}
                 sightingPatternIds={sightings?.bySentence?.[material.sentences[practiceIndex]?.id] || []}
             />
@@ -321,250 +330,246 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
 
     const isCoverGenerating = material.coverStatus === 'generating' && !!material.coverRequestedAt && (Date.now() - material.coverRequestedAt < 5 * 60 * 1000);
 
+    const { total: activeTotal, completed: completedTotal } = materialProgress(material.sentences);
+
+    // 已學句型比對的狀態（判斷與文字沿用原本）
+    const isDetecting = sightings?.status === 'processing' && typeof sightings.requestedAt === 'number' && Date.now() - sightings.requestedAt < 5 * 60 * 1000;
+    const matchedCount = Object.keys(sightings?.bySentence || {}).length;
+    const sightingStatusText = isDetecting
+        ? '比對中，完成後含有已學句型的句子會加上標籤'
+        : sightings?.status === 'error'
+            ? `比對失敗：${sightings.error || '請稍後再試'}`
+            : sightings?.status === 'done'
+                ? `${matchedCount} 句含有已學句型`
+                : sightings?.status === 'processing'
+                    ? '上次比對沒有完成，可以重新比對'
+                    : '還沒比對過';
+
     return (
-        <div className="flex flex-col h-full bg-slate-50 dark:bg-slate-950 p-6 overflow-y-auto pb-20">
-            <div className="flex items-center gap-4 mb-6">
-                <button 
-                    onClick={onBack}
-                    className="p-2 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 rounded-full shadow-xs hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                >
-                    <ChevronLeft size={24} />
-                </button>
-                <h2 className="text-2xl font-black text-slate-800 dark:text-white line-clamp-1 flex-1">
-                    {material.title}
-                </h2>
-                <button
-                    onClick={() => setShowTrash(true)}
-                    className="p-2 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 rounded-full shadow-xs hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors relative"
-                    title="垃圾桶"
-                >
-                    <Trash2 size={24} />
-                    {deletedIndices.length > 0 && (
-                        <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none">
-                            {deletedIndices.length}
-                        </span>
-                    )}
-                </button>
-            </div>
+        <div className="h-full overflow-y-auto">
+            <div className="px-5 pt-2 pb-24 sm:px-8 lg:grid lg:grid-cols-[360px_minmax(0,1fr)] lg:items-start lg:gap-12 lg:px-12 lg:pt-6 lg:pb-16">
 
-            {/* 封面區 */}
-            <div className="mb-6 space-y-3">
-                <div className="aspect-video w-full rounded-2xl overflow-hidden bg-slate-100 dark:bg-slate-800 relative flex items-center justify-center border border-slate-200 dark:border-slate-800 shadow-xs">
-                    {material.coverUrl && material.coverStatus !== 'generating' ? (
-                        <img
-                            src={material.coverUrl}
-                            alt={material.title}
-                            className="w-full h-full object-cover"
-                        />
-                    ) : isCoverGenerating ? (
-                        <div className="flex flex-col items-center justify-center gap-2 text-indigo-500 dark:text-indigo-400">
-                            <Loader2 size={32} className="animate-spin" />
-                            <span className="text-sm font-bold text-slate-500 dark:text-slate-400">封面產生中</span>
-                        </div>
-                    ) : (
-                        <div className="w-full h-full bg-gradient-to-br from-indigo-50 to-slate-100 dark:from-slate-850 dark:to-slate-800 flex items-center justify-center text-slate-300 dark:text-slate-600">
-                            <BookOpen size={48} />
-                        </div>
-                    )}
-                </div>
-
-                {/* 封面操作列 */}
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold text-slate-600 dark:text-slate-300">封面風格：</span>
-                        <div className="inline-flex rounded-lg p-0.5 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
-                            <button
-                                type="button"
-                                onClick={() => handleCoverStyleChange('photo')}
-                                className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all ${
-                                    coverStyle === 'photo'
-                                        ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-xs'
-                                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-                                }`}
-                            >
-                                寫實攝影
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => handleCoverStyleChange('anime')}
-                                className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all ${
-                                    coverStyle === 'anime'
-                                        ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-xs'
-                                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-                                }`}
-                            >
-                                日系動漫
-                            </button>
-                        </div>
-                    </div>
-
-                    <button
-                        onClick={handleGenerateCover}
-                        disabled={isCoverGenerating}
-                        className="px-4 py-2 bg-indigo-600 text-white font-bold rounded-xl shadow-xs hover:bg-indigo-700 transition-all active:scale-95 disabled:opacity-50 disabled:pointer-events-none flex items-center gap-2 text-sm"
-                    >
-                        {isCoverGenerating ? (
-                            <>
-                                <Loader2 size={16} className="animate-spin" />
-                                產生中…
-                            </>
-                        ) : (
-                            material.coverUrl ? '重新產生封面' : '產生封面'
-                        )}
-                    </button>
-                </div>
-
-                {material.coverStatus === 'error' && (
-                    <p className="text-xs text-red-500 font-bold">
-                        封面產生失敗：{material.coverError || '未知錯誤'}
-                    </p>
-                )}
-            </div>
-
-            {/* 已學句型比對 */}
-            {(() => {
-                const isDetecting = sightings?.status === 'processing' && typeof sightings.requestedAt === 'number' && Date.now() - sightings.requestedAt < 5 * 60 * 1000;
-                const matchedCount = Object.keys(sightings?.bySentence || {}).length;
-                const statusText = isDetecting
-                    ? '比對中，完成後含有已學句型的句子會加上標籤'
-                    : sightings?.status === 'error'
-                        ? `比對失敗：${sightings.error || '請稍後再試'}`
-                        : sightings?.status === 'done'
-                            ? `${matchedCount} 句含有已學句型`
-                            : sightings?.status === 'processing'
-                                ? '上次比對沒有完成，可以重新比對'
-                                : '還沒比對過';
-                return (
-                    <div className="mb-6 p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs flex items-center justify-between gap-3">
-                        <div className="min-w-0">
-                            <p className="text-sm font-bold text-slate-700 dark:text-slate-200">已學句型比對</p>
-                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{statusText}</p>
-                        </div>
-                        <button
-                            onClick={() => requestSightingDetection(material.id)}
-                            disabled={isDetecting}
-                            className="shrink-0 px-3 py-2 text-xs font-bold bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-xl hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                {/* 左欄：封面、標題、進度、工具 */}
+                <section className="flex flex-col gap-5">
+                    <div className="-mx-3 flex items-center justify-between">
+                        <IconButton aria-label="返回教材列表" onClick={onBack}>
+                            <ChevronLeft size={22} aria-hidden="true" />
+                        </IconButton>
+                        <IconButton
+                            aria-label={deletedIndices.length > 0 ? `垃圾桶，${deletedIndices.length} 句已刪除` : '垃圾桶'}
+                            title="垃圾桶"
+                            onClick={() => setShowTrash(true)}
+                            className="relative text-muted"
                         >
-                            {isDetecting ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
-                            {sightings?.status === 'done' ? '重新比對' : '比對已學句型'}
-                        </button>
+                            <Trash2 size={19} strokeWidth={1.8} aria-hidden="true" />
+                            {deletedIndices.length > 0 && (
+                                <span className="absolute top-1.5 right-1 min-w-4 h-4 px-1 rounded-full bg-ink text-surface text-[10px] leading-4 text-center" aria-hidden="true">
+                                    {deletedIndices.length}
+                                </span>
+                            )}
+                        </IconButton>
                     </div>
-                );
-            })()}
 
-            <RetellSection
-                material={material}
-                bySentence={sightings?.bySentence}
-                onStart={(segmentIndex, segment, targetPatterns) => setRetellTarget({ segmentIndex, segment, targetPatterns })}
-            />
-
-            {extractMessage && (
-                <div className={`mb-6 text-sm px-4 py-3 rounded-xl shadow-xs border animate-in slide-in-from-top-2 font-bold text-center ${
-                    extractMessage.isError 
-                        ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 border-red-100 dark:border-red-800' 
-                        : 'bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 border-indigo-100 dark:border-indigo-800'
-                }`}>
-                    {extractMessage.text}
-                </div>
-            )}
-
-            <audio 
-                ref={audioRef} 
-                src={material.audioUrl} 
-                onTimeUpdate={handleTimeUpdate} 
-                onEnded={() => setPlayingIndex(null)} 
-            />
-
-            <div className="space-y-4">
-                {material.sentences.map((s, i) => {
-                    if (s.deleted) return null;
-                    const isCompleted = s.mastery >= 1000;
-                    return (
-                        <div key={s.id} className="p-5 rounded-2xl bg-white dark:bg-slate-900 shadow-xs border border-slate-200 dark:border-slate-800 flex flex-col gap-4">
-                            <div className="w-full space-y-2">
-                                <div className="flex flex-wrap items-center gap-2 mb-2">
-                                    {s.lowConfidence && (
-                                        <span className="text-[10px] font-bold bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full shrink-0">
-                                            低信心度
-                                        </span>
-                                    )}
-                                    {isCompleted && (
-                                        <span className="text-[10px] font-bold bg-green-100 text-green-600 px-2 py-0.5 rounded-full shrink-0 flex items-center gap-1">
-                                            <CheckCircle2 size={12} /> 已精熟
-                                        </span>
-                                    )}
-                                    <span className="text-xs font-bold text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full">
-                                        Mastery: {s.mastery}
-                                    </span>
-                                </div>
-                                <p className="text-lg font-bold text-slate-800 dark:text-slate-200 leading-relaxed">
-                                    {s.text}
-                                </p>
-                                <p className="text-slate-500 dark:text-slate-400 text-sm leading-relaxed">
-                                    {s.translation}
-                                </p>
-                                {(sightings?.bySentence?.[s.id] || []).filter(pid => patternNames[pid]).length > 0 && (
-                                    <div className="flex flex-wrap gap-1.5 pt-1">
-                                        {(sightings?.bySentence?.[s.id] || []).filter(pid => patternNames[pid]).map(pid => (
-                                            <button
-                                                key={pid}
-                                                onClick={() => setQuickCardPatternId(pid)}
-                                                className="text-[11px] font-bold px-2 py-1 rounded-lg bg-purple-50 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-900/50 transition-colors"
-                                            >
-                                                含句型：{patternNames[pid]}
-                                            </button>
-                                        ))}
-                                    </div>
-                                )}
+                    {/* 封面 */}
+                    <div className="aspect-video w-full overflow-hidden rounded-[18px] bg-surface-2 border border-line flex items-center justify-center">
+                        {material.coverUrl && material.coverStatus !== 'generating' ? (
+                            <img src={material.coverUrl} alt="" className="w-full h-full object-cover" />
+                        ) : isCoverGenerating ? (
+                            <div className="flex flex-col items-center justify-center gap-2 text-accent" role="status">
+                                <Loader2 size={28} className="animate-spin" aria-hidden="true" />
+                                <span className="text-sm text-muted">封面產生中</span>
                             </div>
-                            
-                            <div className="flex flex-wrap items-center gap-2">
-                                {isCompleted && !s.extracted && (
-                                    <button
-                                        onClick={() => handleExtract(i)}
-                                        disabled={extractingIndex !== null}
-                                        className="shrink-0 px-4 h-12 rounded-xl flex items-center justify-center gap-2 transition-all shadow-xs bg-purple-50 text-purple-600 hover:bg-purple-100 dark:bg-purple-900/30 dark:text-purple-400 dark:hover:bg-purple-900/50 font-bold text-sm disabled:opacity-50"
-                                    >
-                                        {extractingIndex === i ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}
-                                        萃取語言模型
-                                    </button>
-                                )}
-                                {isCompleted && s.extracted && (
-                                    <button
-                                        onClick={() => handleExtract(i)}
-                                        disabled={extractingIndex !== null}
-                                        title="已萃取過，可重新萃取（與既有句型重複的會自動略過）"
-                                        className="shrink-0 px-4 h-12 rounded-xl flex items-center justify-center gap-2 shadow-xs bg-slate-50 text-slate-500 hover:bg-slate-100 dark:bg-slate-800/50 dark:text-slate-400 dark:hover:bg-slate-800 font-bold text-sm border border-slate-200 dark:border-slate-700 transition-all disabled:opacity-50"
-                                    >
-                                        {extractingIndex === i ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}
-                                        已萃取・重新萃取
-                                    </button>
-                                )}
-                                <button
-                                    onClick={() => setPracticeIndex(i)}
-                                    className="shrink-0 px-4 h-12 rounded-xl flex items-center justify-center gap-2 transition-all shadow-xs bg-indigo-50 text-indigo-600 hover:bg-indigo-100 dark:bg-indigo-900/30 dark:text-indigo-400 dark:hover:bg-indigo-900/50 font-bold text-sm"
-                                >
-                                    <Mic size={18} />
-                                    跟讀
-                                </button>
-                                <button
-                                    onClick={() => playingIndex === i ? handlePause() : handlePlaySegment(i)}
-                                    className={`shrink-0 w-12 h-12 rounded-xl flex items-center justify-center transition-all shadow-xs ${playingIndex === i ? 'bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-100' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 hover:text-slate-800 dark:hover:bg-slate-700 dark:hover:text-slate-100'}`}
-                                >
-                                    {playingIndex === i ? <Pause size={20} className="fill-current" /> : <Play size={20} className="fill-current ml-1" />}
-                                </button>
-                                <button
-                                    onClick={() => setPendingDeleteIndex(i)}
-                                    disabled={activeIndices.length <= 1}
-                                    title={activeIndices.length <= 1 ? "至少需保留 1 句" : "刪除句子"}
-                                    className="shrink-0 w-12 h-12 rounded-xl flex items-center justify-center transition-all shadow-xs text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/30 disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-red-500"
-                                >
-                                    <Trash2 size={20} />
-                                </button>
-                            </div>
+                        ) : (
+                            <BookOpen size={40} strokeWidth={1.4} className="text-muted/50" aria-hidden="true" />
+                        )}
+                    </div>
+
+                    {/* 標題與整體進度 */}
+                    <div className="flex flex-col gap-3">
+                        <h2 className="font-reading text-[30px] leading-[1.18] tracking-[-0.01em] text-ink break-words">{material.title}</h2>
+                        <div className="flex items-center justify-between text-[13px] text-muted">
+                            <span>{activeTotal} 句</span>
+                            <span><span className="font-medium text-ink">{completedTotal}</span> 句已畢業</span>
                         </div>
-                    );
-                })}
+                        <ProgressBar value={completedTotal} max={activeTotal} label="整份教材進度" size="sm" />
+                    </div>
+
+                    {/* 封面風格與產生封面 */}
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                        <SegmentedControl<CoverStyle>
+                            label="封面風格"
+                            value={coverStyle}
+                            onChange={handleCoverStyleChange}
+                            options={[
+                                { value: 'photo', label: '寫實攝影' },
+                                { value: 'anime', label: '日系動漫' },
+                            ]}
+                        />
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={handleGenerateCover}
+                            disabled={isCoverGenerating}
+                            icon={isCoverGenerating ? <Loader2 size={15} className="animate-spin" aria-hidden="true" /> : <RefreshCw size={15} aria-hidden="true" />}
+                        >
+                            {isCoverGenerating ? '產生中…' : (material.coverUrl ? '重新產生封面' : '產生封面')}
+                        </Button>
+                    </div>
+                    {material.coverStatus === 'error' && (
+                        <p role="alert" className="-mt-2 text-xs font-medium text-danger break-words">
+                            封面產生失敗：{material.coverError || '未知錯誤'}
+                        </p>
+                    )}
+
+                    {/* 工具：已學句型比對＋複述練習（同一張卡片，分隔線區隔） */}
+                    <div className="rounded-2xl border border-line bg-surface">
+                        <div className="flex items-center gap-3 px-4 py-3.5">
+                            <div className="min-w-0 flex-1">
+                                <p className="text-sm font-medium text-ink">已學句型比對</p>
+                                <p className={`text-xs mt-0.5 ${sightings?.status === 'error' ? 'text-danger' : 'text-muted'}`}>{sightingStatusText}</p>
+                            </div>
+                            <Button
+                                variant="secondary"
+                                size="sm"
+                                onClick={() => requestSightingDetection(material.id)}
+                                disabled={isDetecting}
+                                icon={isDetecting ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : <Search size={14} aria-hidden="true" />}
+                                className="shrink-0"
+                            >
+                                {sightings?.status === 'done' ? '重新比對' : '比對已學句型'}
+                            </Button>
+                        </div>
+                        <div className="mx-4 h-px bg-line" />
+                        <RetellSection
+                            embedded
+                            material={material}
+                            bySentence={sightings?.bySentence}
+                            onStart={(segmentIndex, segment, targetPatterns) => setRetellTarget({ segmentIndex, segment, targetPatterns })}
+                        />
+                    </div>
+                </section>
+
+                {/* 右欄：句子 */}
+                <section className="mt-9 lg:mt-[60px]">
+                    <div className="flex items-baseline justify-between pb-3 lg:border-b lg:border-line">
+                        <h3 className="text-[17px] font-bold tracking-wide text-ink">句子</h3>
+                        <span className="text-xs text-muted">點「跟讀」開始練習</span>
+                    </div>
+
+                    {extractMessage && (
+                        <div
+                            role="status"
+                            className={`my-3 rounded-xl px-4 py-3 text-sm font-medium text-center break-words ${
+                                extractMessage.isError ? 'bg-danger/10 text-danger' : 'bg-accent-soft text-ink'
+                            }`}
+                        >
+                            {extractMessage.text}
+                        </div>
+                    )}
+
+                    <audio
+                        ref={audioRef}
+                        src={material.audioUrl}
+                        onTimeUpdate={handleTimeUpdate}
+                        onEnded={() => setPlayingIndex(null)}
+                    />
+
+                    <div className="flex flex-col gap-3 lg:gap-0">
+                        {material.sentences.map((s, i) => {
+                            if (s.deleted) return null;
+                            const mastery = Number.isFinite(s.mastery) ? s.mastery : 0;
+                            const isCompleted = mastery >= MASTERY_MAX;
+                            const patternIds = (sightings?.bySentence?.[s.id] || []).filter(pid => patternNames[pid]);
+                            const canDelete = activeIndices.length > 1;
+                            return (
+                                <article
+                                    key={s.id}
+                                    className="flex flex-col gap-2.5 rounded-2xl border border-line bg-surface p-4 sm:p-5 lg:rounded-none lg:border-0 lg:border-b lg:bg-transparent lg:px-0 lg:py-5"
+                                >
+                                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
+                                        <span className="tabular-nums">{activeIndices.indexOf(i) + 1}</span>
+                                        {isCompleted && (
+                                            <span className="rounded-full bg-gold/12 px-2 py-0.5 text-[11px] text-gold">已精熟</span>
+                                        )}
+                                        {s.lowConfidence && (
+                                            <span className="rounded-full bg-warn/10 px-2 py-0.5 text-[11px] text-warn">低信心度</span>
+                                        )}
+                                    </div>
+                                    <p lang="en" className="font-reading text-[20px] leading-[1.4] text-ink break-words">
+                                        {s.text}
+                                    </p>
+                                    <p className="text-sm leading-[1.65] text-muted break-words">
+                                        {s.translation}
+                                    </p>
+                                    {patternIds.length > 0 && (
+                                        <div className="flex flex-wrap gap-1.5 pt-0.5">
+                                            {patternIds.map(pid => (
+                                                <button
+                                                    key={pid}
+                                                    type="button"
+                                                    onClick={() => setQuickCardPatternId(pid)}
+                                                    className="min-h-8 rounded-full bg-accent-soft px-3 text-xs text-ink transition-[filter] hover:brightness-[0.97] dark:hover:brightness-110 focus-visible:outline-2 focus-visible:outline-accent"
+                                                >
+                                                    含句型：{patternNames[pid]}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+
+                                    <div className="flex flex-wrap items-center gap-x-1 gap-y-2 pt-1">
+                                        <div className="mr-auto flex min-w-24 items-center gap-2">
+                                            <ProgressBar
+                                                value={Math.min(mastery, MASTERY_MAX)}
+                                                max={MASTERY_MAX}
+                                                label="熟練度"
+                                                size="sm"
+                                                tone={isCompleted ? 'gold' : 'accent'}
+                                                className="w-16"
+                                            />
+                                            <span className="font-reading text-[15px] tabular-nums text-ink">{mastery}</span>
+                                        </div>
+                                        <div className="ml-auto flex items-center gap-1">
+                                            <IconButton
+                                                aria-label="刪除句子"
+                                                title={canDelete ? '刪除句子' : '至少需保留 1 句'}
+                                                onClick={() => setPendingDeleteIndex(i)}
+                                                disabled={!canDelete}
+                                                className="text-muted hover:text-danger hover:bg-danger/10 disabled:opacity-35 disabled:hover:bg-transparent disabled:hover:text-muted"
+                                            >
+                                                <Trash2 size={17} strokeWidth={1.8} aria-hidden="true" />
+                                            </IconButton>
+                                            {isCompleted && (
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    onClick={() => handleExtract(i)}
+                                                    disabled={extractingIndex !== null}
+                                                    title={s.extracted ? '已萃取過，可重新萃取（與既有句型重複的會自動略過）' : undefined}
+                                                    icon={extractingIndex === i ? <Loader2 size={15} className="animate-spin" aria-hidden="true" /> : <Sparkles size={15} aria-hidden="true" />}
+                                                    className="text-gold! hover:bg-gold/10!"
+                                                >
+                                                    {s.extracted ? '重新萃取' : '萃取'}
+                                                </Button>
+                                            )}
+                                            <IconButton
+                                                aria-label={playingIndex === i ? '暫停' : '播放這一句'}
+                                                onClick={() => playingIndex === i ? handlePause() : handlePlaySegment(i)}
+                                                className={`border ${playingIndex === i ? 'border-accent bg-accent-soft' : 'border-line'}`}
+                                            >
+                                                {playingIndex === i
+                                                    ? <Pause size={16} className="fill-current" aria-hidden="true" />
+                                                    : <Play size={16} className="fill-current ml-0.5" aria-hidden="true" />}
+                                            </IconButton>
+                                            <Button onClick={() => setPracticeIndex(i)} icon={<Mic size={16} aria-hidden="true" />}>
+                                                跟讀
+                                            </Button>
+                                        </div>
+                                    </div>
+                                </article>
+                            );
+                        })}
+                    </div>
+                </section>
             </div>
 
             {/* 刪除確認對話框 */}
@@ -592,59 +597,57 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
 
             {/* 垃圾桶視窗 */}
             {showTrash && (
-                <div 
-                    className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-xs p-4 animate-in fade-in duration-200"
+                <div
+                    className="fixed inset-0 z-100 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4"
                     onClick={() => setShowTrash(false)}
                 >
-                    <div 
-                        className="bg-white dark:bg-slate-900 rounded-[2rem] p-6 w-full max-w-lg shadow-2xl border border-slate-100 dark:border-slate-800 flex flex-col max-h-[85vh] animate-in zoom-in-95 duration-200"
+                    <div
+                        role="dialog"
+                        aria-modal="true"
+                        aria-label={`垃圾桶（${deletedIndices.length}）`}
+                        className="flex max-h-[85vh] w-full max-w-lg flex-col rounded-3xl border border-line bg-surface p-6 shadow-[0_24px_48px_-12px_rgb(0_0_0/0.25)]"
                         onClick={(e) => e.stopPropagation()}
                     >
-                        <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800 mb-4">
-                            <h3 className="text-xl font-black text-slate-800 dark:text-white flex items-center gap-2">
-                                <Trash2 size={20} className="text-slate-400" />
+                        <div className="mb-4 flex items-center justify-between border-b border-line pb-4">
+                            <h3 className="flex items-center gap-2 text-lg font-bold text-ink">
+                                <Trash2 size={19} className="text-muted" aria-hidden="true" />
                                 垃圾桶（{deletedIndices.length}）
                             </h3>
-                            <button
-                                onClick={() => setShowTrash(false)}
-                                className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                            >
-                                <X size={20} />
-                            </button>
+                            <IconButton aria-label="關閉" onClick={() => setShowTrash(false)} className="-mr-2 text-muted">
+                                <X size={20} aria-hidden="true" />
+                            </IconButton>
                         </div>
 
-                        <div className="max-h-[70vh] overflow-y-auto space-y-3 pr-1">
+                        <div className="max-h-[70vh] space-y-3 overflow-y-auto pr-1">
                             {deletedIndices.length === 0 ? (
-                                <div className="text-center py-12 text-slate-400 dark:text-slate-500 font-medium">
+                                <div className="py-12 text-center text-muted">
                                     垃圾桶是空的
                                 </div>
                             ) : (
                                 deletedIndices.map((i) => {
                                     const s = material.sentences[i];
                                     return (
-                                        <div key={s.id || i} className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-850/60 border border-slate-100 dark:border-slate-800 flex flex-col gap-3">
-                                            <div className="flex-1 space-y-1 min-w-0">
-                                                <div className="flex items-center gap-2">
-                                                    <span className="text-xs font-bold text-slate-400 bg-slate-200/70 dark:bg-slate-800 px-2 py-0.5 rounded-full">
-                                                        Mastery: {s.mastery}
-                                                    </span>
-                                                </div>
-                                                <p className="text-sm font-semibold text-slate-700 dark:text-slate-300 break-words line-through opacity-80">
+                                        <div key={s.id || i} className="flex flex-col gap-3 rounded-xl border border-line bg-surface-2 p-3.5">
+                                            <div className="min-w-0 flex-1 space-y-1">
+                                                <span className="text-xs text-muted tabular-nums">熟練度 {s.mastery}</span>
+                                                <p lang="en" className="font-reading text-[17px] leading-snug text-ink break-words line-through decoration-muted/60 opacity-80">
                                                     {s.text}
                                                 </p>
                                                 {s.translation && (
-                                                    <p className="text-xs text-slate-500 dark:text-slate-400 break-words">
+                                                    <p className="text-xs text-muted break-words">
                                                         {s.translation}
                                                     </p>
                                                 )}
                                             </div>
-                                            <button
+                                            <Button
+                                                variant="secondary"
+                                                size="sm"
                                                 onClick={() => handleRestoreSentence(i)}
-                                                className="self-end px-3 py-1.5 bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-950 font-bold text-xs flex items-center gap-1.5 transition-colors shrink-0 shadow-xs"
+                                                icon={<RotateCcw size={14} aria-hidden="true" />}
+                                                className="self-end"
                                             >
-                                                <RotateCcw size={14} />
                                                 復原
-                                            </button>
+                                            </Button>
                                         </div>
                                     );
                                 })

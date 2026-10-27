@@ -1,7 +1,7 @@
 import React from 'react';
 
 type Variant = 'primary' | 'secondary' | 'ghost';
-type Size = 'md' | 'lg';
+type Size = 'sm' | 'md' | 'lg';
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: Variant;
@@ -23,11 +23,12 @@ const VARIANTS: Record<Variant, string> = {
 };
 
 const SIZES: Record<Size, string> = {
+  sm: 'min-h-10 px-4 text-[13px] rounded-full',
   md: 'min-h-11 px-5 text-[15px] rounded-full',
   lg: 'min-h-14 px-8 text-[17px] rounded-full',
 };
 
-/** 共用按鈕：最小點擊區 44px；預設 type="button"，避免放進表單時誤送出 */
+/** 共用按鈕：md／lg 最小點擊區 44px（sm 為 40px，只用於次要的精簡按鈕）；預設 type="button"，避免放進表單時誤送出 */
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function Button(
   { variant = 'primary', size = 'md', icon, fullWidth, className = '', type = 'button', children, ...rest },
   ref,

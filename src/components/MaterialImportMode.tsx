@@ -719,7 +719,8 @@ export default function MaterialImportMode() {
     }
 
     return (
-        <div className="flex flex-col h-full bg-slate-50 dark:bg-slate-950 p-6 overflow-y-auto pb-20">
+        // 匯入畫面還沒改版（②b），維持原本寬度
+        <div className="mx-auto w-full max-w-3xl flex flex-col h-full bg-slate-50 dark:bg-slate-950 p-6 overflow-y-auto pb-20">
             <div className="flex items-center gap-4 mb-6">
                 <button 
                     onClick={async () => {
