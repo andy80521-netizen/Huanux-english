@@ -4,7 +4,9 @@ import { auth, db, appId } from '../firebase';
 import { LanguagePattern, PatternExampleSentence } from '../types';
 import { isSydneyDateReached, getSydneyDateString } from '../utils/sydneyTime';
 import PatternPracticeSessionView from './PatternPracticeSessionView';
-import { Sparkles, CalendarCheck, Target, CheckCircle2, ShieldCheck, Loader2, AlertCircle } from 'lucide-react';
+import { Sparkles, ShieldCheck, Loader2, AlertCircle, ChevronRight, CircleSlash } from 'lucide-react';
+import Button from './ui/Button';
+import { groupMasteryBars, GroupMasteryBar } from '../utils/groupMastery';
 import { prefetchSpeech } from '../services/speech';
 import { needsMaintenanceInit, initMaintenance, isMaintenanceDue, pickMaintenanceSentences, applyMaintenanceResult, MaintenanceOutcome, MAINTENANCE_SIZE, MAINTENANCE_PASS_COUNT } from '../services/maintenance';
 
@@ -32,7 +34,50 @@ type MaintenanceResultState =
     | { kind: 'already' }
     | { kind: 'error'; message: string };
 
-export default function TodayReviewView() {
+/** 系統是否開啟「減少動態效果」 */
+const prefersReducedMotion = () => {
+    try { return !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches; } catch { return false; }
+};
+
+/**
+ * 一組 10 句的熟練度長條。
+ * 小（今日複習卡片）：滿 1000 金色，其餘主色。
+ * 大（本組練習完成）：底段主色、這次增加的那段金色；開始前就已滿 1000 的整根金色。
+ */
+function MasteryBars({ bars, size, showGain = false }: { bars: GroupMasteryBar[]; size: 'sm' | 'lg'; showGain?: boolean }) {
+    const big = size === 'lg';
+    return (
+        <span
+            aria-hidden="true"
+            className={`grid grid-cols-10 items-end ${big ? 'h-24 gap-1.5' : 'h-5 w-full max-w-[184px] gap-1'}`}
+        >
+            {bars.map((b) => {
+                if (!b.created) {
+                    return <span key={b.id} className={`h-full border border-dashed border-muted/40 ${big ? 'rounded-md' : 'rounded-[3px]'}`} />;
+                }
+                const base = b.mastery - b.gain;
+                const alreadyFull = b.mastered && b.gain === 0;
+                const gainPct = big && showGain ? b.gain / 10 : 0;
+                return (
+                    <span key={b.id} className={`relative h-full overflow-hidden bg-line ${big ? 'rounded-md' : 'rounded-[3px]'}`}>
+                        <span
+                            className={`absolute inset-x-0 bottom-0 ${(!big && b.mastered) || alreadyFull ? 'bg-gold' : 'bg-accent'}`}
+                            style={{ height: `${(big ? base : b.mastery) / 10}%` }}
+                        />
+                        {big && (
+                            <span
+                                className="absolute inset-x-0 bg-gold transition-[height] delay-200 duration-700 ease-[var(--ease-out-soft)]"
+                                style={{ bottom: `${base / 10}%`, height: `${gainPct}%` }}
+                            />
+                        )}
+                    </span>
+                );
+            })}
+        </span>
+    );
+}
+
+export default function TodayReviewView({ tabs }: { tabs?: React.ReactNode }) {
     const [patterns, setPatterns] = useState<LanguagePattern[]>([]);
     const [loading, setLoading] = useState(true);
     const [user, setUser] = useState(auth.currentUser);
@@ -44,6 +89,9 @@ export default function TodayReviewView() {
     const [startMasteryMap, setStartMasteryMap] = useState<Record<string, number>>({});
     const [activeGroup, setActiveGroup] = useState<{ pattern: LanguagePattern; groupIndex: number } | null>(null);
     const [isSummary, setIsSummary] = useState(false);
+    // 練習期間真的寫入的熟練度（句子 id → 寫入後的值）：完成畫面以這份為準，避免監聽延遲先顯示 +0
+    const [sessionAfter, setSessionAfter] = useState<Record<string, number>>({});
+    const [summaryBarsShown, setSummaryBarsShown] = useState(false);
 
     // 維持複習
     const [maintenancePattern, setMaintenancePattern] = useState<LanguagePattern | null>(null);
@@ -178,18 +226,29 @@ export default function TodayReviewView() {
         void prefetchSpeech(sentences.reduce<string[]>((acc, s) => acc.concat([s.qaQuestion || '', s.situationalPrompt || '', s.text || '']), []));
     }, [loading, maintenanceItems, reviewGroups]);
 
-    if (!user) {
-        return (
-            <div className="flex flex-col items-center justify-center h-full bg-slate-50 dark:bg-slate-950 text-slate-500 font-bold">
-                <p>請先登入以檢視今日複習</p>
-            </div>
-        );
-    }
+    // 本組完成畫面：長條的金色增加段只長高一次；減少動態效果時直接顯示
+    useEffect(() => {
+        if (!isSummary) {
+            setSummaryBarsShown(false);
+            return;
+        }
+        if (prefersReducedMotion()) {
+            setSummaryBarsShown(true);
+            return;
+        }
+        const raf = requestAnimationFrame(() => setSummaryBarsShown(true));
+        return () => cancelAnimationFrame(raf);
+    }, [isSummary]);
 
-    if (loading && patterns.length === 0) {
+    if (!user || (loading && patterns.length === 0)) {
         return (
-            <div className="flex flex-col items-center justify-center h-full bg-slate-50 dark:bg-slate-950 text-slate-500 font-bold">
-                <p>載入中...</p>
+            <div className="flex h-full flex-col px-5 pt-4 sm:px-8 lg:px-14 lg:pt-9">
+                {tabs && <div className="lg:flex lg:justify-end">{tabs}</div>}
+                <div className="flex flex-1 items-center justify-center text-[15px] text-muted">
+                    {!user ? <p>請先登入以檢視今日複習</p> : (
+                        <p className="flex items-center gap-2"><Loader2 size={18} className="animate-spin text-accent" aria-hidden="true" />載入中...</p>
+                    )}
+                </div>
             </div>
         );
     }
@@ -205,6 +264,7 @@ export default function TodayReviewView() {
             initialMastery[key] = it.sentence.mastery || 0;
         });
         setStartMasteryMap(initialMastery);
+        setSessionAfter({});
         setActiveGroup({ pattern: group.pattern, groupIndex: group.groupIndex });
         setIsSummary(false);
         const firstKey = `${queue[0].pattern.id}::${queue[0].sentence.id}`;
@@ -217,6 +277,7 @@ export default function TodayReviewView() {
         setSessionQueue(queue);
         setCompletedKeys(new Set());
         setStartMasteryMap({});
+        setSessionAfter({});
         setActiveGroup(null);
         setMaintenancePattern(item.pattern);
         maintenanceScoresRef.current = {};
@@ -256,6 +317,7 @@ export default function TodayReviewView() {
         setCompletedKeys(new Set());
         setActiveItemKey(null);
         setStartMasteryMap({});
+        setSessionAfter({});
         setActiveGroup(null);
         setIsSummary(false);
         setMaintenancePattern(null);
@@ -291,29 +353,27 @@ export default function TodayReviewView() {
 
     if (isSummary && maintenancePattern) {
         const r = maintenanceResult;
+        const pending = maintenanceSaving || !r;
         const passed = r?.kind === 'result' && r.outcome.passed;
         return (
-            <div className="flex flex-col items-center justify-center h-full bg-slate-50 dark:bg-slate-950 p-6 overflow-y-auto">
-                <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl p-8 border border-slate-200 dark:border-slate-800 shadow-xl text-center space-y-6">
-                    <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mx-auto shadow-inner ${passed ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400' : 'bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400'}`}>
-                        {maintenanceSaving || !r ? <Loader2 size={36} className="animate-spin" /> : passed ? <ShieldCheck size={36} /> : <AlertCircle size={36} />}
-                    </div>
-
-                    <div>
-                        <h2 className="text-2xl font-black text-slate-800 dark:text-white">
-                            {maintenanceSaving || !r ? '儲存結果中…'
+            <div className="flex h-full flex-col overflow-y-auto px-7 pt-10 pb-9 sm:px-10">
+                <div className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center gap-8" aria-live="polite">
+                    <div className="flex flex-col gap-3">
+                        <span className={`flex size-14 items-center justify-center rounded-2xl ${pending ? 'bg-surface-2 text-accent' : passed ? 'bg-gold/12 text-gold' : 'bg-warn/10 text-warn'}`} aria-hidden="true">
+                            {pending ? <Loader2 size={28} className="animate-spin" /> : passed ? <ShieldCheck size={28} /> : <AlertCircle size={28} />}
+                        </span>
+                        <h1 className="text-[26px] font-bold tracking-wide text-ink">
+                            {pending ? '儲存結果中…'
                                 : r.kind === 'result' ? (r.outcome.passed ? '維持複習通過' : '這次沒有通過')
                                 : r.kind === 'incomplete' ? '這次不計算'
                                 : r.kind === 'already' ? '已經更新過了'
                                 : '儲存失敗'}
-                        </h2>
-                        <p className="text-sm font-bold text-slate-500 dark:text-slate-400 mt-1">
-                            {maintenancePattern.text}
-                        </p>
+                        </h1>
+                        <p lang="en" className="font-reading text-[22px] leading-snug text-ink break-words">{maintenancePattern.text}</p>
                     </div>
 
                     {r && !maintenanceSaving && (
-                        <div className="bg-slate-50 dark:bg-slate-800/60 rounded-2xl p-4 border border-slate-100 dark:border-slate-800 text-sm font-bold text-slate-600 dark:text-slate-300 leading-relaxed space-y-1">
+                        <div className="flex flex-col gap-1.5 border-y border-line py-5 text-[15px] leading-relaxed text-ink">
                             {r.kind === 'result' && (
                                 <>
                                     <p>{MAINTENANCE_SIZE} 句中 {r.outcome.passCount} 句全對</p>
@@ -322,36 +382,34 @@ export default function TodayReviewView() {
                                     ) : (
                                         <p>{r.outcome.failedCount} 句熟練度降為 750，已回到今日複習，今天就可以重新練習</p>
                                     )}
-                                    <p>下次維持複習：{getSydneyDateString(r.outcome.dueAt)}</p>
+                                    <p className="text-muted">下次維持複習：{getSydneyDateString(r.outcome.dueAt)}</p>
                                 </>
                             )}
                             {r.kind === 'incomplete' && <p>有題目沒有完成評分，這次的結果不會更新，之後再做一次即可</p>}
                             {r.kind === 'already' && <p>這個句型的維持複習已經更新過（或已延後），這次不重複計算</p>}
-                            {r.kind === 'error' && <p>{r.message}，請稍後再做一次</p>}
+                            {r.kind === 'error' && <p className="text-danger">{r.message}，請稍後再做一次</p>}
                         </div>
                     )}
-
-                    <button
-                        onClick={handleBackFromSession}
-                        disabled={maintenanceSaving}
-                        className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-bold rounded-2xl shadow-lg shadow-indigo-200 dark:shadow-none transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        返回今日複習
-                    </button>
+                </div>
+                <div className="mx-auto w-full max-w-md pt-6">
+                    <Button size="lg" fullWidth onClick={handleBackFromSession} disabled={maintenanceSaving}>返回今日複習</Button>
                 </div>
             </div>
         );
     }
 
     if (isSummary && activeGroup) {
+        // 練習後的熟練度：優先用這次練習真的寫入的值，沒有才用最新的監聽資料
+        const latestGroupPattern = patterns.find(item => item.id === activeGroup.pattern.id) || activeGroup.pattern;
         let totalMasteryDiff = 0;
         let masteredCount = 0;
+        const startById: Record<string, number> = {};
 
         completedKeys.forEach(key => {
             const [pId, sId] = key.split('::');
             const p = patterns.find(item => item.id === pId);
             const s = p?.exampleSentences?.find(item => item.id === sId);
-            const latestMastery = s?.mastery || 0;
+            const latestMastery = sessionAfter[sId] ?? (s?.mastery || 0);
             const startMastery = startMasteryMap[key] ?? 0;
 
             totalMasteryDiff += (latestMastery - startMastery);
@@ -359,46 +417,56 @@ export default function TodayReviewView() {
                 masteredCount += 1;
             }
         });
+        Object.entries(startMasteryMap).forEach(([key, v]) => {
+            const [pId, sId] = key.split('::');
+            if (pId === activeGroup.pattern.id) startById[sId] = Number(v) || 0;
+        });
+        const bars = groupMasteryBars(latestGroupPattern.exampleSentences, activeGroup.groupIndex, startById, sessionAfter);
 
         const diffDisplay = totalMasteryDiff >= 0 ? `+${totalMasteryDiff}` : `${totalMasteryDiff}`;
 
         return (
-            <div className="flex flex-col items-center justify-center h-full bg-slate-50 dark:bg-slate-950 p-6 overflow-y-auto">
-                <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl p-8 border border-slate-200 dark:border-slate-800 shadow-xl text-center space-y-6">
-                    <div className="w-16 h-16 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 rounded-2xl flex items-center justify-center mx-auto shadow-inner">
-                        <CheckCircle2 size={36} />
+            <div className="flex h-full flex-col overflow-y-auto px-7 pt-14 pb-9 sm:px-10">
+                <div className="mx-auto flex w-full max-w-lg flex-1 flex-col justify-center gap-9">
+                    <div className="relative flex flex-col gap-2.5">
+                        <svg width="190" height="56" viewBox="0 0 190 56" aria-hidden="true" className="pointer-events-none absolute -top-10 -left-2.5 animate-sparkle">
+                            <circle cx="10" cy="40" r="2.5" className="fill-gold" />
+                            <circle cx="70" cy="8" r="2" className="fill-accent" />
+                            <path d="M150 34 l4 -8 l4 8 l-4 8 z" className="fill-gold" opacity="0.85" />
+                            <circle cx="178" cy="14" r="2.5" className="fill-gold" />
+                            <circle cx="118" cy="48" r="1.5" className="fill-accent" />
+                        </svg>
+                        <span className="text-[13px] text-muted">第 {activeGroup.groupIndex + 1} 組</span>
+                        <h1 className="text-[26px] font-bold tracking-wide text-ink">本組練習完成</h1>
+                        <p lang="en" className="font-reading text-[22px] leading-snug text-ink break-words">{activeGroup.pattern.text}</p>
                     </div>
 
-                    <div>
-                        <h2 className="text-2xl font-black text-slate-800 dark:text-white">
-                            本組練習完成
-                        </h2>
-                        <p className="text-sm font-bold text-slate-500 dark:text-slate-400 mt-1">
-                            {activeGroup.pattern.text}・第 {activeGroup.groupIndex + 1} 組
-                        </p>
-                    </div>
+                    <section aria-label={`本組 10 句熟練度`} className="flex flex-col gap-3">
+                        <MasteryBars bars={bars} size="lg" showGain={summaryBarsShown} />
+                        <div className="flex justify-between gap-2 text-xs text-muted">
+                            <span>第 1 句</span>
+                            <span>金色＝這次增加的熟練度</span>
+                            <span>第 10 句</span>
+                        </div>
+                    </section>
 
-                    <div className="grid grid-cols-3 gap-3 pt-2">
-                        <div className="bg-slate-50 dark:bg-slate-800/60 rounded-2xl p-4 border border-slate-100 dark:border-slate-800">
-                            <div className="text-xs font-bold text-slate-500 dark:text-slate-400 mb-1">練習句數</div>
-                            <div className="text-xl font-black text-slate-800 dark:text-white">{completedKeys.size}</div>
+                    <section className="grid grid-cols-3 border-y border-line">
+                        <div className="flex flex-col gap-1.5 py-[18px]">
+                            <span className="font-reading text-[40px] leading-none text-ink tabular-nums">{completedKeys.size}</span>
+                            <span className="text-[13px] text-muted">練習句數</span>
                         </div>
-                        <div className="bg-indigo-50 dark:bg-indigo-950/40 rounded-2xl p-4 border border-indigo-100 dark:border-indigo-900/50">
-                            <div className="text-xs font-bold text-indigo-600 dark:text-indigo-400 mb-1">熟練度合計</div>
-                            <div className="text-xl font-black text-indigo-600 dark:text-indigo-400">{diffDisplay}</div>
+                        <div className="flex flex-col gap-1.5 border-l border-line py-[18px] pl-4">
+                            <span className={`font-reading text-[40px] leading-none tabular-nums ${totalMasteryDiff > 0 ? 'text-gold' : 'text-ink'}`}>{diffDisplay}</span>
+                            <span className="text-[13px] text-muted">熟練度合計</span>
                         </div>
-                        <div className="bg-amber-50 dark:bg-amber-950/40 rounded-2xl p-4 border border-amber-100 dark:border-amber-900/50">
-                            <div className="text-xs font-bold text-amber-600 dark:text-amber-400 mb-1">本次精熟</div>
-                            <div className="text-xl font-black text-amber-600 dark:text-amber-400">{masteredCount}</div>
+                        <div className="flex flex-col gap-1.5 border-l border-line py-[18px] pl-4">
+                            <span className="font-reading text-[40px] leading-none text-ink tabular-nums">{masteredCount}</span>
+                            <span className="text-[13px] text-muted">本次精熟</span>
                         </div>
-                    </div>
-
-                    <button
-                        onClick={handleBackFromSession}
-                        className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-bold rounded-2xl shadow-lg shadow-indigo-200 dark:shadow-none transition-all cursor-pointer"
-                    >
-                        返回今日複習
-                    </button>
+                    </section>
+                </div>
+                <div className="mx-auto w-full max-w-lg pt-6">
+                    <Button size="lg" fullWidth onClick={handleBackFromSession}>返回今日複習</Button>
                 </div>
             </div>
         );
@@ -437,98 +505,114 @@ export default function TodayReviewView() {
                 onBack={handleBackFromSession}
                 onNext={handleNextInSession}
                 isLastSentence={isLastSentence}
+                progress={{ done: completedKeys.size, total: sessionQueue.length }}
                 progressLabel={maintenancePattern
                     ? `維持題・第 ${completedKeys.size + 1} / ${sessionQueue.length} 題`
                     : `第 ${completedKeys.size + 1} / ${sessionQueue.length} 題`}
                 onScored={maintenancePattern
                     ? (sentenceId, _total, isExact) => { maintenanceScoresRef.current[sentenceId] = isExact; }
                     : undefined}
+                onMasteryUpdated={(sentenceId, _before, after) => {
+                    setSessionAfter(prev => ({ ...prev, [sentenceId]: after }));
+                }}
             />
         );
     }
 
+    const statsLine = reviewItems.length > 0 || maintenanceItems.length > 0
+        ? [
+            reviewItems.length > 0 ? `共有 ${reviewItems.length} 個句子等待練習` : '',
+            maintenanceItems.length > 0 ? `${maintenanceItems.length} 個句型要維持複習` : ''
+        ].filter(Boolean).join('・')
+        : '所有進度已完成';
+
+    const maintenanceSection = maintenanceItems.length > 0 && (
+        <section className="flex flex-col gap-2.5">
+            <h2 className="flex items-center gap-1.5 text-[13px] font-medium text-muted">
+                <ShieldCheck size={15} className="text-gold" aria-hidden="true" />
+                維持複習
+            </h2>
+            {maintenanceItems.map((item) => (
+                <button
+                    key={item.pattern.id}
+                    type="button"
+                    onClick={() => startMaintenance(item)}
+                    className="flex w-full items-center gap-3.5 rounded-[18px] border border-gold/35 bg-surface px-[18px] py-4 text-left transition-colors hover:border-gold/70 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                >
+                    <span className="flex min-w-0 flex-1 flex-col gap-1">
+                        <span lang="en" className="font-reading text-[21px] leading-tight text-ink break-words">{item.pattern.text}</span>
+                        <span className="text-[13px] leading-relaxed text-muted">
+                            維持題 {item.sentences.length} 句・{(item.pattern.maintenance?.level || 0) > 0
+                                ? `已連續通過 ${item.pattern.maintenance?.level} 次`
+                                : item.pattern.maintenance?.lastReviewedAt ? '上次沒有通過' : '第一次維持複習'}・{MAINTENANCE_SIZE} 句中 {MAINTENANCE_PASS_COUNT} 句全對即通過
+                        </span>
+                    </span>
+                    <ChevronRight size={18} className="shrink-0 text-muted" aria-hidden="true" />
+                </button>
+            ))}
+        </section>
+    );
+
     return (
-        <div className="flex flex-col h-full bg-slate-50 dark:bg-slate-950 p-6 overflow-y-auto pb-20">
-            <div className="mb-6 flex items-center gap-3">
-                <div className="w-10 h-10 bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 rounded-xl flex items-center justify-center">
-                    <CalendarCheck size={24} />
+        <div className="@container h-full overflow-y-auto px-5 pt-4 pb-12 sm:px-8 lg:px-14 lg:pt-9">
+            {tabs && <div className="mb-6 lg:hidden">{tabs}</div>}
+            <header className="flex items-end justify-between gap-6">
+                <div className="flex min-w-0 flex-col gap-1">
+                    <h1 className="text-[22px] font-bold tracking-wide text-ink lg:text-[26px]">今日複習</h1>
+                    <p className="text-[13px] text-muted lg:text-sm">{statsLine}</p>
                 </div>
-                <div>
-                    <h2 className="text-2xl font-black text-slate-800 dark:text-white">今日複習</h2>
-                    <p className="text-sm font-bold text-slate-500">
-                        {reviewItems.length > 0 || maintenanceItems.length > 0
-                            ? [
-                                reviewItems.length > 0 ? `共有 ${reviewItems.length} 個句子等待練習` : '',
-                                maintenanceItems.length > 0 ? `${maintenanceItems.length} 個句型要維持複習` : ''
-                            ].filter(Boolean).join('・')
-                            : '所有進度已完成'}
-                    </p>
+                {tabs && <div className="hidden shrink-0 lg:block">{tabs}</div>}
+            </header>
+
+            <div className="mt-6 grid grid-cols-1 items-start gap-6 lg:mt-7 xl:grid-cols-[minmax(0,1fr)_300px] xl:gap-8">
+                <div className="flex min-w-0 flex-col gap-6">
+                    <div className="xl:hidden">{maintenanceSection}</div>
+
+                    {reviewGroups.length === 0 && maintenanceItems.length === 0 ? (
+                        <div className="flex flex-col items-center gap-3 rounded-[20px] border border-line bg-surface px-6 py-16 text-center">
+                            <Sparkles size={36} className="text-gold" aria-hidden="true" />
+                            <h2 className="text-lg font-bold text-ink">今天沒有可以複習的句子</h2>
+                            <p className="text-sm text-muted">去造更多新句型，或等待下一輪解鎖吧！</p>
+                        </div>
+                    ) : reviewGroups.length > 0 && (
+                        <section className="flex flex-col gap-2.5">
+                            <h2 className="text-[13px] font-medium text-muted">待練組別</h2>
+                            <div className="grid grid-cols-1 gap-3 @[40rem]:grid-cols-2 @[40rem]:gap-4">
+                                {reviewGroups.map((group) => {
+                                    const bars = groupMasteryBars(group.pattern.exampleSentences, group.groupIndex);
+                                    return (
+                                        <button
+                                            key={group.key}
+                                            type="button"
+                                            onClick={() => startSession(group)}
+                                            className="flex w-full flex-col gap-3.5 rounded-[18px] border border-line bg-surface px-[18px] py-4 text-left transition-colors hover:border-accent/50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent lg:px-[22px] lg:py-5"
+                                        >
+                                            <span className="flex w-full items-start justify-between gap-3">
+                                                <span className="flex min-w-0 flex-col gap-1">
+                                                    <span lang="en" className="font-reading text-xl leading-tight text-ink break-words lg:text-[22px]">{group.pattern.text}</span>
+                                                    <span className="text-[13px] text-muted">第 {group.groupIndex + 1} 組・待練 {group.items.length} 句</span>
+                                                </span>
+                                                <ChevronRight size={18} className="mt-1 shrink-0 text-muted" aria-hidden="true" />
+                                            </span>
+                                            <span className="flex w-full items-center gap-3">
+                                                <MasteryBars bars={bars} size="sm" />
+                                                <span className="shrink-0 text-xs text-muted tabular-nums">待練平均 {group.avgMastery} / 1000</span>
+                                            </span>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </section>
+                    )}
                 </div>
+
+                <aside className="hidden flex-col gap-4 xl:flex">
+                    {maintenanceSection}
+                    {reviewGroups.length > 0 && (
+                        <p className="text-pretty text-[13px] leading-relaxed text-muted">每組的小長條是 10 句的熟練度；滿 1000 變成金色。</p>
+                    )}
+                </aside>
             </div>
-
-            {maintenanceItems.length > 0 && (
-                <div className="mb-6">
-                    <h3 className="text-sm font-black text-slate-500 dark:text-slate-400 mb-3 flex items-center gap-2">
-                        <ShieldCheck size={16} className="text-emerald-500" />
-                        維持複習
-                    </h3>
-                    <div className="space-y-4">
-                        {maintenanceItems.map((item) => (
-                            <div
-                                key={item.pattern.id}
-                                onClick={() => startMaintenance(item)}
-                                className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-emerald-200 dark:border-emerald-900/60 shadow-xs cursor-pointer hover:border-emerald-400 dark:hover:border-emerald-700 transition-colors"
-                            >
-                                <div className="text-xs font-bold text-emerald-600 dark:text-emerald-400 mb-2 truncate">
-                                    句型：{item.pattern.text}
-                                </div>
-                                <div className="text-lg font-bold text-slate-800 dark:text-slate-100 mb-2">
-                                    維持題 {item.sentences.length} 句
-                                </div>
-                                <div className="text-xs font-bold text-slate-500 dark:text-slate-400">
-                                    {(item.pattern.maintenance?.level || 0) > 0
-                                        ? `已連續通過 ${item.pattern.maintenance?.level} 次`
-                                        : item.pattern.maintenance?.lastReviewedAt ? '上次沒有通過' : '第一次維持複習'}
-                                    ・{MAINTENANCE_SIZE} 句中 {MAINTENANCE_PASS_COUNT} 句全對即通過
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            )}
-
-            {reviewGroups.length === 0 && maintenanceItems.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-20 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 text-center shadow-xs">
-                    <Sparkles size={48} className="text-amber-400 mb-4" />
-                    <h3 className="text-lg font-black text-slate-700 dark:text-slate-200 mb-2">今天沒有可以複習的句子</h3>
-                    <p className="text-sm font-bold text-slate-500">
-                        去造更多新句型，或等待下一輪解鎖吧！
-                    </p>
-                </div>
-            ) : (
-                <div className="space-y-4">
-                    {reviewGroups.map((group) => {
-                        return (
-                            <div 
-                                key={group.key}
-                                onClick={() => startSession(group)}
-                                className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200 dark:border-slate-800 shadow-xs cursor-pointer hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors group"
-                            >
-                                <div className="text-xs font-bold text-indigo-500 dark:text-indigo-400 mb-2 truncate">
-                                    來自句型：{group.pattern.text}
-                                </div>
-                                <div className="text-lg font-bold text-slate-800 dark:text-slate-100 mb-4">
-                                    第 {group.groupIndex + 1} 組・待練 {group.items.length} 句
-                                </div>
-                                <div className="flex items-center gap-2 text-xs font-bold text-slate-500 dark:text-slate-400">
-                                    <Target size={14} className="text-amber-500" />
-                                    平均熟練度：{group.avgMastery} / 1000
-                                </div>
-                            </div>
-                        );
-                    })}
-                </div>
-            )}
         </div>
     );
 }
