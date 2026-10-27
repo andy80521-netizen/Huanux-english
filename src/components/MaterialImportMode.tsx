@@ -820,7 +820,7 @@ export default function MaterialImportMode() {
     );
 
     const cardHeader = (icon: React.ReactNode, title: string, sub: string) => (
-        <div className="flex items-start gap-3">
+        <div className="flex flex-col items-start gap-3 @[15rem]:flex-row">
             <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent" aria-hidden="true">{icon}</span>
             <div className="flex min-w-0 flex-col gap-0.5">
                 <h2 className="text-base font-bold text-ink">{title}</h2>
@@ -862,7 +862,7 @@ export default function MaterialImportMode() {
             {!pendingMaterial && (
                 <div className={`grid grid-cols-1 gap-4 lg:grid-cols-3 lg:gap-5 ${busy ? 'pointer-events-none opacity-45' : ''}`} aria-busy={busy || undefined}>
                     {/* 路徑一：音訊上傳 */}
-                    <section className="flex flex-col gap-4 rounded-[18px] border border-line bg-surface p-[18px] lg:p-6">
+                    <section className="@container flex flex-col gap-4 rounded-[18px] border border-line bg-surface p-[18px] lg:p-6">
                         {cardHeader(<Headphones size={20} />, '從音檔匯入', '真人 mp3（podcast、廣播），自動切出每句時間')}
                         <input
                             type="file"
@@ -883,7 +883,7 @@ export default function MaterialImportMode() {
                     </section>
 
                     {/* 路徑二：文字 / PDF 上傳 */}
-                    <section className="flex flex-col gap-4 rounded-[18px] border border-line bg-surface p-[18px] lg:p-6">
+                    <section className="@container flex flex-col gap-4 rounded-[18px] border border-line bg-surface p-[18px] lg:p-6">
                         {cardHeader(<FileText size={20} />, '從文字或文件匯入', '貼上英文，或上傳 .txt／.pdf，用 AI 語音產生原音')}
                         <label className="flex flex-1 flex-col">
                             <span className="sr-only">英文文本</span>
@@ -896,7 +896,8 @@ export default function MaterialImportMode() {
                                 disabled={busy}
                             />
                         </label>
-                        <div className="flex gap-2.5">
+                        {/* 卡片窄時（1024px 桌機三欄）上下排，避免按鈕溢出卡片 */}
+                        <div className="flex flex-col gap-2.5 @[16rem]:flex-row">
                             <Button onClick={handleTextSubmit} disabled={busy || !textInput.trim()} className="flex-1 whitespace-nowrap">
                                 直接送出文字
                             </Button>
@@ -914,7 +915,7 @@ export default function MaterialImportMode() {
                     </section>
 
                     {/* 路徑三：從舊題庫匯入 */}
-                    <section className="flex flex-col gap-3 rounded-[18px] border border-line bg-surface p-[18px] lg:p-6">
+                    <section className="@container flex flex-col gap-3 rounded-[18px] border border-line bg-surface p-[18px] lg:p-6">
                         {cardHeader(<FolderOpen size={20} />, '從舊題庫匯入', '把舊版課程的題目轉成教材')}
                         <div className="flex min-h-0 flex-1 flex-col">
                             {courses.length === 0 ? (
