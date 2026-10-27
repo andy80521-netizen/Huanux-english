@@ -21,6 +21,10 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 - 畫面自檢可用本機假資料預覽：另建 vite 設定，把 `../firebase`、`firebase/firestore`、`firebase/storage`、`services/gemini` 換成模擬模組，Chromium 加 `--use-fake-device-for-media-stream` 可跑完整錄音流程；Tailwind 要用 `@source` 指到 repo 的 `src`
 - 本機 build 沒有 `GEMINI_API_KEY` 時整頁空白（Gemini SDK 載入時就拋錯），本機截圖要用 `GEMINI_API_KEY=placeholder… npx vite build`；沙盒連不到 Google Fonts 與 Firebase，截圖會是備援字體＋未登入畫面
 
+- 桌機驗收不能只看 1280px：App 有 232px 側欄，1024px 時三欄卡片內寬只剩約 165px（PR #12 按鈕溢出）。窄卡片內的排版用 container query（`@container`＋`@[16rem]:flex-row`），不要只靠視窗斷點
+- 匯入頁、複述頁都是「頁面內」捲動容器：新內容出現在下方（解析結果、複述回饋）時使用者看不到，要 `scrollIntoView`；切換到另一個畫面（進入校對）時要把捲動位置歸零
+- 本機假資料預覽要模擬匯入流程時，`doc()` 模擬必須回傳 `id`，否則存檔會走到沒有 materialId 的舊分支，看起來像程式錯誤
+
 ## 防作弊機制的已知限制（2026-10-25 多輪攻擊測試後）
 - 「把斷言改弱」「mock 掉被測程式」「程式偵測測試環境」只能列為 ⚠️ 注意事項，無法自動判定是否作弊，要靠審查者與完成報告說明
 - Claude 若繞過 `gh_ai.py` 直接用 `gh api` 留言，留言會被當成擁有者的發言（Claude 使用擁有者帳號）；只能靠規則遵守
@@ -48,3 +52,8 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 | UI 改版②a（PR #8，規劃） | DeepSeek／Nemotron／Poolside／Gemini | 2 | 1 | RetellSection 雙框、色階遺漏；誤判：objectURL 未釋放（Gemini，現行已釋放） |
 | UI 改版②a（PR #8，審查） | Codex | 1 | 0 | 等待麥克風權限期間跳句會啟動舊錄音（🔴） |
 | UI 改版②a（PR #8，審查） | Gemini Lite | 0 | 0 | 兩輪皆無意見，漏掉 Codex 的 🔴 |
+| UI 改版②b（PR #12，規劃） | Codex | 3 | 0 | 舊題庫沒有分析步驟、底部動作列的捲動容器與鍵盤行為、萃取預覽 Esc 有副作用 |
+| UI 改版②b（PR #12，規劃） | Grok | 9 | 1 | 校對中隱藏選項卡、沿用原提示文字、實心警告色對比、文案清單補齊等；駁回：改用 fixed（會蓋到分頁列） |
+| UI 改版②b（PR #12，規劃） | Gemini／Nemotron／Poolside／DeepSeek | 1 | 1 | 底部動作列要實機驗收；誤判：max-w-3xl 在 RetellView 內（Poolside） |
+| UI 改版②b（PR #12，審查） | Codex | 1 | 0 | 1024px 桌機文字卡按鈕溢出（🟠） |
+| UI 改版②b（PR #12，審查） | Gemini Lite | 0 | 0 | 兩輪皆無意見，漏掉 Codex 的 🟠 |
