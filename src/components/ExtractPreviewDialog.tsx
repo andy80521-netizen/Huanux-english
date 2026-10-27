@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { CheckSquare, Square, Loader2, Sparkles } from 'lucide-react';
+import React, { useEffect, useId, useMemo, useState } from 'react';
+import { Check, Loader2 } from 'lucide-react';
 
 export interface ExtractCandidate {
   category: string;
@@ -13,6 +13,7 @@ const categoryLabels: Record<string, string> = {
   phrase: '片語',
   collocation: '語組'
 };
+const CATEGORY_ORDER = ['structural', 'phrase', 'collocation'];
 
 interface Props {
   candidates: ExtractCandidate[];
@@ -23,11 +24,26 @@ interface Props {
 }
 
 // 萃取結果預覽：使用者勾選要加入句型庫的項目（預設全選）
+// 刻意不處理 Esc：這裡的取消就是「全部不要」（會把該句標成已萃取），不該被誤觸
 export default function ExtractPreviewDialog({ candidates, note, saving, onConfirm, onCancel }: Props) {
+  const titleId = useId();
   const [selected, setSelected] = useState<Set<number>>(() => new Set<number>(candidates.map((_, i) => i)));
 
   useEffect(() => {
     setSelected(new Set<number>(candidates.map((_, i) => i)));
+  }, [candidates]);
+
+  // 分組只影響顯示；勾選仍用原 candidates 的索引。未知分類放最後一組
+  const groups = useMemo(() => {
+    const byCat = new Map<string, number[]>();
+    candidates.forEach((c, i) => {
+      const list = byCat.get(c.category) ?? [];
+      list.push(i);
+      byCat.set(c.category, list);
+    });
+    const known = CATEGORY_ORDER.filter(k => byCat.has(k));
+    const unknown = [...byCat.keys()].filter(k => !CATEGORY_ORDER.includes(k));
+    return [...known, ...unknown].map(k => ({ key: k, label: categoryLabels[k] || k, indexes: byCat.get(k)! }));
   }, [candidates]);
 
   const toggle = (i: number) => {
@@ -40,70 +56,79 @@ export default function ExtractPreviewDialog({ candidates, note, saving, onConfi
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-xs p-4 animate-in fade-in duration-200">
-      <div className="bg-white dark:bg-slate-900 rounded-3xl w-full max-w-md max-h-[85vh] flex flex-col shadow-2xl border border-slate-100 dark:border-slate-800">
-        <div className="px-5 pt-5 pb-3 border-b border-slate-100 dark:border-slate-800">
-          <h3 className="text-lg font-black text-slate-800 dark:text-white flex items-center gap-2">
-            <Sparkles size={18} className="text-purple-500" />
-            選擇要加入的句型
-          </h3>
-          <p className="text-xs font-bold text-slate-500 dark:text-slate-400 mt-1">
+    <div className="fixed inset-0 z-100 flex items-end justify-center bg-black/40 backdrop-blur-xs p-0 sm:items-center sm:p-4 animate-in fade-in duration-200">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className="flex max-h-[88vh] w-full flex-col rounded-t-3xl border border-line bg-surface shadow-[0_24px_48px_-12px_rgb(0_0_0/0.25)] sm:max-w-lg sm:rounded-3xl"
+      >
+        <div className="px-6 pt-6 pb-4">
+          <h3 id={titleId} className="text-xl font-bold text-ink">選擇要加入的句型</h3>
+          <p className="mt-1.5 text-sm leading-relaxed text-muted">
             取消勾選不想練的項目，只有勾選的會加入句型庫{note ? `　${note}` : ''}
           </p>
         </div>
 
-        <div className="overflow-y-auto p-4 space-y-3 flex-1">
-          {candidates.map((c, i) => {
-            const isOn = selected.has(i);
-            return (
-              <button
-                key={i}
-                type="button"
-                onClick={() => toggle(i)}
-                className={`w-full text-left rounded-2xl p-4 border transition-all flex gap-3 ${
-                  isOn
-                    ? 'border-indigo-400 bg-indigo-50/60 dark:bg-indigo-900/20 dark:border-indigo-700'
-                    : 'border-slate-200 dark:border-slate-700 opacity-60'
-                }`}
-              >
-                {isOn
-                  ? <CheckSquare size={20} className="text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5" />
-                  : <Square size={20} className="text-slate-400 shrink-0 mt-0.5" />}
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2 mb-1">
-                    <span className="text-base font-black text-slate-800 dark:text-slate-100 break-words">{c.text}</span>
-                    <span className="text-[10px] font-bold bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300 px-2 py-0.5 rounded-full shrink-0">
-                      {categoryLabels[c.category] || c.category}
-                    </span>
-                  </div>
-                  {c.meaningZh && (
-                    <p className="text-sm font-bold text-slate-600 dark:text-slate-300">{c.meaningZh}</p>
-                  )}
-                  {c.learningPoint && (
-                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5 leading-relaxed">
-                      學習重點：{c.learningPoint}
-                    </p>
-                  )}
-                </div>
-              </button>
-            );
-          })}
+        <div className="flex-1 overflow-y-auto border-y border-line px-4 py-4 sm:px-6">
+          <div className="flex flex-col gap-6">
+            {groups.map(g => (
+              <section key={g.key} className="flex flex-col gap-2" aria-label={g.label}>
+                <h4 className="px-1 text-xs tracking-[0.08em] text-muted">{g.label}</h4>
+                {g.indexes.map(i => {
+                  const c = candidates[i];
+                  const isOn = selected.has(i);
+                  return (
+                    <button
+                      key={i}
+                      type="button"
+                      role="checkbox"
+                      aria-checked={isOn}
+                      onClick={() => toggle(i)}
+                      disabled={saving}
+                      className={`flex w-full gap-3 rounded-2xl border p-4 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-default ${
+                        isOn ? 'border-accent bg-accent-soft/60' : 'border-line hover:bg-surface-2'
+                      }`}
+                    >
+                      <span
+                        aria-hidden="true"
+                        className={`mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md border transition-colors ${
+                          isOn ? 'border-accent bg-accent text-on-accent' : 'border-muted/50 bg-surface'
+                        }`}
+                      >
+                        {isOn && <Check size={14} strokeWidth={3} />}
+                      </span>
+                      <span className={`flex min-w-0 flex-1 flex-col gap-1 ${isOn ? '' : 'opacity-70'}`}>
+                        <span lang="en" className="font-reading text-[17px] leading-snug text-ink break-words">{c.text}</span>
+                        {c.meaningZh && <span className="text-sm text-ink">{c.meaningZh}</span>}
+                        {c.learningPoint && (
+                          <span className="text-xs leading-relaxed text-muted">學習重點：{c.learningPoint}</span>
+                        )}
+                      </span>
+                    </button>
+                  );
+                })}
+              </section>
+            ))}
+          </div>
         </div>
 
-        <div className="p-4 border-t border-slate-100 dark:border-slate-800 flex gap-3">
+        <div className="flex gap-3 px-6 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
           <button
+            type="button"
             onClick={onCancel}
             disabled={saving}
-            className="flex-1 py-3 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold rounded-2xl hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors disabled:opacity-50"
+            className="min-h-12 flex-1 rounded-full border border-line text-[15px] text-ink transition-colors hover:bg-surface-2 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
           >
             全部不要
           </button>
           <button
+            type="button"
             onClick={() => onConfirm(candidates.map((_, i) => i).filter(i => selected.has(i)))}
             disabled={saving || selected.size === 0}
-            className="flex-1 py-3 bg-indigo-600 text-white font-bold rounded-2xl hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+            className="flex min-h-12 flex-1 items-center justify-center gap-2 rounded-full bg-accent text-[15px] font-medium text-on-accent transition-[filter,transform] hover:brightness-110 active:scale-[0.98] disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
           >
-            {saving ? <><Loader2 size={16} className="animate-spin" />加入中…</> : `加入句型庫（${selected.size}）`}
+            {saving ? <><Loader2 size={16} className="animate-spin" aria-hidden="true" />加入中…</> : `加入句型庫（${selected.size}）`}
           </button>
         </div>
       </div>

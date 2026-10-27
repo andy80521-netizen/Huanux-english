@@ -1,99 +1,160 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Loader2, Volume2 } from 'lucide-react';
 import { RetellFeedback } from '../services/gemini';
 import { RetellTargetPattern } from '../services/retell';
+import ProgressBar from './ui/ProgressBar';
+import { countUpValue } from '../utils/countUp';
+
+/** 系統是否開啟「減少動態效果」（分數跑動是 JS，全域 CSS 規則管不到，要自己判斷） */
+const prefersReducedMotion = () => {
+  try { return !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches; } catch { return false; }
+};
+
+/** 分數從 0 跑到目標值；animate 為 false、減少動態效果、或不是數字時直接顯示原值 */
+function useCountUp(target: unknown, animate: boolean): unknown {
+  const numeric = typeof target === 'number' && Number.isFinite(target);
+  const [shown, setShown] = useState<unknown>(() => (animate && numeric && !prefersReducedMotion() ? 0 : target));
+  useEffect(() => {
+    if (!animate || !numeric || prefersReducedMotion()) {
+      setShown(target);
+      return;
+    }
+    const to = target as number;
+    const duration = 800;
+    const start = performance.now();
+    let raf = 0;
+    const tick = (now: number) => {
+      const progress = (now - start) / duration;
+      setShown(countUpValue(0, to, progress));
+      if (progress < 1) raf = requestAnimationFrame(tick);
+    };
+    setShown(0);
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [target, animate, numeric]);
+  return shown;
+}
+
+function Score({ label, value, animate }: { label: string; value: unknown; animate: boolean }) {
+  const shown = useCountUp(value, animate);
+  const numeric = typeof value === 'number' && Number.isFinite(value);
+  return (
+    <div className="flex min-w-0 flex-1 flex-col gap-2">
+      <span
+        className="font-reading text-[56px] leading-[0.9] tracking-[-0.03em] text-ink tabular-nums lg:text-[64px]"
+        // 跑動中的數字不念給螢幕閱讀器，避免念一串數字
+        aria-hidden={numeric && animate ? true : undefined}
+      >
+        {String(shown ?? '')}
+      </span>
+      {numeric && animate && <span className="sr-only">{`${label} ${value}`}</span>}
+      <span className="text-[13px] text-muted">{label}</span>
+      {numeric && <ProgressBar value={typeof shown === 'number' ? shown : (value as number)} max={100} label={label} size="sm" className="max-w-[120px]" />}
+    </div>
+  );
+}
+
+const SectionTitle = ({ children }: { children: React.ReactNode }) => (
+  <h3 className="text-sm font-bold text-ink">{children}</h3>
+);
 
 // 一次複述的回饋內容（複述完成畫面與歷史紀錄共用）
-export default function RetellFeedbackPanel({ feedback, targetPatterns, onPlayModel, modelLoading }: {
+export default function RetellFeedbackPanel({ feedback, targetPatterns, onPlayModel, modelLoading, animateScores = false }: {
   feedback: RetellFeedback;
   targetPatterns: RetellTargetPattern[];
   onPlayModel?: () => void;
   modelLoading?: boolean;
+  /** 只有「這次結果」傳 true：分數從 0 跑上去；歷史紀錄展開時直接顯示 */
+  animateScores?: boolean;
 }) {
   const statusLabel: Record<string, { text: string; className: string }> = {
-    correct: { text: '用對了', className: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300' },
-    incorrect: { text: '用錯了', className: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300' },
-    unused: { text: '沒用到', className: 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400' }
+    correct: { text: '用對了', className: 'bg-accent-soft text-ink' },
+    incorrect: { text: '用錯了', className: 'bg-warn/10 text-warn' },
+    unused: { text: '沒用到', className: 'bg-surface-2 text-muted border-line' }
   };
   return (
-    <div className="space-y-5">
-      <div className="flex items-center justify-center gap-6">
-        <div className="text-center">
-          <div className="text-3xl font-black text-indigo-600 dark:text-indigo-400">{feedback.contentScore}</div>
-          <div className="text-xs font-bold text-slate-500 mt-1">內容涵蓋</div>
+    <div className="flex flex-col gap-7">
+      <div className="flex flex-col gap-4">
+        <div className="flex items-stretch">
+          <Score label="內容涵蓋" value={feedback.contentScore} animate={animateScores} />
+          <div className="mx-5 w-px bg-line" aria-hidden="true" />
+          <Score label="語言表現" value={feedback.languageScore} animate={animateScores} />
         </div>
-        <div className="h-10 w-px bg-slate-200 dark:bg-slate-700"></div>
-        <div className="text-center">
-          <div className="text-3xl font-black text-indigo-600 dark:text-indigo-400">{feedback.languageScore}</div>
-          <div className="text-xs font-bold text-slate-500 mt-1">語言表現</div>
-        </div>
+        {feedback.comment && (
+          <p className="text-[15px] leading-relaxed text-ink">{feedback.comment}</p>
+        )}
       </div>
 
-      {feedback.comment && (
-        <p className="text-sm font-bold text-slate-700 dark:text-slate-200 leading-relaxed bg-indigo-50 dark:bg-indigo-900/20 rounded-xl p-4">{feedback.comment}</p>
-      )}
-
       {(feedback.coverage.covered.length > 0 || feedback.coverage.missed.length > 0) && (
-        <div className="space-y-2">
-          <p className="text-xs font-black text-slate-500 dark:text-slate-400">內容涵蓋</p>
-          {feedback.coverage.covered.map((c, i) => (
-            <p key={`c${i}`} className="text-sm text-slate-700 dark:text-slate-300">✓ {c}</p>
-          ))}
-          {feedback.coverage.missed.map((m, i) => (
-            <p key={`m${i}`} className="text-sm text-amber-700 dark:text-amber-400">✗ 漏掉：{m}</p>
-          ))}
-        </div>
+        <section className="flex flex-col gap-2">
+          <SectionTitle>內容涵蓋</SectionTitle>
+          <ul className="flex flex-col gap-1.5">
+            {feedback.coverage.covered.map((c, i) => (
+              <li key={`c${i}`} className="flex gap-2 text-sm leading-relaxed text-ink">
+                <span className="text-accent" aria-hidden="true">✓</span>
+                <span>{c}</span>
+              </li>
+            ))}
+            {feedback.coverage.missed.map((m, i) => (
+              <li key={`m${i}`} className="flex gap-2 text-sm leading-relaxed text-warn">
+                <span aria-hidden="true">✗</span>
+                <span>漏掉：{m}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
       {feedback.corrections.length > 0 && (
-        <div className="space-y-3">
-          <p className="text-xs font-black text-slate-500 dark:text-slate-400">語言修正</p>
+        <section className="flex flex-col gap-2.5">
+          <SectionTitle>語言修正</SectionTitle>
           {feedback.corrections.map((c, i) => (
-            <div key={i} className="bg-slate-50 dark:bg-slate-950 rounded-xl p-3 border border-slate-100 dark:border-slate-800">
-              <p className="text-sm text-slate-500 dark:text-slate-400 line-through">{c.original}</p>
-              <p className="text-sm font-bold text-emerald-700 dark:text-emerald-400 mt-1">{c.better}</p>
-              {c.note && <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{c.note}</p>}
+            <div key={i} className="flex flex-col gap-1.5 rounded-2xl border border-line bg-surface px-4 py-3">
+              <p lang="en" className="text-sm text-muted line-through decoration-warn">{c.original}</p>
+              <p lang="en" className="font-reading text-[17px] leading-snug text-ink">{c.better}</p>
+              {c.note && <p className="text-xs leading-relaxed text-muted">{c.note}</p>}
             </div>
           ))}
-        </div>
+        </section>
       )}
 
       {feedback.patternUsage.length > 0 && (
-        <div className="space-y-2">
-          <p className="text-xs font-black text-slate-500 dark:text-slate-400">句型運用</p>
+        <section className="flex flex-col gap-2.5">
+          <SectionTitle>句型運用</SectionTitle>
           {feedback.patternUsage.map(u => {
             const p = targetPatterns.find(t => t.id === u.id);
             const label = statusLabel[u.status] || statusLabel.unused;
             return (
-              <div key={u.id} className="flex items-start gap-2">
-                <span className={`shrink-0 text-[11px] font-bold px-2 py-0.5 rounded-full ${label.className}`}>{label.text}</span>
-                <div className="min-w-0">
-                  <p className="text-sm font-bold text-slate-700 dark:text-slate-200">{p?.text || u.id}</p>
-                  {u.note && <p className="text-xs text-slate-500 dark:text-slate-400">{u.note}</p>}
+              <div key={u.id} className="flex items-start gap-2.5">
+                <span className={`mt-0.5 w-14 shrink-0 rounded-full border border-transparent py-0.5 text-center text-[11px] font-medium ${label.className}`}>{label.text}</span>
+                <div className="flex min-w-0 flex-col gap-0.5">
+                  <p lang="en" className="font-reading text-base leading-snug text-ink break-words">{p?.text || u.id}</p>
+                  {u.note && <p className="text-xs leading-relaxed text-muted">{u.note}</p>}
                 </div>
               </div>
             );
           })}
-        </div>
+        </section>
       )}
 
       {feedback.modelAnswer && (
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <p className="text-xs font-black text-slate-500 dark:text-slate-400">示範版本</p>
+        <section className="flex flex-col gap-2.5">
+          <div className="flex items-center justify-between gap-3">
+            <SectionTitle>示範版本</SectionTitle>
             {onPlayModel && (
               <button
+                type="button"
                 onClick={onPlayModel}
                 disabled={modelLoading}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800/60 rounded-xl shadow-xs disabled:opacity-50"
+                className="flex min-h-9 items-center gap-1.5 rounded-full bg-accent-soft px-3 text-xs text-ink transition-[filter] hover:brightness-[0.97] dark:hover:brightness-110 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
               >
-                {modelLoading ? <Loader2 size={14} className="animate-spin" /> : <Volume2 size={14} />}
+                {modelLoading ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : <Volume2 size={14} aria-hidden="true" />}
                 {modelLoading ? '語音準備中…' : '播放示範'}
               </button>
             )}
           </div>
-          <p className="text-sm font-bold text-slate-800 dark:text-slate-100 leading-relaxed">{feedback.modelAnswer}</p>
-        </div>
+          <p lang="en" className="font-reading text-lg italic leading-relaxed text-ink">{feedback.modelAnswer}</p>
+        </section>
       )}
     </div>
   );

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { FileText, Headphones, AlertCircle, Loader2, Upload, CheckCircle, Volume2, Sparkles, FolderOpen } from 'lucide-react';
+import { FileText, Headphones, AlertCircle, Loader2, Upload, CheckCircle, Volume2, Sparkles, FolderOpen, Check } from 'lucide-react';
 import { splitTextToSentences, generateSpeechForSentences, extractPatternsFromText, translateSentences } from '../services/gemini';
 import { extractTextFromPdf } from '../utils/pdfExtract';
 import { auth, db, storage, appId } from '../firebase';
@@ -16,6 +16,9 @@ import MaterialListView from './MaterialListView';
 import MaterialDetailView from './MaterialDetailView';
 import { ChevronLeft } from 'lucide-react';
 import ExtractPreviewDialog from './ExtractPreviewDialog';
+import Button from './ui/Button';
+import IconButton from './ui/IconButton';
+import { importSteps } from '../utils/importSteps';
 
 export type PendingMaterial = {
     source: 'upload' | 'tts';
@@ -670,6 +673,20 @@ export default function MaterialImportMode() {
         }
     };
 
+    // 版面：解析結果出現時捲到結果、進入校對時回到頁首（只影響捲動位置）
+    const scrollRef = useRef<HTMLDivElement>(null);
+    const resultsRef = useRef<HTMLElement>(null);
+    const hasResults = results.length > 0;
+    const isReviewing = !!pendingMaterial;
+    useEffect(() => {
+        if (!hasResults || isReviewing) return;
+        const reduce = (() => { try { return !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches; } catch { return false; } })();
+        resultsRef.current?.scrollIntoView?.({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
+    }, [hasResults, isReviewing]);
+    useEffect(() => {
+        if (isReviewing && scrollRef.current) scrollRef.current.scrollTop = 0;
+    }, [isReviewing]);
+
     const handleCancelReview = async () => {
         if (isSavingRef.current) {
             setTranslationError('翻譯中，請稍候完成後再操作');
@@ -718,230 +735,261 @@ export default function MaterialImportMode() {
         );
     }
 
-    return (
-        // 匯入畫面還沒改版（②b），維持原本寬度
-        <div className="mx-auto w-full max-w-3xl flex flex-col h-full bg-slate-50 dark:bg-slate-950 p-6 overflow-y-auto pb-20">
-            <div className="flex items-center gap-4 mb-6">
-                <button 
-                    onClick={async () => {
-                        if (loadingState === 'uploadingAudio' || loadingState === 'transcribing' || activeJobRef.current) {
-                            handleCancelWhisper();
-                        } else if (pendingMaterial?.source === 'upload') {
-                            await handleCancelReview();
-                        }
-                        setCurrentView('list');
-                    }}
-                    disabled={loadingState === 'translating'}
-                    className="p-2 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 rounded-full shadow-xs hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors disabled:opacity-50"
-                >
-                    <ChevronLeft size={24} />
-                </button>
-                <h2 className="text-2xl font-black text-slate-800 dark:text-white">匯入新教材</h2>
+    const busy = loadingState !== 'idle';
+    const reviewing = !!pendingMaterial && !saveSuccess;
+    const stepProgress = loadingState === 'translating'
+        ? translateProgress
+        : loadingState === 'generating' && ttsProgress
+            ? { done: ttsProgress.current, total: ttsProgress.total }
+            : null;
+    const steps = importSteps(loadingState, pendingMaterial?.source === 'tts', stepProgress);
+    const canCancelImport = loadingState === 'uploadingAudio' || loadingState === 'transcribing';
+
+    const backButton = (
+        <IconButton
+            aria-label="返回教材列表"
+            onClick={async () => {
+                if (loadingState === 'uploadingAudio' || loadingState === 'transcribing' || activeJobRef.current) {
+                    handleCancelWhisper();
+                } else if (pendingMaterial?.source === 'upload') {
+                    await handleCancelReview();
+                }
+                setCurrentView('list');
+            }}
+            disabled={loadingState === 'translating'}
+            className="-ml-3"
+        >
+            <ChevronLeft size={22} aria-hidden="true" />
+        </IconButton>
+    );
+
+    // 處理中：三步驟進度（沒有對應步驟時保留原本的單行提示）
+    const progressBlock = busy && (
+        <section aria-live="polite" className="flex flex-col gap-6 rounded-[20px] border border-line bg-surface px-5 py-5 lg:px-8 lg:py-7">
+            <div className={`flex items-center justify-between gap-4 ${canCancelImport ? 'min-h-10' : ''}`}>
+                <p className="text-[13px] text-muted">正在匯入</p>
+                {canCancelImport && (
+                    <Button variant="secondary" size="sm" onClick={handleCancelWhisper}>取消匯入</Button>
+                )}
             </div>
-
-            {error && (
-                <div className="mb-6 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm px-4 py-3 rounded-xl flex items-center gap-2 shadow-xs border border-red-100 dark:border-red-800 animate-in slide-in-from-top-2">
-                    <AlertCircle size={16} className="shrink-0" />
-                    <span className="font-bold leading-relaxed">{error}</span>
-                </div>
-            )}
-
-            {whisperError && (
-                <div className="mb-6 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm p-4 rounded-xl flex flex-col justify-between gap-3 shadow-xs border border-red-100 dark:border-red-800 animate-in slide-in-from-top-2">
-                    <div className="flex items-center gap-2">
-                        <AlertCircle size={18} className="shrink-0" />
-                        <span className="font-bold leading-relaxed">{whisperError}</span>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                        <button
-                            onClick={handleRetryWhisper}
-                            className="px-3 py-1.5 bg-red-600 text-white font-bold rounded-lg hover:bg-red-700 transition-colors text-xs"
-                        >
-                            重試
-                        </button>
-                        <button
-                            onClick={handleCancelWhisper}
-                            className="px-3 py-1.5 bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold rounded-lg hover:bg-slate-300 dark:hover:bg-slate-700 transition-colors text-xs"
-                        >
-                            取消
-                        </button>
-                    </div>
-                </div>
-            )}
-
-            <div className="grid grid-cols-1 gap-6 mb-8">
-                {/* 路徑一：音訊上傳 */}
-                <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-xs border border-slate-200 dark:border-slate-800">
-                    <div className="flex items-center gap-3 mb-4">
-                        <div className="w-10 h-10 rounded-xl bg-orange-50 dark:bg-orange-900/30 flex items-center justify-center text-orange-500">
-                            <Headphones size={20} />
-                        </div>
-                        <h3 className="text-lg font-bold text-slate-800 dark:text-white">從音檔匯入</h3>
-                    </div>
-                    
-                    <input 
-                        type="file" 
-                        accept=".mp3,audio/mpeg" 
-                        className="hidden" 
-                        ref={audioInputRef}
-                        onChange={handleAudioUpload}
-                    />
-                    <button 
-                        onClick={() => audioInputRef.current?.click()}
-                        disabled={loadingState !== 'idle'}
-                        className="w-full py-4 rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:border-indigo-500 hover:text-indigo-600 dark:hover:border-indigo-400 dark:hover:text-indigo-400 transition-colors flex items-center justify-center gap-2 font-bold disabled:opacity-50"
-                    >
-                        <Upload size={18} />
-                        選擇音檔 (.mp3)
-                    </button>
-                    
-
-                </div>
-
-                {/* 路徑二：文字 / PDF 上傳 */}
-                <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-xs border border-slate-200 dark:border-slate-800">
-                    <div className="flex items-center gap-3 mb-4">
-                        <div className="w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
-                            <FileText size={20} />
-                        </div>
-                        <h3 className="text-lg font-bold text-slate-800 dark:text-white">從文字或文件匯入</h3>
-                    </div>
-
-                    <textarea
-                        value={textInput}
-                        onChange={(e) => setTextInput(e.target.value)}
-                        placeholder="在此貼上英文文本..."
-                        className="w-full h-32 p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 mb-4 focus:ring-2 focus:ring-indigo-500 outline-hidden resize-none text-slate-800 dark:text-slate-200"
-                        disabled={loadingState !== 'idle'}
-                    />
-
-                    <div className="flex gap-3">
-                        <button 
-                            onClick={handleTextSubmit}
-                            disabled={loadingState !== 'idle' || !textInput.trim()}
-                            className="flex-1 py-3 bg-indigo-600 text-white font-bold rounded-xl shadow-lg shadow-indigo-200 dark:shadow-none hover:bg-indigo-700 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
-                        >
-                            {loadingState !== 'idle' ? <Loader2 className="animate-spin" size={18} /> : null}
-                            直接送出文字
-                        </button>
-                        
-                        <input 
-                            type="file" 
-                            accept=".txt,.pdf" 
-                            className="hidden" 
-                            ref={fileInputRef}
-                            onChange={handlePdfOrTxtUpload}
-                        />
-                        <button 
-                            onClick={() => fileInputRef.current?.click()}
-                            disabled={loadingState !== 'idle'}
-                            className="px-4 py-3 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold rounded-xl hover:bg-slate-200 dark:hover:bg-slate-700 transition-all flex items-center gap-2 disabled:opacity-50"
-                        >
-                            <Upload size={18} />
-                            上傳檔案
-                        </button>
-                    </div>
-                </div>
-                
-                {/* 路徑三：從舊題庫匯入 */}
-                <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-xs border border-slate-200 dark:border-slate-800 flex flex-col">
-                    <div className="flex items-center gap-3 mb-4 shrink-0">
-                        <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-900/30 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
-                            <FolderOpen size={20} />
-                        </div>
-                        <h3 className="text-lg font-bold text-slate-800 dark:text-white">從舊題庫匯入</h3>
-                    </div>
-                    
-                    <div className="flex-1 min-h-0 flex flex-col">
-                        {courses.length === 0 ? (
-                            <p className="text-slate-500 dark:text-slate-400 font-bold text-sm text-center py-8">尚無舊題庫資料</p>
-                        ) : (
-                            <div className="mb-4 space-y-2 overflow-y-auto" style={{ maxHeight: '200px' }}>
-                                {courses.map(course => {
-                                    const count = vocabData.filter(v => v.course === course).length;
-                                    return (
-                                        <label key={course} className="flex items-center gap-3 p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">
-                                            <input
-                                                type="checkbox"
-                                                checked={selectedCourses.includes(course)}
-                                                onChange={(e) => {
-                                                    if (e.target.checked) {
-                                                        setSelectedCourses([...selectedCourses, course]);
-                                                    } else {
-                                                        setSelectedCourses(selectedCourses.filter(c => c !== course));
-                                                    }
-                                                }}
-                                                className="w-5 h-5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 shrink-0"
-                                            />
-                                            <span className="flex-1 font-bold text-slate-800 dark:text-slate-200">{course}</span>
-                                            <span className="text-xs font-bold text-slate-500 bg-slate-200 dark:bg-slate-900 px-2 py-1 rounded-lg shrink-0">{count} 句</span>
-                                        </label>
-                                    );
-                                })}
+            {steps ? (
+                <ol className="grid grid-cols-1 gap-5 sm:grid-cols-3 sm:gap-4">
+                    {steps.steps.map((st) => (
+                        <li key={st.label} className="flex gap-3 sm:flex-col sm:gap-2.5" aria-current={st.status === 'active' ? 'step' : undefined}>
+                            <div className={`hidden h-[3px] rounded-full sm:block ${st.status === 'pending' ? 'bg-line' : 'bg-accent'}`} aria-hidden="true" />
+                            <span className="mt-px flex size-5 shrink-0 items-center justify-center sm:hidden" aria-hidden="true">
+                                {st.status === 'done' && <span className="flex size-5 items-center justify-center rounded-full bg-accent text-on-accent"><Check size={12} strokeWidth={3} /></span>}
+                                {st.status === 'active' && <Loader2 size={20} className="animate-spin text-accent" />}
+                                {st.status === 'pending' && <span className="size-5 rounded-full border-[1.5px] border-muted/50" />}
+                            </span>
+                            <div className="flex min-w-0 flex-col gap-1">
+                                <div className="flex items-center gap-2">
+                                    <span className="hidden size-5 shrink-0 items-center justify-center sm:flex" aria-hidden="true">
+                                        {st.status === 'done' && <span className="flex size-5 items-center justify-center rounded-full bg-accent text-on-accent"><Check size={12} strokeWidth={3} /></span>}
+                                        {st.status === 'active' && <Loader2 size={20} className="animate-spin text-accent" />}
+                                        {st.status === 'pending' && <span className="size-5 rounded-full border-[1.5px] border-muted/50" />}
+                                    </span>
+                                    <span className={`text-[15px] ${st.status === 'active' ? 'font-bold text-ink' : st.status === 'done' ? 'font-medium text-ink' : 'text-muted'}`}>
+                                        {st.label}
+                                        <span className="sr-only">{st.status === 'done' ? '（已完成）' : st.status === 'active' ? '（進行中）' : '（尚未開始）'}</span>
+                                    </span>
+                                </div>
+                                {st.detail && <span className="text-pretty text-[13px] leading-relaxed text-muted sm:pl-7">{st.detail}</span>}
                             </div>
-                        )}
-                    </div>
-                    
-                    <button
-                        onClick={handleLibrarySubmit}
-                        disabled={selectedCourses.length === 0 || loadingState !== 'idle'}
-                        className="w-full mt-auto py-3 bg-emerald-600 text-white font-bold rounded-xl shadow-lg shadow-emerald-200 dark:shadow-none hover:bg-emerald-700 transition-all flex items-center justify-center gap-2 disabled:opacity-50 shrink-0"
-                    >
-                        <FolderOpen size={18} />
-                        匯入選定題庫
-                    </button>
-                </div>
-            </div>
-
-            {/* 結果呈現區 */}
-            {loadingState !== 'idle' && (
-                <div className="flex flex-col items-center justify-center py-12 text-slate-400">
-                    <Loader2 className="animate-spin text-indigo-600 mb-4" size={40} />
-                    <p className="font-bold">
-                        {loadingState === 'uploadingAudio' && '正在上傳音檔至 Storage...'}
-                        {loadingState === 'transcribing' && 'Whisper 正在進行語音轉錄與斷句...'}
-                        {loadingState === 'translating' && `正在翻譯（已完成 ${translateProgress?.done || 0} / 共 ${translateProgress?.total || 0} 句）...`}
+                        </li>
+                    ))}
+                </ol>
+            ) : (
+                <div className="flex items-center gap-3">
+                    <Loader2 size={20} className="animate-spin text-accent" aria-hidden="true" />
+                    <p className="text-[15px] font-medium text-ink">
                         {loadingState === 'uploading' && '正在上傳音檔至 Gemini...'}
                         {loadingState === 'analyzing' && 'Gemini AI 正在分析音檔...'}
-                        {loadingState === 'processing' && 'Gemini AI 正在處理中...'}
-                        {loadingState === 'generating' && `正在生成語音 (${ttsProgress?.current || 0}/${ttsProgress?.total || 0})...`}
                         {loadingState === 'timestamping' && 'Gemini AI 正在抓取時間軸...'}
                     </p>
-                    {(loadingState === 'uploadingAudio' || loadingState === 'transcribing') && (
-                        <button
-                            onClick={handleCancelWhisper}
-                            className="mt-4 px-4 py-2 bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold rounded-xl hover:bg-slate-300 dark:hover:bg-slate-700 transition-colors text-sm"
-                        >
-                            取消匯入
-                        </button>
-                    )}
+                </div>
+            )}
+        </section>
+    );
+
+    const alertBox = (text: string, key: string) => (
+        <div key={key} role="alert" className="flex items-start gap-3 rounded-xl bg-danger/10 px-4 py-3.5 text-sm text-danger">
+            <AlertCircle size={18} className="mt-0.5 shrink-0" aria-hidden="true" />
+            <span className="font-medium leading-relaxed break-words">{text}</span>
+        </div>
+    );
+
+    const cardHeader = (icon: React.ReactNode, title: string, sub: string) => (
+        <div className="flex items-start gap-3">
+            <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent" aria-hidden="true">{icon}</span>
+            <div className="flex min-w-0 flex-col gap-0.5">
+                <h2 className="text-base font-bold text-ink">{title}</h2>
+                <p className="text-pretty text-xs leading-relaxed text-muted">{sub}</p>
+            </div>
+        </div>
+    );
+
+    return (
+        <div ref={scrollRef} className={`flex h-full flex-col gap-6 overflow-y-auto px-5 pt-2 sm:px-8 lg:gap-8 lg:px-14 lg:pt-8 lg:pb-14 ${reviewing ? 'pb-0' : 'pb-12'}`}>
+            {!reviewing && (
+                <header className="flex flex-col gap-1">
+                    <div className="flex items-center gap-1">
+                        {backButton}
+                        <h1 className="text-[22px] font-bold tracking-wide text-ink lg:text-[26px]">匯入新教材</h1>
+                    </div>
+                    <p className="text-pretty text-[13px] leading-relaxed text-muted lg:text-sm">選一種方式匯入。原文會逐句斷句並翻譯，不會摘要或改寫。</p>
+                </header>
+            )}
+
+            {error && alertBox(error, 'error')}
+
+            {whisperError && (
+                <div role="alert" className="flex flex-col gap-3 rounded-xl bg-danger/10 p-4 text-sm text-danger sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex items-start gap-3">
+                        <AlertCircle size={18} className="mt-0.5 shrink-0" aria-hidden="true" />
+                        <span className="font-medium leading-relaxed break-words">{whisperError}</span>
+                    </div>
+                    <div className="flex shrink-0 gap-2 self-end sm:self-auto">
+                        <Button size="sm" onClick={handleRetryWhisper}>重試</Button>
+                        <Button variant="secondary" size="sm" onClick={handleCancelWhisper}>取消</Button>
+                    </div>
                 </div>
             )}
 
-            
+            {!pendingMaterial && progressBlock}
+
+            {/* 校對中不顯示三張選項卡，校對畫面佔滿整頁 */}
+            {!pendingMaterial && (
+                <div className={`grid grid-cols-1 gap-4 lg:grid-cols-3 lg:gap-5 ${busy ? 'pointer-events-none opacity-45' : ''}`} aria-busy={busy || undefined}>
+                    {/* 路徑一：音訊上傳 */}
+                    <section className="flex flex-col gap-4 rounded-[18px] border border-line bg-surface p-[18px] lg:p-6">
+                        {cardHeader(<Headphones size={20} />, '從音檔匯入', '真人 mp3（podcast、廣播），自動切出每句時間')}
+                        <input
+                            type="file"
+                            accept=".mp3,audio/mpeg"
+                            className="hidden"
+                            ref={audioInputRef}
+                            onChange={handleAudioUpload}
+                        />
+                        <button
+                            type="button"
+                            onClick={() => audioInputRef.current?.click()}
+                            disabled={busy}
+                            className="flex min-h-[88px] flex-1 flex-col items-center justify-center gap-1.5 rounded-[14px] border-[1.5px] border-dashed border-muted/45 bg-surface-2 text-sm font-medium text-ink transition-colors hover:border-accent hover:bg-accent-soft/50 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent lg:min-h-[180px]"
+                        >
+                            <Upload size={20} aria-hidden="true" />
+                            選擇音檔 (.mp3)
+                        </button>
+                    </section>
+
+                    {/* 路徑二：文字 / PDF 上傳 */}
+                    <section className="flex flex-col gap-4 rounded-[18px] border border-line bg-surface p-[18px] lg:p-6">
+                        {cardHeader(<FileText size={20} />, '從文字或文件匯入', '貼上英文，或上傳 .txt／.pdf，用 AI 語音產生原音')}
+                        <label className="flex flex-1 flex-col">
+                            <span className="sr-only">英文文本</span>
+                            <textarea
+                                lang="en"
+                                value={textInput}
+                                onChange={(e) => setTextInput(e.target.value)}
+                                placeholder="在此貼上英文文本..."
+                                className="min-h-28 w-full flex-1 resize-none rounded-xl border border-muted/35 bg-surface-2 px-3.5 py-3 font-reading text-base leading-normal text-ink placeholder:text-muted transition-colors focus-visible:border-accent focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-accent lg:min-h-36"
+                                disabled={busy}
+                            />
+                        </label>
+                        <div className="flex gap-2.5">
+                            <Button onClick={handleTextSubmit} disabled={busy || !textInput.trim()} className="flex-1 whitespace-nowrap">
+                                直接送出文字
+                            </Button>
+                            <input
+                                type="file"
+                                accept=".txt,.pdf"
+                                className="hidden"
+                                ref={fileInputRef}
+                                onChange={handlePdfOrTxtUpload}
+                            />
+                            <Button variant="secondary" onClick={() => fileInputRef.current?.click()} disabled={busy} icon={<Upload size={16} aria-hidden="true" />} className="shrink-0 whitespace-nowrap px-4">
+                                上傳檔案
+                            </Button>
+                        </div>
+                    </section>
+
+                    {/* 路徑三：從舊題庫匯入 */}
+                    <section className="flex flex-col gap-3 rounded-[18px] border border-line bg-surface p-[18px] lg:p-6">
+                        {cardHeader(<FolderOpen size={20} />, '從舊題庫匯入', '把舊版課程的題目轉成教材')}
+                        <div className="flex min-h-0 flex-1 flex-col">
+                            {courses.length === 0 ? (
+                                <p className="py-8 text-center text-sm text-muted">尚無舊題庫資料</p>
+                            ) : (
+                                <div className="-mx-1 flex max-h-[216px] flex-col gap-2 overflow-y-auto px-1 py-1">
+                                    {courses.map(course => {
+                                        const count = vocabData.filter(v => v.course === course).length;
+                                        const checked = selectedCourses.includes(course);
+                                        return (
+                                            <label
+                                                key={course}
+                                                className={`flex min-h-12 cursor-pointer items-center gap-3 rounded-xl border px-3.5 transition-colors has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-accent ${
+                                                    checked ? 'border-accent bg-accent-soft/60' : 'border-line bg-surface-2 hover:bg-line/50'
+                                                }`}
+                                            >
+                                                <input
+                                                    type="checkbox"
+                                                    checked={checked}
+                                                    disabled={busy}
+                                                    onChange={(e) => {
+                                                        if (e.target.checked) {
+                                                            setSelectedCourses([...selectedCourses, course]);
+                                                        } else {
+                                                            setSelectedCourses(selectedCourses.filter(c => c !== course));
+                                                        }
+                                                    }}
+                                                    className="sr-only"
+                                                />
+                                                <span
+                                                    aria-hidden="true"
+                                                    className={`flex size-5 shrink-0 items-center justify-center rounded-md border-[1.5px] transition-colors ${checked ? 'border-accent bg-accent text-on-accent' : 'border-muted/60'}`}
+                                                >
+                                                    {checked && <Check size={14} strokeWidth={3} />}
+                                                </span>
+                                                <span className="min-w-0 flex-1 text-sm font-medium text-ink break-words">{course}</span>
+                                                <span className="shrink-0 text-xs text-muted tabular-nums">{count} 句</span>
+                                            </label>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
+                        <Button
+                            variant="secondary"
+                            onClick={handleLibrarySubmit}
+                            disabled={selectedCourses.length === 0 || busy}
+                            fullWidth
+                            className="mt-1"
+                        >
+                            匯入選定題庫
+                        </Button>
+                    </section>
+                </div>
+            )}
+
             {saveSuccess && !timestampWarning && (
-                <div className="mb-6 bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400 text-sm px-4 py-4 rounded-xl flex items-center gap-3 shadow-xs border border-green-100 dark:border-green-800 animate-in slide-in-from-top-2">
-                    <CheckCircle size={20} className="shrink-0" />
-                    <span className="font-bold leading-relaxed">
+                <div role="status" className="flex items-start gap-3 rounded-xl bg-accent-soft px-4 py-4 text-sm text-ink">
+                    <CheckCircle size={20} className="mt-px shrink-0 text-accent" aria-hidden="true" />
+                    <span className="font-medium leading-relaxed">
                         已儲存成功！您的語音教材已經建立，您可以隨時至主畫面開始跟讀練習。
                     </span>
                 </div>
             )}
             {saveSuccess && timestampWarning && (
-                <div className="mb-6 bg-yellow-50 dark:bg-yellow-900/20 text-yellow-600 dark:text-yellow-400 text-sm px-4 py-4 rounded-xl flex items-center gap-3 shadow-xs border border-yellow-100 dark:border-yellow-800 animate-in slide-in-from-top-2">
-                    <AlertCircle size={20} className="shrink-0" />
-                    <span className="font-bold leading-relaxed">
+                <div role="status" className="flex items-start gap-3 rounded-xl bg-warn/10 px-4 py-4 text-sm text-warn">
+                    <AlertCircle size={20} className="mt-px shrink-0" aria-hidden="true" />
+                    <span className="font-medium leading-relaxed">
                         已儲存成功，但時間軸自動抓取失敗，已暫時使用預設值 0 儲存，之後需要手動校正時間軸。
                     </span>
                 </div>
             )}
 
-            {translationError && (
-                <div className="mb-6 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm px-4 py-3 rounded-xl flex items-center gap-2 shadow-xs border border-red-100 dark:border-red-800 animate-in slide-in-from-top-2">
-                    <AlertCircle size={16} className="shrink-0" />
-                    <span className="font-bold leading-relaxed">{translationError}</span>
-                </div>
-            )}
+            {/* 校對中，翻譯／存檔訊息顯示在動作按鈕旁；其他時候顯示在這裡 */}
+            {translationError && !reviewing && alertBox(translationError, 'translation')}
 
             {pendingMaterial && !saveSuccess && (
                 <MaterialReviewPanel
@@ -953,64 +1001,60 @@ export default function MaterialImportMode() {
                     isSaving={loadingState === 'translating'}
                     onSave={confirmAndSaveMaterial}
                     onCancel={handleCancelReview}
+                    headerStart={backButton}
+                    status={progressBlock || null}
+                    notice={translationError}
                 />
             )}
 
             {loadingState === 'idle' && results.length > 0 && !saveSuccess && !pendingMaterial && (
-
-                <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-xs border border-slate-200 dark:border-slate-800">
-                    <div className="flex flex-col justify-between gap-4 mb-6">
-                        <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-4">解析結果 (共 {results.length} 句)</h3>
-                        <div className="flex gap-2">
-                            <button
-                                onClick={handleGenerate}
-                                className="flex-1 px-4 py-2 bg-indigo-600 text-white font-bold rounded-lg shadow-md shadow-indigo-200 dark:shadow-none hover:bg-indigo-700 transition-all flex items-center justify-center gap-2"
-                            >
-                                <Volume2 size={16} />
+                <section ref={resultsRef} className="flex scroll-mt-4 flex-col gap-5 rounded-[20px] border border-line bg-surface p-5 lg:p-8">
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                        <h2 className="text-lg font-bold text-ink">解析結果 (共 {results.length} 句)</h2>
+                        <div className="flex flex-col gap-2.5 sm:flex-row">
+                            <Button onClick={handleGenerate} icon={<Volume2 size={16} aria-hidden="true" />} className="whitespace-nowrap sm:flex-1 lg:flex-none">
                                 生成語音，開始跟讀
-                            </button>
-                            <button
+                            </Button>
+                            <Button
+                                variant="secondary"
                                 onClick={handleExtractPatterns}
                                 disabled={isExtracting}
-                                className="flex-1 px-4 py-2 bg-slate-100 dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 font-bold rounded-lg flex items-center justify-center gap-2 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-colors disabled:opacity-50"
+                                icon={isExtracting ? <Loader2 size={16} className="animate-spin" aria-hidden="true" /> : <Sparkles size={16} aria-hidden="true" />}
+                                className="whitespace-nowrap sm:flex-1 lg:flex-none"
                             >
-                                {isExtracting ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
                                 {isExtracting ? '萃取中...' : '萃取語言模型'}
-                            </button>
+                            </Button>
                         </div>
                     </div>
-                    
+
                     {extractSuccessMsg && (
-                        <div className="mb-6 p-4 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 font-bold rounded-xl flex items-center justify-between border border-emerald-100 dark:border-emerald-800 animate-in fade-in">
-                            <div className="flex items-center gap-3">
-                                <CheckCircle size={20} />
-                                <span>{extractSuccessMsg}</span>
+                        <div role="status" className="flex flex-col gap-3 rounded-xl bg-accent-soft p-4 text-sm text-ink sm:flex-row sm:items-center sm:justify-between">
+                            <div className="flex items-start gap-3">
+                                <CheckCircle size={20} className="mt-px shrink-0 text-accent" aria-hidden="true" />
+                                <span className="font-medium leading-relaxed">{extractSuccessMsg}</span>
                             </div>
-                            <button
-                                onClick={() => setCurrentView('list')}
-                                className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors"
-                            >
+                            <Button size="sm" onClick={() => setCurrentView('list')} className="self-end sm:self-auto">
                                 返回列表
-                            </button>
+                            </Button>
                         </div>
                     )}
-                    
-                    <div className="space-y-4">
+
+                    <ol className="flex flex-col divide-y divide-line">
                         {results.map((item, index) => (
-                            <div key={index} className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700">
-                                <div className="flex justify-between items-start mb-2">
-                                    <p className="font-bold text-slate-800 dark:text-slate-200 flex-1">{item.text}</p>
+                            <li key={index} className="flex flex-col gap-1.5 py-4 first:pt-0 last:pb-0">
+                                <div className="flex items-start justify-between gap-3">
+                                    <p lang="en" className="font-reading text-lg leading-snug text-ink break-words">{item.text}</p>
                                     {item.lowConfidence && (
-                                        <span className="ml-3 text-[10px] font-bold bg-orange-100 text-orange-600 px-2 py-1 rounded-full shrink-0">
+                                        <span className="shrink-0 rounded-full bg-warn/10 px-2 py-0.5 text-[11px] font-medium text-warn">
                                             低信心度
                                         </span>
                                     )}
                                 </div>
-                                <p className="text-slate-600 dark:text-slate-400 text-sm">{item.translation}</p>
-                            </div>
+                                <p className="text-sm leading-relaxed text-muted">{item.translation}</p>
+                            </li>
                         ))}
-                    </div>
-                </div>
+                    </ol>
+                </section>
             )}
 
             {textExtractPreview && (
