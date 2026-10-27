@@ -119,7 +119,7 @@ def call(member, prompt, waits=RETRY_WAITS, deadline=None):
                 break
             print(f"  … {member} 暫時失敗（{str(err)[:80]}），{waits[attempt]} 秒後重試", file=sys.stderr)
             time.sleep(waits[attempt])
-    raise RuntimeError(f"失敗（已重試或時間預算用完）：{err}")
+    raise RuntimeError(f"失敗（已重試或時間預算用完）：{err}") from (err if isinstance(err, Exception) else None)
 
 
 # Gemini 免費版常因過載回 503：主要模型重試仍失敗時，依序改用這些 Gemini 模型（不存在的模型會立即跳過）
@@ -135,21 +135,43 @@ def chain(member):
     return [member] + [f"google:{m}" for m in GEMINI_FALLBACK if f"google:{m}" != member]
 
 
+REASONS = {
+    400: "400 請求格式錯誤", 401: "401 金鑰無效", 403: "403 金鑰沒有權限",
+    404: "404 找不到這個模型（名稱錯誤或已停用）",
+    429: "429 免費額度用完或請求太頻繁",
+    500: "500 伺服器錯誤", 502: "502 伺服器錯誤", 503: "503 伺服器過載", 504: "504 伺服器逾時",
+}
+
+
+def explain(err):
+    """把錯誤轉成一行看得懂的原因，附上 API 回傳訊息的開頭（例如 429 會寫出是哪一種額度）。"""
+    text = str(err)
+    if isinstance(err, requests.exceptions.Timeout) or "timed out" in text.lower():
+        return "請求逾時"
+    if "時間預算" in text and "HTTP" not in text:
+        return "時間預算用完"
+    m = re.search(r"HTTP (\d{3})", text)
+    msg = re.search(r'"message":\s*"([^"]{1,160})', text)
+    reason = REASONS.get(int(m.group(1)), f"HTTP {m.group(1)}") if m else text[:120]
+    return f"{reason}（{msg.group(1)}）" if msg else reason
+
+
 def call_member(member, prompt, deadline=None):
-    """依 chain() 依序嘗試，回傳 (回覆, 實際使用的模型)。主要模型最多用剩餘時間的一半，其餘平分給備援。"""
+    """依 chain() 依序嘗試，回傳 (回覆, 實際使用的模型, 失敗紀錄)。主要模型最多用剩餘時間的一半，其餘平分給備援。
+    失敗紀錄是「`模型`：原因」字串的清單，用來在留言中說明為什麼改用備援。"""
     deadline = deadline or START + BUDGET_SEC
-    alts, errors = chain(member), []
+    alts, failures = chain(member), []
     for i, alt in enumerate(alts):
         left = deadline - time.time()
         if left < MIN_TRY_SEC:
             break
         share = left if i == len(alts) - 1 else (left * 0.5 if i == 0 else left / (len(alts) - i))
         try:
-            return call(alt, prompt, deadline=time.time() + share), alt
+            return call(alt, prompt, deadline=time.time() + share), alt, failures
         except Exception as e:  # noqa: BLE001
-            errors.append(f"{alt}：{str(e)[:200]}")
-            print(f"  ✗ {alt}：{str(e)[:120]}", file=sys.stderr)
-    raise RuntimeError("；".join(errors) or "時間預算已用完，未呼叫")
+            failures.append(f"`{alt}`：{explain(e.__cause__ or e)}")
+            print(f"  ✗ {alt}：{str(e)[:200]}", file=sys.stderr)
+    raise RuntimeError("；".join(failures) or "時間預算已用完，未呼叫")
 
 
 def _split(name):
@@ -180,8 +202,10 @@ def ask_all(prompt, level="中"):
         for f in cf.as_completed(futs):
             m = futs[f]
             try:
-                text, used = f.result()
-                note = f"⚠️ 主要模型暫時無法使用，改由 `{used}` 回答。\n\n" if used != m else ""
+                text, used, failures = f.result()
+                note = ""
+                if used != m:
+                    note = f"⚠️ 主要模型暫時無法使用，改由 `{used}` 回答。失敗原因：\n" + "\n".join(f"- {x}" for x in failures) + "\n\n"
                 out[m] = note + (text or "（空白回覆）")
                 print(f"  ✓ {m}（{used}）")
             except Exception as e:  # noqa: BLE001

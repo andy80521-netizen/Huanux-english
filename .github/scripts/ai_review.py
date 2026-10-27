@@ -131,7 +131,8 @@ def main():
     first_deadline = START + BUDGET_SEC * 0.7
     for idx, m in enumerate(models):
         try:
-            result, used = call_member(m, prompt, deadline=first_deadline if idx == 0 and len(models) > 1 else None)
+            result, used, failures = call_member(m, prompt, deadline=first_deadline if idx == 0 and len(models) > 1 else None)
+            errors += [f"- {x}" for x in failures]
             break
         except Exception as e:  # noqa: BLE001
             errors.append(f"- `{m}`：{str(e)[:300]}")
