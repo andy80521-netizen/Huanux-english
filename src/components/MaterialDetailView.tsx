@@ -122,8 +122,6 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
 
     if (retellTarget) {
         return (
-            // 複述練習頁還沒改版（②b），維持原本寬度
-            <div className="mx-auto h-full w-full max-w-3xl">
             <RetellView
                 material={material}
                 segment={retellTarget.segment}
@@ -131,7 +129,6 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
                 targetPatterns={retellTarget.targetPatterns}
                 onBack={() => setRetellTarget(null)}
             />
-            </div>
         );
     }
 
