@@ -31,6 +31,9 @@ type CheckResult = {
     revisionNotes?: string[];
 };
 
+// 解鎖新組時金點散開的位移（px）
+const UNLOCK_SPARKS: Array<[number, number]> = [[-48, -30], [46, -34], [-30, 40], [40, 36], [0, -52], [58, 4], [-58, 6]];
+
 export default function LanguageModelPracticeView({ pattern, groupIndex, onBack }: Props) {
     const [inputText, setInputText] = useState('');
     const [isChecking, setIsChecking] = useState(false);
@@ -390,7 +393,20 @@ export default function LanguageModelPracticeView({ pattern, groupIndex, onBack 
                             您已經完成了這個句型的基本練習，現在可以開始念出來練習了。
                         </p>
                         {justUnlocked !== null && (
-                            <div className="rounded-full bg-gold/12 px-4 py-2 text-sm font-bold text-gold animate-rise-in">
+                            <div className="relative flex items-center gap-2.5 rounded-full border border-gold/35 bg-gold/12 px-5 py-2.5 text-[15px] font-bold text-gold animate-pop-in">
+                                {/* 金點向外散開（只播一次） */}
+                                {UNLOCK_SPARKS.map(([x, y], i) => (
+                                    <span
+                                        key={i}
+                                        aria-hidden="true"
+                                        className="pointer-events-none absolute left-1/2 top-1/2 -ml-[2.5px] -mt-[2.5px] size-[5px] rounded-full bg-gold animate-burst"
+                                        style={{ '--burst-x': `${x}px`, '--burst-y': `${y}px` } as React.CSSProperties}
+                                    />
+                                ))}
+                                <svg width="22" height="22" viewBox="0 0 34 34" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true" className="shrink-0">
+                                    <rect x="7" y="15" width="20" height="14" rx="3" />
+                                    <path d="M11 15v-4a6 6 0 0 1 12 0v4" className="animate-unlock" style={{ transformOrigin: '11px 15px', transformBox: 'view-box' }} />
+                                </svg>
                                 已解鎖第 {justUnlocked + 1} 組！
                             </div>
                         )}

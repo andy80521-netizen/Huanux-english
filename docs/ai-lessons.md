@@ -33,6 +33,8 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 - React 19＋TS：檔案內的區域函式元件被傳 `key` 會型別錯誤，宣告成 `React.FC<Props>`
 - 讀取狀態的「已有資料」要看實際筆數：空集合的 snapshot 之後監聽失敗，若當成已有資料就會停在空狀態、沒有重試（PR #16）
 - 同一份規格跨 PR 會互相牽動：③a 的測試鎖住了 `WIDE_TABS`，④ 拿掉時要先問擁有者改測試；規劃時就先 `grep tests` 找出會被影響的舊斷言
+- 轉場動畫的 `animation-fill-mode` 不要用 `both`／`forwards`：Chrome 會把結束值 `transform: none` 留成 identity matrix，祖先仍是 `position: fixed` 的定位容器；用 `backwards`（PR #18）
+- 全域「減少動態」規則只縮短時間不夠，`animation-delay`／`transition-delay` 也要歸零，否則逐列延遲期間元素是透明的（PR #18）
 - `onSnapshot` 一定要處理錯誤回呼：Firestore 出錯後會結束該監聽，只印 console 會讓畫面永遠停在「載入中」；文件監聽也要處理 `exists()` 為 false。重試用 `retryKey` 放進 effect 依賴重新訂閱（PR #15）
 - 用正則檢查原始碼的驗收測試，`[\s\S]*?` 可能跨到別處的程式而誤判通過；寫完要確認修改前真的會失敗（PR #15 有一條原本誤判通過，推送前已收緊）
 - 文案守門測試用正則抓屬性時，`onChange={(e) => …}` 裡的 `=>` 會讓 `[^>]*` 提早結束；className 放在事件屬性前面
@@ -85,3 +87,7 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 | UI 改版④（PR #16，審查） | Codex | 1 | 0 | 空集合後監聽失敗會卡在空狀態（🟠） |
 | UI 改版④（PR #16，審查） | Gemini Flash／Lite | 0 | 0 | 兩輪皆無意見，漏掉 Codex 的 🟠 |
 | 刪除舊單字庫（PR #17，審查） | Codex／Gemini Lite | 0 | 0 | 第 1 輪皆無意見 |
+| UI 改版⑤（PR #18，規劃） | Codex | 2 | 0 | 印章名稱要依實際門檻、減少動態要連延遲歸零 |
+| UI 改版⑤（PR #18，規劃） | DeepSeek | 4 | 0 | 逐列延遲上限、數字跑動獨立元件、手機輕壓 transition、fixed 對話框風險 |
+| UI 改版⑤（PR #18，規劃） | Nemotron／Gemini Lite／Poolside | 3 | 3 | StrictMode 旗標、空資料、data-card-link；誤判：整組精熟用平均值（Poolside）、要 will-change／分批（Nemotron、Gemini）；Grok 未出現 |
+| UI 改版⑤（PR #18，審查） | Codex／Gemini Lite | 0 | 0 | 第 1 輪皆無意見 |
