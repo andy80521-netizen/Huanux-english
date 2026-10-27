@@ -9,7 +9,7 @@ ai_review.py — Gemini 程式審查（取代已停止的 Gemini Code Assist Git
   /gemini review <舊SHA>..<新SHA>        只審查這段範圍的修改（後續輪次用）
 
 審查規則取自 main 上的 AGENTS.md（Code Review Rules）。
-模型依序嘗試 repo variable AI_REVIEW_MODELS（預設 google:gemini-flash-latest,openrouter:deepseek/deepseek-v4.1-flash），
+模型依序嘗試 repo variable AI_REVIEW_MODELS（預設 google:gemini-3.8-flash,openrouter:deepseek/deepseek-v4.1-flash），
 第一個成功的就採用，留言中會標明實際使用的模型。
 結果留言第一行是 <!-- ai-gemini-review:sha=<審查的 head SHA> -->，gh_ai.py 以此判斷「gemini-review」到齊。
 """
@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ai_council import BUDGET_SEC, START, call_member  # noqa: E402  共用 API 呼叫、重試、Gemini 備援與時間預算
 
 API = "https://api.github.com"
-DEFAULT_MODELS = "google:gemini-flash-latest,openrouter:deepseek/deepseek-v4.1-flash"
+DEFAULT_MODELS = "google:gemini-3.8-flash,openrouter:deepseek/deepseek-v4.1-flash"
 SKIP_FULL = re.compile(r"(^|/)(package-lock\.json|dist/|.*\.(png|jpe?g|gif|webp|mp3|wav|ico|svg|pdf|woff2?))$")
 RANGE_RE = re.compile(r"\b([0-9a-f]{7,40})\.\.\.?([0-9a-f]{7,40})\b")
 

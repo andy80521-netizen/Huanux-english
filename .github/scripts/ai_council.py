@@ -12,7 +12,7 @@ ai_council.py — 規劃委員會（在 GitHub Actions 執行；Claude 的工作
   Variable  AI_COUNCIL  逗號分隔，前綴決定走哪個管道：
               google:<模型>      → Google Gemini API（免費金鑰）
               openrouter:<模型>  → OpenRouter（免費模型以 :free 結尾）
-            例：google:gemini-flash-latest,openrouter:nvidia/nemotron-3-ultra-550b-a55b:free
+            例：google:gemini-3.8-flash,openrouter:nvidia/nemotron-3-ultra-550b-a55b:free
   Variable  AI_COUNCIL_BIG  （選填）只在規劃文件標示「級別：大」時加入的成員，例：openrouter:x-ai/grok-4.7
   Variable  AI_COUNCIL_MAX_CHARS  （選填）送出的內容上限，預設 200000 字元
   Secret    COUNCIL_GEMINI_API_KEY、OPENROUTER_API_KEY
@@ -80,7 +80,10 @@ def call_google(model, prompt, timeout=REQUEST_TIMEOUT):
     if not data.get("candidates") or "content" not in data["candidates"][0]:
         raise Retryable(f"回傳格式不符：{str(data)[:300]}")
     parts = data["candidates"][0]["content"].get("parts", [])
-    return "".join(p.get("text", "") for p in parts).strip()
+    text = "".join(p.get("text", "") for p in parts).strip()
+    version = data.get("modelVersion")
+    # 註明 Google 實際使用的模型（別名、自動導向時可能與指定的不同）
+    return f"{text}\n\n<sub>Google 回報的實際模型：`{version}`</sub>" if text and version else text
 
 
 def call_once(member, prompt, timeout=REQUEST_TIMEOUT):
@@ -120,8 +123,9 @@ def call(member, prompt, waits=RETRY_WAITS, deadline=None):
 
 
 # Gemini 免費版常因過載回 503：主要模型重試仍失敗時，依序改用這些 Gemini 模型（不存在的模型會立即跳過）
+# 2.5 系列自 2026-09-18 起不開放給新專案，所以不列入
 GEMINI_FALLBACK = [m.strip() for m in (os.environ.get("AI_GEMINI_FALLBACK")
-                   or "gemini-flash-lite-latest,gemini-2.5-flash").split(",") if m.strip()]
+                   or "gemini-3.6-flash,gemini-3.5-flash-lite,gemini-flash-lite-latest").split(",") if m.strip()]
 
 
 def chain(member):
