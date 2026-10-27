@@ -25,6 +25,11 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 - 匯入頁、複述頁都是「頁面內」捲動容器：新內容出現在下方（解析結果、複述回饋）時使用者看不到，要 `scrollIntoView`；切換到另一個畫面（進入校對）時要把捲動位置歸零
 - 本機假資料預覽要模擬匯入流程時，`doc()` 模擬必須回傳 `id`，否則存檔會走到沒有 materialId 的舊分支，看起來像程式錯誤
 
+- 熟練度寫入用 `updatePatternSentences`（Firestore 交易）：更新函式可能重試，外部變數要在函式開頭清空，並以回傳值（null＝沒寫入）判斷是否真的提交（PR #13）
+- 「練習後」的畫面不要只靠 `onSnapshot` 的最新資料：監聽可能晚到，完成畫面會先顯示 +0。練習期間自己記一份「真的寫入的結果」（PR #13 的 `onMasteryUpdated`）
+- 同一個元件放在不同寬度的頁面（例如練習畫面同時出現在 1200px 與 768px 的頁面）時，雙欄用 container query（`@container`＋`@[60rem]:`），不要用 `lg:`
+- 本機假資料預覽要測寫入流程時，Firestore 模擬要支援 `runTransaction` 的 `get`／`update` 並重新通知監聽；錄音用 `--use-file-for-fake-audio-capture=<靜音 wav>`，靜音偵測才會自動停止
+
 ## 防作弊機制的已知限制（2026-10-25 多輪攻擊測試後）
 - 「把斷言改弱」「mock 掉被測程式」「程式偵測測試環境」只能列為 ⚠️ 注意事項，無法自動判定是否作弊，要靠審查者與完成報告說明
 - Claude 若繞過 `gh_ai.py` 直接用 `gh api` 留言，留言會被當成擁有者的發言（Claude 使用擁有者帳號）；只能靠規則遵守
@@ -57,3 +62,8 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 | UI 改版②b（PR #12，規劃） | Gemini／Nemotron／Poolside／DeepSeek | 1 | 1 | 底部動作列要實機驗收；誤判：max-w-3xl 在 RetellView 內（Poolside） |
 | UI 改版②b（PR #12，審查） | Codex | 1 | 0 | 1024px 桌機文字卡按鈕溢出（🟠） |
 | UI 改版②b（PR #12，審查） | Gemini Lite | 0 | 0 | 兩輪皆無意見，漏掉 Codex 的 🟠 |
+| UI 改版③a（PR #13，規劃） | Codex | 4 | 0 | 起始值鍵名不一致（gain 永遠 0）、交易重試殘留 outcome、完成畫面監聽競態、共用元件接線驗收 |
+| UI 改版③a（PR #13，規劃） | Grok | 9 | 0 | 金色語意衝突、+0 不顯示、容器斷點 960px、1024px 不硬塞三欄、錄音鈕固定底部、守門補動態句 |
+| UI 改版③a（PR #13，規劃） | DeepSeek／Gemini Lite | 3 | 1 | 鍵名轉換、button 內排版、空格與 0 分格要分得出來；誤判：要加頁首標題（DeepSeek，設計稿沒有） |
+| UI 改版③a（PR #13，規劃） | Nemotron／Poolside | 0 | 3 | 誤判：SegmentedControl 不存在、熟練度樂觀更新；超出範圍：重試上限 |
+| UI 改版③a（PR #13，審查） | Codex／Gemini Lite | 0 | 0 | 第 1 輪皆無意見（規劃階段已處理主要風險） |
