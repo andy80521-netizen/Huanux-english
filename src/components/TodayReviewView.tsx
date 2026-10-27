@@ -80,6 +80,9 @@ function MasteryBars({ bars, size, showGain = false }: { bars: GroupMasteryBar[]
 export default function TodayReviewView({ tabs }: { tabs?: React.ReactNode }) {
     const [patterns, setPatterns] = useState<LanguagePattern[]>([]);
     const [loading, setLoading] = useState(true);
+    // 監聽失敗（Firestore 會結束這個監聽）：沒有資料時顯示錯誤與重試，已有資料就保留畫面
+    const [loadError, setLoadError] = useState(false);
+    const [retryKey, setRetryKey] = useState(0);
     const [user, setUser] = useState(auth.currentUser);
     
     // Session states
@@ -115,6 +118,7 @@ export default function TodayReviewView({ tabs }: { tabs?: React.ReactNode }) {
     useEffect(() => {
         if (!user) return;
         setLoading(true);
+        setLoadError(false);
         const patternsRef = collection(db, `artifacts/${appId}/users/${user.uid}/languagePatterns`);
         const unsubscribe = onSnapshot(patternsRef, (snapshot) => {
             const loaded: LanguagePattern[] = [];
@@ -125,9 +129,11 @@ export default function TodayReviewView({ tabs }: { tabs?: React.ReactNode }) {
             setLoading(false);
         }, (error) => {
             console.error('[監聽來源:TodayReviewView-languagePatterns]', error);
+            setLoadError(true);
+            setLoading(false);
         });
         return () => unsubscribe();
-    }, [user]);
+    }, [user, retryKey]);
 
     // 達到「可用」但還沒有維持複習排程的句型：補設 30 天後到期（舊句型也適用）
     useEffect(() => {
@@ -239,6 +245,19 @@ export default function TodayReviewView({ tabs }: { tabs?: React.ReactNode }) {
         const raf = requestAnimationFrame(() => setSummaryBarsShown(true));
         return () => cancelAnimationFrame(raf);
     }, [isSummary]);
+
+    if (user && loadError && patterns.length === 0) {
+        return (
+            <div className="flex h-full flex-col px-5 pt-4 sm:px-8 lg:px-14 lg:pt-9">
+                {tabs && <div className="lg:flex lg:justify-end">{tabs}</div>}
+                <div role="alert" className="flex flex-1 flex-col items-center justify-center gap-4 text-center text-[15px] text-muted">
+                    <AlertCircle size={36} className="text-danger" aria-hidden="true" />
+                    <p className="max-w-sm leading-relaxed">讀取句型失敗，請檢查網路後再試一次</p>
+                    <Button variant="secondary" onClick={() => setRetryKey((k) => k + 1)}>重試</Button>
+                </div>
+            </div>
+        );
+    }
 
     if (!user || (loading && patterns.length === 0)) {
         return (

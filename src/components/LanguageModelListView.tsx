@@ -39,6 +39,9 @@ const Chip: React.FC<{ on: boolean; onClick: () => void; children: React.ReactNo
 export default function LanguageModelListView({ tabs, onPatternClick, filters, onFiltersChange }: LanguageModelListViewProps) {
     const [patterns, setPatterns] = useState<LanguagePattern[]>([]);
     const [loading, setLoading] = useState(true);
+    // 監聽失敗：沒有資料時顯示錯誤與重試，不可當成「沒有句型」
+    const [loadError, setLoadError] = useState(false);
+    const [retryKey, setRetryKey] = useState(0);
     const [uid, setUid] = useState<string | null | undefined>(undefined);
 
     // 刪除：卡片垃圾桶（單一）或選取模式（批次）
@@ -56,6 +59,8 @@ export default function LanguageModelListView({ tabs, onPatternClick, filters, o
             return;
         }
         setUid(currentUid);
+        setLoading(true);
+        setLoadError(false);
 
         const q = query(
             collection(db, `artifacts/${appId}/users/${currentUid}/languagePatterns`)
@@ -71,11 +76,12 @@ export default function LanguageModelListView({ tabs, onPatternClick, filters, o
         }, (err) => {
             console.error("[監聽來源:LanguageModelListView-languagePatterns]", err);
             console.error("Error fetching language patterns: ", err);
+            setLoadError(true);
             setLoading(false);
         });
 
         return () => unsubscribe();
-    }, []);
+    }, [retryKey]);
 
     const pageHeader = (actions?: React.ReactNode) => (
         <>
@@ -117,6 +123,19 @@ export default function LanguageModelListView({ tabs, onPatternClick, filters, o
 
     if (uid === null) {
         return emptyShell(<User size={36} className="text-muted" aria-hidden="true" />, '請先登入', '請先至「個人」頁面登入才能使用語言模型功能。');
+    }
+
+    if (loadError && patterns.length === 0) {
+        return (
+            <div className="flex h-full flex-col overflow-y-auto px-5 pt-4 pb-12 sm:px-8 lg:px-14 lg:pt-9">
+                {pageHeader()}
+                <div role="alert" className="flex flex-1 flex-col items-center justify-center gap-4 py-16 text-center">
+                    <AlertCircle size={36} className="text-danger" aria-hidden="true" />
+                    <p className="max-w-sm text-[15px] leading-relaxed text-muted">讀取句型失敗，請檢查網路後再試一次</p>
+                    <Button variant="secondary" onClick={() => setRetryKey((k) => k + 1)}>重試</Button>
+                </div>
+            </div>
+        );
     }
 
     if (patterns.length === 0) {

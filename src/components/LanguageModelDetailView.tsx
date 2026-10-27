@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { LanguagePattern } from '../types';
 import { auth, db, appId } from '../firebase';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { doc, onSnapshot, DocumentSnapshot } from 'firebase/firestore';
 import { ChevronLeft, Loader2, PenTool, RefreshCw, Trash2, ShieldCheck, AlertCircle } from 'lucide-react';
 import Button from './ui/Button';
 import IconButton from './ui/IconButton';
@@ -17,6 +17,9 @@ import { getPatternStage, getMasteredCount } from '../utils/patternStage';
 import { deletePattern } from '../services/patternDelete';
 import { getSydneyDateString } from '../utils/sydneyTime';
 
+const toPattern = (snapshot: DocumentSnapshot): LanguagePattern =>
+    ({ id: snapshot.id, ...snapshot.data() } as LanguagePattern);
+
 export default function LanguageModelDetailView({ patternId, onBack }: { patternId: string, onBack: () => void }) {
     const [pattern, setPattern] = useState<LanguagePattern | null>(null);
     const [showGroupSelection, setShowGroupSelection] = useState(false);
@@ -28,28 +31,62 @@ export default function LanguageModelDetailView({ patternId, onBack }: { pattern
     const [deleting, setDeleting] = useState(false);
     const [deleteError, setDeleteError] = useState<string | null>(null);
     const [viewingGroupIndex, setViewingGroupIndex] = useState<number | null>(null);
+    // 讀取狀態：沒有 pattern 時決定顯示載入中、找不到、讀取失敗或未登入
+    const [loadStatus, setLoadStatus] = useState<'loading' | 'notFound' | 'error' | 'signedOut'>('loading');
+    const [retryKey, setRetryKey] = useState(0);
+    // 自己刪除時文件會先消失，不要閃一下「找不到這個句型」
+    const deletingRef = useRef(false);
 
     useEffect(() => {
         const uid = auth.currentUser?.uid;
-        if (!uid || !patternId) return;
+        if (!uid) {
+            setLoadStatus('signedOut');
+            return;
+        }
+        if (!patternId) return;
+        setLoadStatus('loading');
 
         const docRef = doc(db, `artifacts/${appId}/users/${uid}/languagePatterns`, patternId);
         const unsubscribe = onSnapshot(docRef, (snapshot) => {
             if (snapshot.exists()) {
-                setPattern({ id: snapshot.id, ...snapshot.data() } as LanguagePattern);
+                setPattern(toPattern(snapshot));
+            } else {
+                if (deletingRef.current) return;
+                setPattern(null);
+                setLoadStatus('notFound');
             }
         }, (error) => {
             console.error('[監聽來源:LanguageModelDetailView-languagePattern]', error);
+            setLoadStatus('error');
         });
 
         return () => unsubscribe();
-    }, [patternId]);
+    }, [patternId, retryKey]);
 
     if (!pattern) {
+        if (loadStatus === 'loading') {
+            return (
+                <div className="flex h-full items-center justify-center gap-2 text-[15px] text-muted">
+                    <Loader2 className="animate-spin text-accent" size={20} aria-hidden="true" />
+                    <p>載入中...</p>
+                </div>
+            );
+        }
+        const message = loadStatus === 'notFound'
+            ? '找不到這個句型，可能已在其他裝置刪除'
+            : loadStatus === 'error'
+                ? '讀取句型失敗，請檢查網路後再試一次'
+                : '請先登入';
         return (
-            <div className="flex h-full items-center justify-center gap-2 text-[15px] text-muted">
-                <Loader2 className="animate-spin text-accent" size={20} aria-hidden="true" />
-                <p>載入中...</p>
+            <div role="alert" className="flex h-full flex-col items-center justify-center gap-4 px-5 text-center">
+                <AlertCircle size={36} className={loadStatus === 'error' ? 'text-danger' : 'text-muted'} aria-hidden="true" />
+                <p className="max-w-sm text-[15px] leading-relaxed text-muted">{message}</p>
+                <div className="flex flex-wrap items-center justify-center gap-3">
+                    {loadStatus === 'error' && (
+                        <Button variant="secondary" onClick={() => setRetryKey((k) => k + 1)}>重試</Button>
+                    )}
+                    <Button variant={loadStatus === 'error' ? 'ghost' : 'secondary'} icon={<ChevronLeft size={18} aria-hidden="true" />} onClick={onBack}>回到句型庫</Button>
+                </div>
             </div>
         );
     }
@@ -115,6 +152,7 @@ export default function LanguageModelDetailView({ patternId, onBack }: { pattern
         if (!uid || deleting) return;
 
         setShowDeleteConfirm(false);
+        deletingRef.current = true;
         setDeleting(true);
         setDeleteError(null);
 
@@ -124,6 +162,7 @@ export default function LanguageModelDetailView({ patternId, onBack }: { pattern
         } catch (err: any) {
             console.error('刪除句型失敗:', err);
             setDeleteError(err.message || '刪除失敗，請稍後再試');
+            deletingRef.current = false;
             setDeleting(false);
         }
     };

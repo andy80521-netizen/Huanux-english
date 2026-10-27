@@ -31,6 +31,8 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 - 本機假資料預覽要測寫入流程時，Firestore 模擬要支援 `runTransaction` 的 `get`／`update` 並重新通知監聽；錄音用 `--use-file-for-fake-audio-capture=<靜音 wav>`，靜音偵測才會自動停止
 - `Button` 元件的基本 class 有 `inline-flex`，直接加 `hidden lg:inline-flex` 不會隱藏（PR #14 手機出現兩個刪除鈕）；要在外面包 `<span className="hidden lg:block">`
 - React 19＋TS：檔案內的區域函式元件被傳 `key` 會型別錯誤，宣告成 `React.FC<Props>`
+- `onSnapshot` 一定要處理錯誤回呼：Firestore 出錯後會結束該監聽，只印 console 會讓畫面永遠停在「載入中」；文件監聽也要處理 `exists()` 為 false。重試用 `retryKey` 放進 effect 依賴重新訂閱（PR #15）
+- 用正則檢查原始碼的驗收測試，`[\s\S]*?` 可能跨到別處的程式而誤判通過；寫完要確認修改前真的會失敗（PR #15 有一條原本誤判通過，推送前已收緊）
 - 文案守門測試用正則抓屬性時，`onChange={(e) => …}` 裡的 `=>` 會讓 `[^>]*` 提早結束；className 放在事件屬性前面
 
 ## 防作弊機制的已知限制（2026-10-25 多輪攻擊測試後）
@@ -74,3 +76,4 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 | UI 改版③b（PR #14，規劃） | Grok | 9 | 0 | 共用顯示元件、數字口徑不變、早退畫面要有切換、16px 輸入框、長字換行、速覽卡無障礙、精熟分支換樣式、載入中卡住（另開 PR） |
 | UI 改版③b（PR #14，規劃） | DeepSeek／Nemotron／Gemini Lite／Poolside | 3 | 4 | 16px、長字、aria-modal；誤判：token 不存在（Gemini、Poolside）、地圖要橫捲（Gemini）、另掃一次資料（DeepSeek）；超出範圍：hover、重試上限 |
 | UI 改版③b（PR #14，審查） | Codex／Gemini Lite | 0 | 0 | 第 1 輪皆無意見 |
+| 載入中卡住修正（PR #15，審查） | Codex／Gemini Flash | 0 | 0 | 第 1 輪皆無意見 |
