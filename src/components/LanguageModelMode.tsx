@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import LanguageModelListView from './LanguageModelListView';
 import LanguageModelDetailView from './LanguageModelDetailView';
 import TodayReviewView from './TodayReviewView';
+import SegmentedControl from './ui/SegmentedControl';
 
 export interface PatternFilterState {
     search: string;
@@ -9,6 +10,11 @@ export interface PatternFilterState {
     primaryCategory: string;
     situationTag: string | null;
 }
+
+const TAB_OPTIONS = [
+    { value: 'review', label: '今日複習' },
+    { value: 'library', label: '句型庫' },
+] as const;
 
 const defaultFilters: PatternFilterState = {
     search: '',
@@ -23,55 +29,45 @@ export default function LanguageModelMode() {
     const [selectedPatternId, setSelectedPatternId] = useState<string | null>(null);
     const [filters, setFilters] = useState<PatternFilterState>(defaultFilters);
 
+    const tabs = (
+        <SegmentedControl
+            label="語言模型"
+            options={TAB_OPTIONS}
+            value={activeTab}
+            onChange={setActiveTab}
+            className="w-full sm:w-auto sm:min-w-[240px]"
+        />
+    );
+
     if (currentView === 'detail' && selectedPatternId) {
         return (
-            <LanguageModelDetailView 
-                patternId={selectedPatternId} 
-                onBack={() => setCurrentView('list')} 
-            />
+            // 句型詳情還沒改版（③b），維持原本寬度
+            <div className="mx-auto h-full w-full max-w-3xl">
+                <LanguageModelDetailView
+                    patternId={selectedPatternId}
+                    onBack={() => setCurrentView('list')}
+                />
+            </div>
         );
     }
 
+    if (activeTab === 'review') {
+        return <TodayReviewView tabs={tabs} />;
+    }
+
     return (
-        <div className="flex flex-col h-full bg-slate-50 dark:bg-slate-950">
-            <div className="px-6 pt-6 pb-2">
-                <div className="flex bg-slate-200/50 dark:bg-slate-800/50 p-1 rounded-xl">
-                    <button
-                        onClick={() => setActiveTab('review')}
-                        className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${
-                            activeTab === 'review'
-                                ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-xs'
-                                : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-                        }`}
-                    >
-                        今日複習
-                    </button>
-                    <button
-                        onClick={() => setActiveTab('library')}
-                        className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${
-                            activeTab === 'library'
-                                ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-xs'
-                                : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-                        }`}
-                    >
-                        句型庫
-                    </button>
-                </div>
-            </div>
-            
+        // 句型庫還沒改版（③b），維持原本寬度
+        <div className="mx-auto flex h-full w-full max-w-3xl flex-col">
+            <div className="px-6 pt-6 pb-2">{tabs}</div>
             <div className="flex-1 overflow-hidden">
-                {activeTab === 'review' ? (
-                    <TodayReviewView />
-                ) : (
-                    <LanguageModelListView 
-                        onPatternClick={(id) => {
-                            setSelectedPatternId(id);
-                            setCurrentView('detail');
-                        }}
-                        filters={filters}
-                        onFiltersChange={setFilters}
-                    />
-                )}
+                <LanguageModelListView
+                    onPatternClick={(id) => {
+                        setSelectedPatternId(id);
+                        setCurrentView('detail');
+                    }}
+                    filters={filters}
+                    onFiltersChange={setFilters}
+                />
             </div>
         </div>
     );

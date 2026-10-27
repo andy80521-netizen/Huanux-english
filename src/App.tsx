@@ -16,6 +16,9 @@ import PersonalMode from './components/PersonalMode';
 import MaterialImportMode from './components/MaterialImportMode';
 import LanguageModelMode from './components/LanguageModelMode';
 
+// 桌機內容最寬 1200px 的分頁（其他分頁尚未改版，維持 768px）
+const WIDE_TABS = ['material', 'languageModel'];
+
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState('material'); 
   const [vocabData, setVocabData] = useState<VocabItem[]>([]);
@@ -379,7 +382,7 @@ const App: React.FC = () => {
         )}
         <main className="relative flex-1 min-h-0 overflow-hidden">
           {/* 「啟蒙的開始」已改版成寬版（列表三欄、詳情兩欄、跟讀側欄），其他分頁改版前維持 768px */}
-          <div className={`mx-auto h-full w-full ${activeTab === 'material' ? 'lg:max-w-[1200px]' : 'lg:max-w-3xl'}`}>
+          <div className={`mx-auto h-full w-full ${WIDE_TABS.includes(activeTab) ? 'lg:max-w-[1200px]' : 'lg:max-w-3xl'}`}>
             {activeTab === 'material' && <MaterialImportMode />}
             {activeTab === 'languageModel' && <LanguageModelMode />}
             {activeTab === 'badges' && <BadgeMode />}

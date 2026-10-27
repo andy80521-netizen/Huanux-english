@@ -9,7 +9,11 @@ import { requestPracticeImages } from '../services/practiceImage';
 import { getSpeechUrl, prefetchSpeech } from '../services/speech';
 import { auth } from '../firebase';
 import { updatePatternSentences } from '../services/sentenceWrites';
-import { Mic, Loader2, Play, RefreshCw, ChevronRight, Check, ChevronLeft, Volume2 } from 'lucide-react';
+import { Mic, Loader2, RefreshCw, ChevronRight, Check, ChevronLeft, Volume2, RotateCcw, AlertCircle } from 'lucide-react';
+import Button from './ui/Button';
+import IconButton from './ui/IconButton';
+import ProgressBar from './ui/ProgressBar';
+import { countUpValue } from '../utils/countUp';
 import { isSydneyDateReached, addSydneyCalendarDays, getSydneyCalendarDaysDiff } from '../utils/sydneyTime';
 import { SILENT_AUDIO } from '../utils';
 
@@ -22,7 +26,22 @@ interface Props {
   isLastSentence: boolean;
   progressLabel?: string;
   onScored?: (sentenceId: string, total: number, isExact: boolean) => void; // 每次評分完成時回報（維持複習用）；isExact＝一字不差
+  /** 進度（今日複習用）：畫在頁首下方的細線 */
+  progress?: { done: number; total: number };
+  /** 熟練度真的寫入後回報（今日複習的完成畫面用）；只在寫入成功時呼叫 */
+  onMasteryUpdated?: (sentenceId: string, before: number, after: number) => void;
 }
+
+/** 系統是否開啟「減少動態效果」（分數跑動是 JS，全域 CSS 規則管不到，要自己判斷） */
+const prefersReducedMotion = () => {
+    try { return !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches; } catch { return false; }
+};
+
+const PROMPT_LABEL: Record<string, string> = {
+    qaQuestion: '回答這個問題',
+    situationalPrompt: '情境任務',
+    imageUrl: '看圖說出對應的句子',
+};
 
 type SessionState = 'idle' | 'recording' | 'scoring' | 'scored' | 'scoreError';
 
@@ -116,7 +135,7 @@ const pickPromptTypeByMastery = (available: PromptType[], mastery: number): Prom
     return available[available.length - 1];
 };
 
-export default function PatternPracticeSessionView({ pattern, sentenceIndex, groupIndex, onBack, onNext, isLastSentence, progressLabel, onScored }: Props) {
+export default function PatternPracticeSessionView({ pattern, sentenceIndex, groupIndex, onBack, onNext, isLastSentence, progressLabel, onScored, progress, onMasteryUpdated }: Props) {
     const [sessionState, setSessionState] = useState<SessionState>('idle');
     const [activePromptType, setActivePromptType] = useState<PromptType | null>(null);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -136,6 +155,11 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
     const [promptAudioUrl, setPromptAudioUrl] = useState<string | null>(null);
     const [promptAudioLoading, setPromptAudioLoading] = useState(false);
     const [hasAnswerAudio, setHasAnswerAudio] = useState(false);
+    // 結果畫面：這次真的寫入的熟練度增加量（>0 才顯示）、是否一字不差、總分跑動
+    const [masteryGain, setMasteryGain] = useState<number | null>(null);
+    const [lastExact, setLastExact] = useState(false);
+    const [displayTotal, setDisplayTotal] = useState(0);
+    const [showGain, setShowGain] = useState(false);
 
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const streamRef = useRef<MediaStream | null>(null);
@@ -197,6 +221,7 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
             setActivePromptType(pickPromptTypeByMastery(availablePrompts, sentenceObj.mastery || 0));
         }
         setCurrentMastery(sentenceObj.mastery || 0);
+        setMasteryGain(null);
     };
 
     const generatePrompts = async () => {
@@ -389,13 +414,16 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
             // 【v3.11】精準背出原句：一字不差才累加熟練度
             const isExact = canAccumulatePattern(scores);
             onScored?.(sentenceObj.id, scores.total, isExact);
+            setLastExact(isExact);
+            setMasteryGain(null);
 
             if (isExact) {
                 const uid = auth.currentUser?.uid;
                 if (uid) {
                     const now = Date.now();
-                    let outcome: { newMastery: number; newNextAvailableAt?: number; isBlockedByTier: boolean; oldNextAvailableAt?: number } | null = null;
-                    await updatePatternSentences(pattern.id, (sentences) => {
+                    let outcome: { oldMastery: number; newMastery: number; newNextAvailableAt?: number; isBlockedByTier: boolean; oldNextAvailableAt?: number } | null = null;
+                    const written = await updatePatternSentences(pattern.id, (sentences) => {
+                        outcome = null; // 交易可能重試：每次先清空，只留最後一次（真正提交）的結果
                         const idx = sentences.findIndex(s => s.id === sentenceObj.id);
                         if (idx < 0) return null;
                         const s = sentences[idx];
@@ -403,13 +431,18 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
                         const oldNextAvailableAt = s.nextAvailableAt;
                         const r = calculateMasteryAfterAttempt(oldMastery, oldNextAvailableAt, scores.total, now);
                         sentences[idx] = { ...s, mastery: r.newMastery, ...(r.newNextAvailableAt !== undefined ? { nextAvailableAt: r.newNextAvailableAt } : {}) };
-                        outcome = { newMastery: r.newMastery, newNextAvailableAt: r.newNextAvailableAt, isBlockedByTier: r.isBlockedByTier, oldNextAvailableAt };
+                        outcome = { oldMastery, newMastery: r.newMastery, newNextAvailableAt: r.newNextAvailableAt, isBlockedByTier: r.isBlockedByTier, oldNextAvailableAt };
                         return sentences;
                     });
-                    if (outcome) {
-                        setCurrentMastery(outcome.newMastery);
-                        if (outcome.isBlockedByTier) {
-                            const targetDate = outcome.newNextAvailableAt || outcome.oldNextAvailableAt || now;
+                    const committed = written !== null ? (outcome as typeof outcome) : null;
+                    if (committed) {
+                        const o = committed as NonNullable<typeof outcome>;
+                        setCurrentMastery(o.newMastery);
+                        const gain = o.newMastery - o.oldMastery;
+                        setMasteryGain(gain > 0 ? gain : null);
+                        onMasteryUpdated?.(sentenceObj.id, o.oldMastery, o.newMastery);
+                        if (o.isBlockedByTier) {
+                            const targetDate = o.newNextAvailableAt || o.oldNextAvailableAt || now;
                             const waitDays = getSydneyCalendarDaysDiff(now, targetDate);
                             setTierBlockInfo({ blocked: true, waitDays: waitDays > 0 ? waitDays : 1 });
                         } else {
@@ -506,6 +539,33 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
         }
     };
 
+    // 結果畫面：總分從 0 跑上去，跑完再出現金色 +N；減少動態效果時直接顯示
+    useEffect(() => {
+        if (sessionState !== 'scored' || !scoreResult) return;
+        const target = scoreResult.total;
+        if (prefersReducedMotion()) {
+            setDisplayTotal(target);
+            setShowGain(true);
+            return;
+        }
+        setDisplayTotal(0);
+        setShowGain(false);
+        const duration = 700;
+        const start = performance.now();
+        let raf = 0;
+        const tick = (now: number) => {
+            const p = (now - start) / duration;
+            setDisplayTotal(countUpValue(0, target, p));
+            if (p < 1) raf = requestAnimationFrame(tick);
+        };
+        raf = requestAnimationFrame(tick);
+        const gainTimer = window.setTimeout(() => setShowGain(true), duration + 300);
+        return () => {
+            cancelAnimationFrame(raf);
+            window.clearTimeout(gainTimer);
+        };
+    }, [sessionState, scoreResult]);
+
     const handleReplayPrompt = () => {
         if (promptAudioUrl) {
             recordedAudioRef.current?.pause();
@@ -542,298 +602,305 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
         setScoreResult(null);
         setUserText('');
         setTierBlockInfo(null);
+        setMasteryGain(null);
         setSessionState('idle');
         initPrompt();
     };
 
+    const promptText = activePromptType === 'qaQuestion' ? (sentenceObj?.qaQuestion || generatedPrompts?.qaQuestion)
+        : activePromptType === 'situationalPrompt' ? (sentenceObj?.situationalPrompt || generatedPrompts?.situationalPrompt)
+        : '';
+    const scored = sessionState === 'scored' && !!scoreResult;
+    const gainShown = scored && masteryGain !== null && masteryGain > 0;
+    const progressPct = progress && progress.total > 0 ? Math.min(100, (progress.done / progress.total) * 100) : null;
+
     return (
-        <div className="flex flex-col h-full bg-slate-50 dark:bg-slate-950 p-6 overflow-y-auto pb-20">
+        <div className="@container flex h-full min-h-0 flex-col overflow-y-auto">
             <audio ref={recordedAudioRef} className="hidden" preload="auto" />
             <audio ref={speechAudioRef} className="hidden" preload="auto" />
-            <div className="flex items-center gap-4 mb-8">
-                <button 
-                    onClick={onBack}
-                    className="p-2 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 rounded-full shadow-xs hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                >
-                    <ChevronLeft size={24} />
-                </button>
-                <div className="flex-1">
-                    <h2 className="text-xl font-black text-slate-800 dark:text-white line-clamp-1">
-                        念出來練習
-                    </h2>
-                    {progressLabel && (
-                        <p className="text-sm text-slate-500 dark:text-slate-400">
-                            {progressLabel}
-                        </p>
-                    )}
-                </div>
-            </div>
 
-            {!isPromptReady ? (
-                <div className="bg-white dark:bg-slate-900 rounded-2xl p-8 shadow-xs border border-slate-200 dark:border-slate-800 flex flex-col items-center text-center">
-                    {promptStatus === 'error' ? (
-                        <>
-                            <p className="text-red-500 dark:text-red-400 font-bold mb-6">
-                                {promptError || '產生題目失敗，請稍後再試'}
-                            </p>
-                            <div className="flex flex-wrap gap-3 justify-center">
-                                <button
-                                    onClick={generatePrompts}
-                                    className="px-5 py-2.5 bg-indigo-600 text-white rounded-xl font-bold shadow-md hover:bg-indigo-700 transition-colors"
-                                >
-                                    再試一次
-                                </button>
-                                <button
-                                    onClick={isLastSentence ? onBack : onNext}
-                                    className="px-5 py-2.5 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-xl font-bold hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
-                                >
-                                    跳過這題
-                                </button>
-                                <button
-                                    onClick={onBack}
-                                    className="px-5 py-2.5 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-xl font-bold hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
-                                >
-                                    返回
-                                </button>
-                            </div>
-                        </>
-                    ) : (
-                        <div className="flex flex-col items-center py-4">
-                            <Loader2 size={32} className="animate-spin text-indigo-600 dark:text-indigo-400 mb-3" />
-                            <p className="text-slate-800 dark:text-slate-100 font-black text-lg mb-1">
-                                正在準備題目…
-                            </p>
-                            <p className="text-xs text-slate-400 dark:text-slate-500 font-medium">
-                                第一次練習這句需要幾秒鐘
-                            </p>
-                        </div>
-                    )}
+            <header className="flex items-center gap-2 px-2 pt-2 sm:px-5 lg:px-9 lg:pt-6">
+                <IconButton aria-label="返回" onClick={onBack}>
+                    <ChevronLeft size={22} aria-hidden="true" />
+                </IconButton>
+                <div className="min-w-0 flex-1">
+                    <h2 className="truncate text-[15px] font-medium tracking-wide text-ink">念出來練習</h2>
+                    {progressLabel && <p className="text-[13px] text-muted">{progressLabel}</p>}
                 </div>
-            ) : (
-                <>
-                    <div className="bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-800 rounded-2xl p-6 mb-8 flex flex-col items-center">
-                        {activePromptType === 'qaQuestion' && (
+            </header>
+            {progressPct !== null && (
+                <div className="mx-6 mt-4 h-0.5 rounded-full bg-line sm:mx-8 lg:mx-12" aria-hidden="true">
+                    <div className="h-full rounded-full bg-accent transition-[width] duration-[var(--dur-base)]" style={{ width: `${progressPct}%` }} />
+                </div>
+            )}
+
+            <main className="flex flex-1 flex-col px-7 pt-8 pb-6 sm:px-10 lg:px-14 lg:pt-10">
+                {!isPromptReady ? (
+                    <div className="flex flex-1 flex-col items-center justify-center gap-4 py-10 text-center" aria-live="polite">
+                        {promptStatus === 'error' ? (
                             <>
-                                <p className="text-sm font-bold text-indigo-600 dark:text-indigo-400 mb-2">回答這個問題：</p>
-                                <p className="text-xl font-black text-slate-800 dark:text-slate-100 text-center">{sentenceObj.qaQuestion || generatedPrompts?.qaQuestion}</p>
+                                <p role="alert" className="flex items-start gap-2 text-[15px] font-medium text-danger">
+                                    <AlertCircle size={18} className="mt-0.5 shrink-0" aria-hidden="true" />
+                                    {promptError || '產生題目失敗，請稍後再試'}
+                                </p>
+                                <div className="flex flex-wrap justify-center gap-3">
+                                    <Button onClick={generatePrompts}>再試一次</Button>
+                                    <Button variant="secondary" onClick={isLastSentence ? onBack : onNext}>跳過這題</Button>
+                                    <Button variant="secondary" onClick={onBack}>返回</Button>
+                                </div>
                             </>
-                        )}
-                        {activePromptType === 'situationalPrompt' && (
+                        ) : (
                             <>
-                                <p className="text-sm font-bold text-indigo-600 dark:text-indigo-400 mb-2">情境任務：</p>
-                                <p className="text-xl font-black text-slate-800 dark:text-slate-100 text-center">{sentenceObj.situationalPrompt || generatedPrompts?.situationalPrompt}</p>
+                                <Loader2 size={28} className="animate-spin text-accent" aria-hidden="true" />
+                                <p className="text-lg font-bold text-ink">正在準備題目…</p>
+                                <p className="text-[13px] text-muted">第一次練習這句需要幾秒鐘</p>
                             </>
-                        )}
-                        {activePromptType === 'imageUrl' && (
-                            <>
-                                <p className="text-sm font-bold text-indigo-600 dark:text-indigo-400 mb-4">看圖說出對應的句子：</p>
-                                <img src={sentenceObj.imageUrl} alt="情境圖" className="max-w-full h-48 object-cover rounded-xl" referrerPolicy="no-referrer" />
-                            </>
-                        )}
-                        {(activePromptType === 'qaQuestion' || activePromptType === 'situationalPrompt') && (
-                            <button
-                                type="button"
-                                onClick={handleReplayPrompt}
-                                disabled={!promptAudioUrl}
-                                className="mt-4 flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800/60 rounded-xl shadow-xs transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                                {promptAudioLoading ? (
-                                    <>
-                                        <Loader2 size={14} className="animate-spin" />
-                                        <span>語音準備中…</span>
-                                    </>
-                                ) : promptAudioUrl ? (
-                                    <>
-                                        <Volume2 size={14} />
-                                        <span>播放題目</span>
-                                    </>
-                                ) : (
-                                    <>
-                                        <Volume2 size={14} />
-                                        <span>語音暫時無法使用</span>
-                                    </>
-                                )}
-                            </button>
                         )}
                     </div>
-
-                    {errorMsg && (
-                        <div className="bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm px-4 py-3 rounded-xl border border-red-100 dark:border-red-800 font-bold mb-6 text-center">
-                            {errorMsg}
-                        </div>
-                    )}
-
-                    {sessionState === 'idle' && (
-                        <div className="flex flex-col items-center mt-4">
-                            <button
-                                onClick={startRecording}
-                                className="w-20 h-20 bg-indigo-600 text-white rounded-full shadow-lg hover:bg-indigo-700 hover:scale-105 active:scale-95 transition-all flex items-center justify-center"
-                            >
-                                <Mic size={32} />
-                            </button>
-                            <button
-                                type="button"
-                                onClick={generatePrompts}
-                                disabled={promptStatus === 'generating'}
-                                className="mt-3 flex items-center gap-1.5 text-xs font-bold text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                                {promptStatus === 'generating' ? (
-                                    <>
-                                        <Loader2 size={14} className="animate-spin" />
-                                        <span>產生中…</span>
-                                    </>
-                                ) : (
-                                    <>
-                                        <RefreshCw size={14} />
-                                        <span>換一組題目</span>
-                                    </>
-                                )}
-                            </button>
-                            {promptStatus === 'error' && promptError && (
-                                <p className="text-xs text-red-500 dark:text-red-400 font-bold mt-1 text-center">
-                                    {promptError}
+                ) : (
+                    <div className="grid w-full max-w-[680px] flex-1 grid-cols-1 content-start gap-8 @[60rem]:max-w-none @[60rem]:grid-cols-[minmax(0,1fr)_440px] @[60rem]:gap-x-14">
+                        {/* 題目 */}
+                        <section className="flex min-w-0 flex-col gap-4 @[60rem]:col-start-1 @[60rem]:row-start-1 @[60rem]:gap-5">
+                            <span className="flex items-center gap-2 text-[13px] text-muted">
+                                <span className="h-px w-[18px] bg-muted" aria-hidden="true" />
+                                {activePromptType ? PROMPT_LABEL[activePromptType] : ''}
+                            </span>
+                            {activePromptType === 'imageUrl' ? (
+                                <img src={sentenceObj.imageUrl} alt="情境圖" className={`w-full max-w-md rounded-2xl object-cover ${scored ? 'max-h-40' : 'max-h-72'}`} referrerPolicy="no-referrer" />
+                            ) : (
+                                <p
+                                    lang={activePromptType === 'qaQuestion' ? 'en' : undefined}
+                                    className={`break-words ${activePromptType === 'qaQuestion' ? 'font-reading tracking-[-0.005em]' : ''} ${
+                                        scored
+                                            ? 'text-[15px] leading-relaxed text-muted @[60rem]:text-[22px] @[60rem]:leading-[1.5] @[60rem]:text-ink'
+                                            : activePromptType === 'qaQuestion' ? 'text-[30px] leading-[1.32] text-ink lg:text-[34px]' : 'text-[22px] leading-[1.6] text-ink'
+                                    }`}
+                                >
+                                    {promptText}
                                 </p>
                             )}
-                        </div>
-                    )}
+                            {(activePromptType === 'qaQuestion' || activePromptType === 'situationalPrompt') && !scored && (
+                                <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    onClick={handleReplayPrompt}
+                                    disabled={!promptAudioUrl}
+                                    className="self-start"
+                                    icon={promptAudioLoading ? <Loader2 size={15} className="animate-spin" aria-hidden="true" /> : <Volume2 size={16} aria-hidden="true" />}
+                                >
+                                    {promptAudioLoading ? '語音準備中…' : promptAudioUrl ? '播放題目' : '語音暫時無法使用'}
+                                </Button>
+                            )}
 
-                    {sessionState === 'scoreError' && (
-                        <div className="flex flex-col sm:flex-row gap-3 mt-4">
-                            <button
-                                onClick={handleRetry}
-                                className="flex-1 py-4 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-xl font-bold hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors flex items-center justify-center gap-2"
-                            >
-                                <RefreshCw size={18} />
-                                重新錄一次
-                            </button>
-                            <button
-                                onClick={() => {
-                                    if (lastRecordingRef.current) {
-                                        runScoring(lastRecordingRef.current.blob, lastRecordingRef.current.durationSec);
-                                    }
-                                }}
-                                className="flex-1 py-4 bg-indigo-600 text-white rounded-xl font-bold shadow-md hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2"
-                            >
-                                <RefreshCw size={18} />
-                                重試評分
-                            </button>
-                        </div>
-                    )}
-
-                    {sessionState === 'recording' && (
-                        <div className="flex flex-col items-center justify-center mt-4 gap-4">
-                            <div className="w-20 h-20 bg-red-500 text-white rounded-full shadow-lg animate-pulse flex items-center justify-center">
-                                <Mic size={32} />
-                            </div>
-                            <p className="text-sm font-bold text-red-500">聆聽中... (講完自動停止)</p>
-                        </div>
-                    )}
-
-                    {sessionState === 'scoring' && (
-                        <div className="flex flex-col items-center justify-center mt-4 gap-4">
-                            <div className="w-20 h-20 bg-amber-500 text-white rounded-full shadow-lg flex items-center justify-center">
-                                <Loader2 size={32} className="animate-spin" />
-                            </div>
-                            <p className="text-sm font-bold text-amber-600 dark:text-amber-500">分析語音與評分中...</p>
-                        </div>
-                    )}
-
-                    {sessionState === 'scored' && scoreResult && (
-                        <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-xs border border-slate-200 dark:border-slate-800 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                            <div className="flex items-center justify-center gap-4 mb-6">
-                                <div className="text-center">
-                                    <div className="text-4xl font-black text-indigo-600 dark:text-indigo-400">
-                                        {scoreResult.total}
+                            {!scored && (
+                                <div className="mt-4 flex max-w-[280px] flex-col gap-2.5">
+                                    <div className="flex items-baseline justify-between">
+                                        <span className="text-[13px] text-muted">目前熟練度</span>
+                                        <span className="font-reading text-[17px] text-ink tabular-nums">
+                                            {currentMastery}<span className="font-sans text-[13px] text-muted"> / 1000</span>
+                                        </span>
                                     </div>
-                                    <div className="text-xs font-bold text-slate-500 mt-1">總分</div>
-                                </div>
-                                <div className="h-12 w-px bg-slate-200 dark:bg-slate-700"></div>
-                                <div className="flex gap-4">
-                                    <div className="text-center">
-                                        <div className="text-xl font-bold text-slate-700 dark:text-slate-300">{scoreResult.content}</div>
-                                        <div className="text-[10px] font-bold text-slate-500">內容</div>
-                                    </div>
-                                    <div className="text-center">
-                                        <div className="text-xl font-bold text-slate-700 dark:text-slate-300">{scoreResult.fluency}</div>
-                                        <div className="text-[10px] font-bold text-slate-500">流暢</div>
-                                    </div>
-                                </div>
-                            </div>
-                            {scoreResult.errors > 0 && (
-                                <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl p-3 mb-4 text-amber-700 dark:text-amber-400 text-sm font-bold text-center">
-                                    有 {scoreResult.errors} 個字不一致，熟練度未增加
+                                    <ProgressBar value={Math.min(currentMastery, 1000)} max={1000} label="目前熟練度" tone={currentMastery >= 1000 ? 'gold' : 'accent'} />
+                                    <span className="text-[13px] leading-relaxed text-muted">說出你造的那句話，一字不差才算數</span>
                                 </div>
                             )}
-                            
-                            <div className="space-y-4 mb-6">
-                                <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-100 dark:border-slate-800">
-                                    <p className="text-xs font-bold text-slate-500 mb-1">目標原句</p>
-                                    <p className="font-bold text-slate-800 dark:text-slate-200">{sentenceObj.text}</p>
+
+                        </section>
+
+                        {/* 狀態與結果 */}
+                        <section aria-live="polite" className="flex min-w-0 flex-col gap-6 @[60rem]:col-start-2 @[60rem]:row-start-1">
+                            {errorMsg && (
+                                <div role="alert" className="flex items-start gap-3 rounded-xl bg-danger/10 px-4 py-3.5 text-sm text-danger">
+                                    <AlertCircle size={18} className="mt-0.5 shrink-0" aria-hidden="true" />
+                                    <span className="font-medium leading-relaxed break-words">{errorMsg}</span>
                                 </div>
-                                <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-100 dark:border-slate-800">
-                                    <p className="text-xs font-bold text-slate-500 mb-1">您念的內容 (語音辨識)</p>
-                                    <p className="font-bold text-slate-800 dark:text-slate-200">{userText}</p>
+                            )}
+
+                            {scored && scoreResult && (
+                                <>
+                                    <div className="flex items-end gap-7">
+                                        <div className="relative flex flex-col">
+                                            {lastExact && (
+                                                <svg width="148" height="40" viewBox="0 0 148 40" aria-hidden="true" className="pointer-events-none absolute -top-[18px] -left-3.5 animate-sparkle">
+                                                    <circle cx="8" cy="22" r="2" className="fill-gold" />
+                                                    <circle cx="132" cy="10" r="2.5" className="fill-gold" />
+                                                    <path d="M118 30 l3 -6 l3 6 l-3 6 z" className="fill-gold" opacity="0.8" />
+                                                    <circle cx="40" cy="4" r="1.5" className="fill-accent" />
+                                                </svg>
+                                            )}
+                                            <span className="font-reading text-[88px] leading-[0.9] tracking-[-0.03em] text-ink tabular-nums lg:text-[96px]" aria-hidden="true">{displayTotal}</span>
+                                            <span className="sr-only">總分 {scoreResult.total}</span>
+                                            <span className="mt-2.5 text-[13px] text-muted">{lastExact ? '總分・一字不差' : '總分'}</span>
+                                        </div>
+                                        <div className="flex flex-1 flex-col gap-3.5 pb-1.5">
+                                            {([['內容', scoreResult.content], ['流暢', scoreResult.fluency]] as const).map(([label, v]) => (
+                                                <div key={label} className="flex flex-col gap-1.5">
+                                                    <div className="flex justify-between text-[13px]"><span className="text-muted">{label}</span><span className="text-ink tabular-nums">{v}</span></div>
+                                                    <ProgressBar value={Number(v) || 0} max={100} label={label} size="sm" />
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    {scoreResult.errors > 0 && (
+                                        <p className="flex items-center gap-2 rounded-xl bg-warn/10 px-3.5 py-3 text-sm font-medium text-warn">
+                                            <AlertCircle size={16} className="shrink-0" aria-hidden="true" />
+                                            有 {scoreResult.errors} 個字不一致，熟練度未增加
+                                        </p>
+                                    )}
+
+                                    <div className="flex flex-col gap-2.5 rounded-[14px] bg-surface-2 px-[18px] py-4 dark:bg-surface">
+                                        <div className="flex items-baseline justify-between gap-3">
+                                            <span className="text-[13px] text-muted">目前熟練度</span>
+                                            <span className="text-sm">
+                                                {gainShown && (
+                                                    <span className={`mr-2.5 font-medium text-gold transition-opacity duration-500 ${showGain ? 'opacity-100' : 'opacity-0'}`}>+{masteryGain}</span>
+                                                )}
+                                                <span className="font-reading text-[17px] text-ink tabular-nums">{currentMastery}</span>
+                                                <span className="text-muted"> / 1000</span>
+                                            </span>
+                                        </div>
+                                        <ProgressBar
+                                            value={Math.min(currentMastery, 1000)}
+                                            max={1000}
+                                            gain={gainShown && showGain ? masteryGain! : 0}
+                                            label="目前熟練度"
+                                            tone={currentMastery >= 1000 ? 'gold' : 'accent'}
+                                        />
+                                        {tierBlockInfo?.blocked && (
+                                            <p className="mt-1 text-[13px] leading-relaxed text-warn">
+                                                已到目前階段練習上限，{tierBlockInfo.waitDays}天後可以繼續往上練習到更高分
+                                            </p>
+                                        )}
+                                    </div>
+
+                                </>
+                            )}
+                        </section>
+
+                        {/* 目標原句（手機排在分數之後；桌機在左欄下方） */}
+                            {scored && (
+                                <div className="flex min-w-0 flex-col gap-2.5 @[60rem]:col-start-1 @[60rem]:row-start-2 @[60rem]:self-end @[60rem]:border-t @[60rem]:border-line @[60rem]:pt-7">
+                                    <span className="text-xs text-muted">目標原句</span>
+                                    <p lang="en" className="font-reading text-[22px] leading-[1.45] text-ink break-words @[60rem]:text-[30px] @[60rem]:leading-[1.35]">{sentenceObj.text}</p>
+                                    {hasAnswerAudio && (
+                                        <button
+                                            type="button"
+                                            onClick={handleReplayAnswer}
+                                            className="mt-1 flex min-h-10 items-center gap-2 self-start rounded-full bg-accent-soft px-3.5 text-[13px] text-ink transition-[filter] hover:brightness-[0.97] dark:hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                                        >
+                                            <Volume2 size={15} aria-hidden="true" />
+                                            重播正確答案
+                                        </button>
+                                    )}
                                 </div>
-                                <WordDiffView diff={scoreResult.diff} />
-                                {hasAnswerAudio && (
-                                    <button
-                                        onClick={handleReplayAnswer}
-                                        className="w-full py-4 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-800 rounded-xl font-bold hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors flex items-center justify-center gap-2"
-                                    >
-                                        <Volume2 size={18} />
-                                        重播正確答案
-                                    </button>
-                                )}
+                            )}
+
+                        {/* 您念的內容與逐字比對 */}
+                        {scored && scoreResult && (
+                                    <div className="flex min-w-0 flex-col gap-2 @[60rem]:col-start-2 @[60rem]:row-start-2">
+                                        <span className="text-xs text-muted">您念的內容 (語音辨識)</span>
+                                        <p lang="en" className="text-[15px] leading-relaxed text-ink break-words">{userText}</p>
+                                        <WordDiffView diff={scoreResult.diff} />
+                                        <button
+                                            type="button"
+                                            onClick={handleReplayRecording}
+                                            className="flex min-h-10 items-center gap-2 self-start rounded-full px-1 text-sm text-accent transition-opacity hover:opacity-80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                                        >
+                                            <RotateCcw size={17} aria-hidden="true" />
+                                            重播我的錄音
+                                        </button>
+                                    </div>
+                        )}
+                    </div>
+                )}
+            </main>
+
+            {/* 動作列：手機固定在練習畫面捲動區底部，題目很長也按得到 */}
+            {isPromptReady && (
+                <div className="sticky bottom-0 z-10 border-t border-line/70 bg-ground/95 @[60rem]:static px-6 pt-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] backdrop-blur-md sm:px-10 lg:px-14 @[60rem]:border-t-0 @[60rem]:bg-transparent @[60rem]:backdrop-blur-none">
+                    <div className="max-w-[680px] @[60rem]:ml-auto @[60rem]:w-[440px] @[60rem]:max-w-none">
+                        {sessionState === 'idle' && (
+                            <div className="flex flex-col items-center gap-2">
                                 <button
-                                    onClick={handleReplayRecording}
-                                    className="w-full py-4 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-xl font-bold hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors flex items-center justify-center gap-2"
+                                    type="button"
+                                    onClick={startRecording}
+                                    aria-label="開始錄音"
+                                    className="flex size-20 items-center justify-center rounded-full bg-accent text-on-accent shadow-[0_12px_28px_-10px_rgb(31_122_92/0.6)] transition-[filter,transform] hover:brightness-110 active:scale-95 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent dark:shadow-none"
                                 >
-                                    <Play size={18} />
-                                    重播我的錄音
+                                    <Mic size={30} aria-hidden="true" />
                                 </button>
-                            </div>
-
-                            <div className="flex items-center justify-between mb-2 px-2">
-                                <span className="text-sm font-bold text-slate-600 dark:text-slate-400">目前熟練度</span>
-                                <span className="text-sm font-black text-indigo-600 dark:text-indigo-400">{currentMastery} / 1000</span>
-                            </div>
-                            {tierBlockInfo?.blocked && (
-                                <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl p-3 mb-8 text-amber-700 dark:text-amber-400 text-sm font-bold text-center">
-                                    已到目前階段練習上限，{tierBlockInfo.waitDays}天後可以繼續往上練習到更高分
-                                </div>
-                            )}
-                            {!tierBlockInfo?.blocked && <div className="mb-8"></div>}
-
-                            <div className="flex flex-col sm:flex-row gap-3">
                                 <button
-                                    onClick={handleRetry}
-                                    className="flex-1 py-4 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-xl font-bold hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors flex items-center justify-center gap-2"
+                                    type="button"
+                                    onClick={generatePrompts}
+                                    disabled={promptStatus === 'generating'}
+                                    className="flex min-h-10 items-center gap-1.5 rounded-full px-3 text-[13px] text-muted transition-colors hover:text-ink disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-accent"
                                 >
-                                    <RefreshCw size={18} />
+                                    {promptStatus === 'generating'
+                                        ? <><Loader2 size={14} className="animate-spin" aria-hidden="true" /><span>產生中…</span></>
+                                        : <><RefreshCw size={14} aria-hidden="true" /><span>換一組題目</span></>}
+                                </button>
+                                {promptStatus === 'error' && promptError && (
+                                    <p className="text-center text-xs font-medium text-danger">{promptError}</p>
+                                )}
+                            </div>
+                        )}
+
+                        {sessionState === 'recording' && (
+                            <div className="flex min-h-[124px] flex-col items-center justify-center gap-3" aria-live="polite">
+                                <span className="flex size-20 items-center justify-center rounded-full border-2 border-danger/60" aria-hidden="true">
+                                    <span className="size-4 rounded-full bg-danger animate-breathe" />
+                                </span>
+                                <p className="text-sm font-medium text-ink">聆聽中... (講完自動停止)</p>
+                            </div>
+                        )}
+
+                        {sessionState === 'scoring' && (
+                            <div className="flex min-h-[124px] flex-col items-center justify-center gap-3" aria-live="polite">
+                                <Loader2 size={30} className="animate-spin text-accent" aria-hidden="true" />
+                                <p className="text-sm font-medium text-ink">分析語音與評分中...</p>
+                            </div>
+                        )}
+
+                        {sessionState === 'scoreError' && (
+                            <div className="grid grid-cols-2 gap-3">
+                                <Button variant="secondary" size="lg" onClick={handleRetry} icon={<RefreshCw size={17} aria-hidden="true" />} className="px-4">
+                                    重新錄一次
+                                </Button>
+                                <Button
+                                    size="lg"
+                                    onClick={() => {
+                                        if (lastRecordingRef.current) {
+                                            runScoring(lastRecordingRef.current.blob, lastRecordingRef.current.durationSec);
+                                        }
+                                    }}
+                                    icon={<RefreshCw size={17} aria-hidden="true" />}
+                                    className="px-4"
+                                >
+                                    重試評分
+                                </Button>
+                            </div>
+                        )}
+
+                        {scored && (
+                            <div className="grid grid-cols-2 gap-3">
+                                <Button variant="secondary" size="lg" onClick={handleRetry} className="px-4">
                                     再念一次
-                                </button>
-                                
+                                </Button>
                                 {isLastSentence ? (
-                                    <button
-                                        onClick={onNext} // Should be a finish handler if it's the last sentence
-                                        className="flex-1 py-4 bg-green-600 text-white rounded-xl font-bold shadow-md hover:bg-green-700 transition-colors flex items-center justify-center gap-2"
-                                    >
-                                        <Check size={18} />
+                                    <Button size="lg" onClick={onNext} icon={<Check size={18} aria-hidden="true" />} className="px-4">
                                         完成練習
-                                    </button>
+                                    </Button>
                                 ) : (
-                                    <button
-                                        onClick={onNext}
-                                        className="flex-1 py-4 bg-indigo-600 text-white rounded-xl font-bold shadow-md hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2"
-                                    >
+                                    <Button size="lg" onClick={onNext} className="px-4">
                                         下一句
-                                        <ChevronRight size={18} />
-                                    </button>
+                                        <ChevronRight size={18} aria-hidden="true" />
+                                    </Button>
                                 )}
                             </div>
-                        </div>
-                    )}
-                </>
+                        )}
+                    </div>
+                </div>
             )}
         </div>
     );
