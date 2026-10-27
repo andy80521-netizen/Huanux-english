@@ -8,7 +8,8 @@ export interface LoadState {
   retryKey: number;
 }
 
-export type LoadEvent = { type: 'subscribe' } | { type: 'snapshot' } | { type: 'error' } | { type: 'retry' };
+/** snapshot 的 empty：收到的是空集合（沒有任何句型）。空集合不算「已有資料」，之後失敗仍要顯示失敗與重試 */
+export type LoadEvent = { type: 'subscribe' } | { type: 'snapshot'; empty?: boolean } | { type: 'error' } | { type: 'retry' };
 
 export const initialLoadState: LoadState = { status: 'loading', hasData: false, retryKey: 0 };
 
@@ -17,7 +18,7 @@ export function patternLoadReducer(state: LoadState, event: LoadEvent): LoadStat
     case 'subscribe':
       return { status: 'loading', hasData: false, retryKey: state.retryKey };
     case 'snapshot':
-      return { ...state, status: 'ready', hasData: true };
+      return { ...state, status: 'ready', hasData: !event.empty };
     case 'error':
       // 已有資料就保留畫面，不打斷使用者
       return state.hasData ? { ...state, status: 'ready' } : { ...state, status: 'error' };

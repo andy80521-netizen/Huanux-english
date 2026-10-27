@@ -76,7 +76,7 @@ export default function BadgeMode() {
                 loaded.push({ id: doc.id, ...doc.data() } as LanguagePattern);
             });
             setPatterns(loaded);
-            dispatch({ type: 'snapshot' });
+            dispatch({ type: 'snapshot', empty: loaded.length === 0 });
         }, (error) => {
             console.error('[監聽來源:BadgeMode-languagePatterns]', error);
             dispatch({ type: 'error' });

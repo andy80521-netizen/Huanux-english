@@ -35,4 +35,13 @@ describe('patternLoadReducer', () => {
     const s = run([{ type: 'subscribe' }, { type: 'snapshot' }, { type: 'subscribe' }], { status: 'loading', hasData: false, retryKey: 3 });
     expect(s).toEqual({ status: 'loading', hasData: false, retryKey: 3 });
   });
+  // 審查第 1 輪（Codex）：空集合不算已有資料
+  it('收到空集合後失敗 → 顯示失敗，可重試', () => {
+    const s = run([{ type: 'subscribe' }, { type: 'snapshot', empty: true }, { type: 'error' }]);
+    expect(s.status).toBe('error');
+    expect(patternLoadReducer(s, { type: 'retry' })).toEqual({ status: 'loading', hasData: false, retryKey: 1 });
+  });
+  it('收到空集合 → 完成但沒有資料', () => {
+    expect(run([{ type: 'subscribe' }, { type: 'snapshot', empty: true }])).toEqual({ status: 'ready', hasData: false, retryKey: 0 });
+  });
 });

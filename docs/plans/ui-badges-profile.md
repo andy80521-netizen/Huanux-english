@@ -127,3 +127,4 @@
 - 2026-10-27：實作完成：`utils/badges.ts`、`utils/loadState.ts`、`ui/BadgeSeal.tsx`、`BadgeMode`、`PersonalMode`（含 Firebase 設定對話框）、`App.tsx`；`patternStage.ts` 抽出 `STAGE_THRESHOLDS`（值不變）；③a 測試依擁有者同意改成新狀態；`check.sh` 通過
   - 自我檢查（本機假資料預覽）：勳章房手機／桌機深色／1024px、空狀態、讀取失敗→重試恢復；個人已登入／匿名／未登入（預設資料庫提示）、設定對話框焦點在「關閉」且 Esc 可關、登入錯誤訊息；皆無橫向捲動
   - 自檢修正：1024px 時右欄太窄 → 左欄 `lg` 300px、`xl` 360px
+- 2026-10-27：審查第 1 輪（`7a597af`）：Codex 🟠 空集合後失敗會卡在空狀態 → snapshot 事件帶 `empty`，補 2 條測試（只新增、未改原有斷言）；Gemini 無意見
