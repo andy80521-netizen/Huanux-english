@@ -29,6 +29,9 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 - 「練習後」的畫面不要只靠 `onSnapshot` 的最新資料：監聽可能晚到，完成畫面會先顯示 +0。練習期間自己記一份「真的寫入的結果」（PR #13 的 `onMasteryUpdated`）
 - 同一個元件放在不同寬度的頁面（例如練習畫面同時出現在 1200px 與 768px 的頁面）時，雙欄用 container query（`@container`＋`@[60rem]:`），不要用 `lg:`
 - 本機假資料預覽要測寫入流程時，Firestore 模擬要支援 `runTransaction` 的 `get`／`update` 並重新通知監聽；錄音用 `--use-file-for-fake-audio-capture=<靜音 wav>`，靜音偵測才會自動停止
+- `Button` 元件的基本 class 有 `inline-flex`，直接加 `hidden lg:inline-flex` 不會隱藏（PR #14 手機出現兩個刪除鈕）；要在外面包 `<span className="hidden lg:block">`
+- React 19＋TS：檔案內的區域函式元件被傳 `key` 會型別錯誤，宣告成 `React.FC<Props>`
+- 文案守門測試用正則抓屬性時，`onChange={(e) => …}` 裡的 `=>` 會讓 `[^>]*` 提早結束；className 放在事件屬性前面
 
 ## 防作弊機制的已知限制（2026-10-25 多輪攻擊測試後）
 - 「把斷言改弱」「mock 掉被測程式」「程式偵測測試環境」只能列為 ⚠️ 注意事項，無法自動判定是否作弊，要靠審查者與完成報告說明
@@ -67,3 +70,7 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 | UI 改版③a（PR #13，規劃） | DeepSeek／Gemini Lite | 3 | 1 | 鍵名轉換、button 內排版、空格與 0 分格要分得出來；誤判：要加頁首標題（DeepSeek，設計稿沒有） |
 | UI 改版③a（PR #13，規劃） | Nemotron／Poolside | 0 | 3 | 誤判：SegmentedControl 不存在、熟練度樂觀更新；超出範圍：重試上限 |
 | UI 改版③a（PR #13，審查） | Codex／Gemini Lite | 0 | 0 | 第 1 輪皆無意見（規劃階段已處理主要風險） |
+| UI 改版③b（PR #14，規劃） | Codex | 2 | 0 | 拿掉暫時寬度會改到 ③a 練習畫面、卡片點擊與鍵盤契約 |
+| UI 改版③b（PR #14，規劃） | Grok | 9 | 0 | 共用顯示元件、數字口徑不變、早退畫面要有切換、16px 輸入框、長字換行、速覽卡無障礙、精熟分支換樣式、載入中卡住（另開 PR） |
+| UI 改版③b（PR #14，規劃） | DeepSeek／Nemotron／Gemini Lite／Poolside | 3 | 4 | 16px、長字、aria-modal；誤判：token 不存在（Gemini、Poolside）、地圖要橫捲（Gemini）、另掃一次資料（DeepSeek）；超出範圍：hover、重試上限 |
+| UI 改版③b（PR #14，審查） | Codex／Gemini Lite | 0 | 0 | 第 1 輪皆無意見 |

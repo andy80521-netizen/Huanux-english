@@ -2,19 +2,41 @@ import React, { useState, useEffect } from 'react';
 import { LanguagePattern } from '../types';
 import { auth, db, appId } from '../firebase';
 import { collection, query, onSnapshot } from 'firebase/firestore';
-import { Sparkles, User, ChevronRight, Search, X, RotateCcw, Trash2, CheckSquare, Square, Loader2 } from 'lucide-react';
+import { Sparkles, User, Search, X, RotateCcw, Trash2, Check, Loader2, AlertCircle } from 'lucide-react';
+import Button from './ui/Button';
+import IconButton from './ui/IconButton';
+import { GroupSegments } from './ui/MasterySegments';
+import { groupMasteredCounts } from '../utils/groupMastery';
 import { PatternFilterState } from './LanguageModelMode';
 import { getPatternStage } from '../utils/patternStage';
 import ConfirmDialog from './ConfirmDialog';
 import { deletePatterns } from '../services/patternDelete';
 
 interface LanguageModelListViewProps {
+    /** 「今日複習／句型庫」切換（手機在頁首、桌機在標題右側） */
+    tabs?: React.ReactNode;
     onPatternClick: (id: string) => void;
     filters: PatternFilterState;
     onFiltersChange: (newFilters: PatternFilterState) => void;
 }
 
-export default function LanguageModelListView({ onPatternClick, filters, onFiltersChange }: LanguageModelListViewProps) {
+/** 篩選用的圓角選項 */
+const Chip: React.FC<{ on: boolean; onClick: () => void; children: React.ReactNode; className?: string }> = ({ on, onClick, children, className = '' }) => {
+    return (
+        <button
+            type="button"
+            aria-pressed={on}
+            onClick={onClick}
+            className={`flex min-h-9 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-[13px] transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent ${
+                on ? 'border-accent bg-accent-soft text-ink font-medium' : 'border-line bg-surface text-ink hover:bg-surface-2'
+            } ${className}`}
+        >
+            {children}
+        </button>
+    );
+};
+
+export default function LanguageModelListView({ tabs, onPatternClick, filters, onFiltersChange }: LanguageModelListViewProps) {
     const [patterns, setPatterns] = useState<LanguagePattern[]>([]);
     const [loading, setLoading] = useState(true);
     const [uid, setUid] = useState<string | null | undefined>(undefined);
@@ -55,40 +77,50 @@ export default function LanguageModelListView({ onPatternClick, filters, onFilte
         return () => unsubscribe();
     }, []);
 
+    const pageHeader = (actions?: React.ReactNode) => (
+        <>
+            {tabs && <div className="mb-6 lg:hidden">{tabs}</div>}
+            <header className="flex items-end justify-between gap-4">
+                <div className="flex min-w-0 flex-col gap-1">
+                    <h1 className="text-[22px] font-bold tracking-wide text-ink lg:text-[26px]">語言模型庫</h1>
+                    <p className="text-[13px] text-muted lg:text-sm">從跟讀教材中萃取出的精華句型</p>
+                </div>
+                <div className="flex shrink-0 items-center gap-3">
+                    {actions}
+                    {tabs && <div className="hidden lg:block">{tabs}</div>}
+                </div>
+            </header>
+        </>
+    );
+
+    const emptyShell = (icon: React.ReactNode, title: string, text: string) => (
+        <div className="flex h-full flex-col overflow-y-auto px-5 pt-4 pb-12 sm:px-8 lg:px-14 lg:pt-9">
+            {pageHeader()}
+            <div className="flex flex-1 flex-col items-center justify-center gap-3 py-16 text-center">
+                {icon}
+                <h2 className="text-lg font-bold text-ink">{title}</h2>
+                <p className="max-w-sm text-sm leading-relaxed text-muted">{text}</p>
+            </div>
+        </div>
+    );
+
     if (loading) {
         return (
-            <div className="flex flex-col h-full bg-slate-50 dark:bg-slate-950 p-6 items-center justify-center text-slate-400">
-                載入中...
+            <div className="flex h-full flex-col px-5 pt-4 sm:px-8 lg:px-14 lg:pt-9">
+                {pageHeader()}
+                <p className="flex flex-1 items-center justify-center gap-2 text-[15px] text-muted">
+                    <Loader2 size={18} className="animate-spin text-accent" aria-hidden="true" />載入中...
+                </p>
             </div>
         );
     }
 
     if (uid === null) {
-        return (
-            <div className="flex flex-col h-full bg-slate-50 dark:bg-slate-950 p-6 items-center justify-center text-center">
-                <div className="w-20 h-20 bg-slate-200 dark:bg-slate-800 rounded-full flex items-center justify-center mb-6 text-slate-400 dark:text-slate-500">
-                    <User size={40} />
-                </div>
-                <h3 className="text-xl font-bold text-slate-700 dark:text-slate-300 mb-2">請先登入</h3>
-                <p className="text-slate-500 dark:text-slate-400 max-w-sm">
-                    請先至「個人」頁面登入才能使用語言模型功能。
-                </p>
-            </div>
-        );
+        return emptyShell(<User size={36} className="text-muted" aria-hidden="true" />, '請先登入', '請先至「個人」頁面登入才能使用語言模型功能。');
     }
 
     if (patterns.length === 0) {
-        return (
-            <div className="flex flex-col items-center justify-center h-full bg-slate-50 dark:bg-slate-950 p-6 text-center">
-                <div className="w-20 h-20 bg-slate-200 dark:bg-slate-800 rounded-full flex items-center justify-center mb-6 text-slate-400 dark:text-slate-500">
-                    <Sparkles size={40} />
-                </div>
-                <h3 className="text-xl font-bold text-slate-700 dark:text-slate-300 mb-2">尚無任何語言模型句型</h3>
-                <p className="text-slate-500 dark:text-slate-400 max-w-sm">
-                    請先在教材裡完成跟讀練習並萃取句型。
-                </p>
-            </div>
-        );
+        return emptyShell(<Sparkles size={36} className="text-gold" aria-hidden="true" />, '尚無任何語言模型句型', '請先在教材裡完成跟讀練習並萃取句型。');
     }
 
     // 分類定義與轉換
@@ -298,332 +330,236 @@ export default function LanguageModelListView({ onPatternClick, filters, onFilte
 
     const isFiltered = filters.search !== '' || filters.category !== 'all' || effectivePrimaryCategory !== 'all' || effectiveSituationTag !== null;
 
+    const headerActions = (
+        <>
+            {isFiltered && (
+                <Button variant="ghost" size="sm" onClick={handleClearFilters} icon={<RotateCcw size={14} aria-hidden="true" />}>
+                    清除篩選
+                </Button>
+            )}
+            {!selectMode && (
+                <Button variant="secondary" size="sm" onClick={() => { setSelectMode(true); setSelectedIds(new Set()); }}>
+                    選取
+                </Button>
+            )}
+        </>
+    );
+
+    const filterHeading = (text: string) => (
+        <h2 className="hidden text-xs text-muted lg:block">{text}</h2>
+    );
+
     return (
-        <div className="flex flex-col h-full bg-slate-50 dark:bg-slate-950 p-6 overflow-y-auto pb-20">
-            <div className="flex items-center justify-between mb-6">
-                <div>
-                    <h2 className="text-2xl font-black text-slate-800 dark:text-white flex items-center gap-2">
-                        <Sparkles className="text-indigo-600 dark:text-indigo-400" />
-                        語言模型庫
-                    </h2>
-                    <p className="text-slate-500 dark:text-slate-400 mt-1 font-bold text-sm">
-                        從跟讀教材中萃取出的精華句型
-                    </p>
-                </div>
-                <div className="flex flex-col items-end gap-2 shrink-0">
-                    {!selectMode && (
-                        <button
-                            onClick={() => { setSelectMode(true); setSelectedIds(new Set()); }}
-                            className="text-xs font-bold text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 shrink-0"
-                        >
-                            <CheckSquare size={14} />
-                            選取
-                        </button>
-                    )}
-                    {isFiltered && (
-                        <button
-                            onClick={handleClearFilters}
-                            className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 bg-indigo-50 dark:bg-indigo-900/30 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 shrink-0"
-                        >
-                            <RotateCcw size={14} />
-                            清除篩選
-                        </button>
-                    )}
-                </div>
-            </div>
+        <div className="h-full overflow-y-auto px-5 pt-4 pb-12 sm:px-8 lg:px-14 lg:pt-9">
+            {pageHeader(headerActions)}
 
-            {/* 選取模式操作列（批次刪除） */}
-            {selectMode && (
-                <div className="sticky top-0 z-10 mb-4 px-3 py-3 rounded-2xl bg-white/95 dark:bg-slate-900/95 backdrop-blur border border-indigo-200 dark:border-indigo-800 shadow-xs flex flex-wrap items-center gap-2">
-                    <span className="text-sm font-black text-slate-700 dark:text-slate-200 flex-1 min-w-[5rem]">
-                        已選 {selectedExisting.length} 個
-                    </span>
-                    <button
-                        onClick={toggleSelectAllVisible}
-                        disabled={visibleIds.length === 0}
-                        className="text-xs font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 px-3 py-2 rounded-lg transition-colors disabled:opacity-50"
-                    >
-                        {allVisibleSelected ? '取消全選' : '全選目前結果'}
-                    </button>
-                    <button
-                        onClick={() => setPendingDeleteIds(selectedExisting.map(p => p.id))}
-                        disabled={selectedExisting.length === 0 || !!deleteProgress}
-                        className="text-xs font-bold text-white bg-red-500 hover:bg-red-600 px-3 py-2 rounded-lg transition-colors flex items-center gap-1.5 disabled:opacity-50"
-                    >
-                        <Trash2 size={14} />
-                        刪除
-                    </button>
-                    <button
-                        onClick={exitSelectMode}
-                        disabled={!!deleteProgress}
-                        className="text-xs font-bold text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 px-3 py-2 rounded-lg transition-colors disabled:opacity-50"
-                    >
-                        完成
-                    </button>
-                </div>
-            )}
-
-            {(deleteProgress || deleteMessage) && (
-                <div className={`mb-4 px-4 py-3 rounded-xl text-sm font-bold flex items-center gap-2 break-words ${
-                    deleteMessage?.isError
-                        ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 border border-red-100 dark:border-red-800'
-                        : 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-800'
-                }`}>
-                    {deleteProgress ? (
-                        <>
-                            <Loader2 size={16} className="animate-spin shrink-0" />
-                            刪除中 {deleteProgress.done}/{deleteProgress.total}…
-                        </>
-                    ) : deleteMessage?.text}
-                </div>
-            )}
-
-            {/* 篩選區 */}
-            <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 shadow-xs border border-slate-200 dark:border-slate-800 mb-6 space-y-4">
-                {/* 關鍵字搜尋框 */}
-                <div className="relative flex items-center">
-                    <Search size={18} className="absolute left-3.5 text-slate-400 pointer-events-none" />
-                    <input
-                        type="text"
-                        value={filters.search}
-                        onChange={(e) => handleSearchChange(e.target.value)}
-                        placeholder="搜尋句型或中文語意..."
-                        className="w-full pl-10 pr-9 py-2.5 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 rounded-xl text-sm font-medium text-slate-800 dark:text-slate-100 placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all"
-                    />
-                    {filters.search && (
-                        <button
-                            onClick={handleClearSearch}
-                            className="absolute right-3 p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
-                            title="清除搜尋"
-                        >
-                            <X size={16} />
-                        </button>
-                    )}
-                </div>
-
-                {/* 類型篩選按鈕列 */}
-                <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
-                    <span className="text-xs font-bold text-slate-400 dark:text-slate-500 shrink-0">類型：</span>
-                    <div className="flex flex-wrap gap-1.5 shrink-0">
-                        {(['all', 'structural', 'phrase', 'collocation'] as const).map(catKey => {
-                            const label = catKey === 'all' ? '全部' : categoryLabels[catKey];
-                            const isSelected = filters.category === catKey;
-                            return (
-                                <button
-                                    key={catKey}
-                                    onClick={() => handleCategorySelect(catKey)}
-                                    className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all shrink-0 ${
-                                        isSelected
-                                            ? 'bg-indigo-600 text-white shadow-xs'
-                                            : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
-                                    }`}
-                                >
-                                    {label}
-                                </button>
-                            );
-                        })}
+            <div className="mt-6 grid grid-cols-1 items-start gap-6 lg:mt-7 lg:grid-cols-[260px_minmax(0,1fr)] lg:gap-9">
+                {/* 篩選：手機橫向捲動列、桌機左欄 */}
+                <aside aria-label="篩選" className="flex min-w-0 flex-col gap-3 lg:sticky lg:top-0 lg:gap-6">
+                    <div className="relative flex items-center">
+                        <Search size={17} className="pointer-events-none absolute left-3.5 text-muted" aria-hidden="true" />
+                        <label htmlFor="pattern-search" className="sr-only">搜尋句型或中文語意</label>
+                        <input
+                            id="pattern-search"
+                            type="text"
+                            className="h-11 w-full rounded-full border border-muted/35 bg-surface pr-10 pl-10 text-base text-ink placeholder:text-muted transition-colors focus-visible:border-accent focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-accent lg:text-sm"
+                            value={filters.search}
+                            placeholder="搜尋句型或中文語意..."
+                            onChange={(e) => handleSearchChange(e.target.value)}
+                        />
+                        {filters.search && (
+                            <IconButton aria-label="清除搜尋" title="清除搜尋" onClick={handleClearSearch} className="absolute right-0.5 size-10">
+                                <X size={16} aria-hidden="true" />
+                            </IconButton>
+                        )}
                     </div>
-                </div>
 
-                {/* 主要情境標籤列 */}
-                <div className="flex items-center gap-2 overflow-x-auto pb-1.5 pt-1 scrollbar-none">
-                    <span className="text-xs font-bold text-slate-400 dark:text-slate-500 shrink-0">情境：</span>
-                    <div className="flex items-center gap-1.5 shrink-0 flex-nowrap">
-                        <button
-                            onClick={() => handlePrimaryCategorySelect('all')}
-                            className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all shrink-0 flex items-center gap-1.5 ${
-                                effectivePrimaryCategory === 'all'
-                                    ? 'bg-indigo-600 text-white shadow-xs'
-                                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
-                            }`}
-                        >
-                            <span>全部</span>
-                            <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
-                                effectivePrimaryCategory === 'all'
-                                    ? 'bg-indigo-700/60 text-indigo-100'
-                                    : 'bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400'
-                            }`}>
-                                {step2Patterns.length}
-                            </span>
-                        </button>
-
-                        {availablePrimaryCategories.map(cat => {
-                            const isSelected = effectivePrimaryCategory === cat;
-                            const count = primaryCategoryCounts[cat] || 0;
-                            return (
-                                <button
-                                    key={cat}
-                                    onClick={() => handlePrimaryCategorySelect(cat)}
-                                    className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all shrink-0 flex items-center gap-1.5 ${
-                                        isSelected
-                                            ? 'bg-indigo-600 text-white shadow-xs'
-                                            : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
-                                    }`}
-                                >
-                                    <span>{cat}</span>
-                                    <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
-                                        isSelected
-                                            ? 'bg-indigo-700/60 text-indigo-100'
-                                            : 'bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400'
-                                    }`}>
-                                        {count}
-                                    </span>
-                                </button>
-                            );
-                        })}
+                    <div className="flex flex-col gap-2">
+                        {filterHeading('類型')}
+                        <div role="group" aria-label="類型" className="-mx-5 flex gap-1.5 overflow-x-auto px-5 pb-0.5 [scrollbar-width:none] sm:-mx-8 sm:px-8 lg:mx-0 lg:flex-wrap lg:overflow-visible lg:px-0">
+                            {(['all', 'structural', 'phrase', 'collocation'] as const).map(catKey => (
+                                <Chip key={catKey} on={filters.category === catKey} onClick={() => handleCategorySelect(catKey)}>
+                                    {catKey === 'all' ? '全部' : categoryLabels[catKey]}
+                                </Chip>
+                            ))}
+                        </div>
                     </div>
-                </div>
 
-                {/* 溝通功能標籤列（只有選取特定主要情境時才顯示） */}
-                {effectivePrimaryCategory !== 'all' && (
-                    <div className="pt-2 border-t border-slate-100 dark:border-slate-800/80">
-                        <div className="flex items-start gap-2">
-                            <span className="text-xs font-bold text-slate-400 dark:text-slate-500 shrink-0 mt-1">溝通功能：</span>
+                    <div className="flex flex-col gap-2">
+                        {filterHeading('情境')}
+                        <div role="group" aria-label="情境" className="-mx-5 flex gap-1.5 overflow-x-auto px-5 pb-0.5 [scrollbar-width:none] sm:-mx-8 sm:px-8 lg:mx-0 lg:flex-col lg:gap-0.5 lg:overflow-visible lg:px-0">
+                            {[['all', step2Patterns.length] as const, ...availablePrimaryCategories.map(cat => [cat, primaryCategoryCounts[cat] || 0] as const)].map(([cat, count]) => {
+                                const on = effectivePrimaryCategory === cat;
+                                return (
+                                    <Chip
+                                        key={cat}
+                                        on={on}
+                                        onClick={() => handlePrimaryCategorySelect(cat)}
+                                        className={`lg:min-h-10 lg:justify-between lg:rounded-xl lg:border-transparent lg:px-3 lg:text-sm ${on ? 'lg:bg-accent-soft' : 'lg:bg-transparent lg:hover:bg-surface-2'}`}
+                                    >
+                                        <span className="break-words">{cat === 'all' ? '全部' : cat}</span>
+                                        <span className="text-xs font-normal text-muted tabular-nums">{count}</span>
+                                    </Chip>
+                                );
+                            })}
+                        </div>
+                    </div>
+
+                    {effectivePrimaryCategory !== 'all' && (
+                        <div className="flex flex-col gap-2">
+                            <h2 className="text-xs text-muted">溝通功能</h2>
                             {availableSituationTags.length > 0 ? (
-                                <div className="flex flex-wrap gap-1.5">
-                                    {availableSituationTags.map(tag => {
-                                        const isSelected = effectiveSituationTag === tag;
-                                        const count = situationTagCounts[tag] || 0;
-                                        return (
-                                            <button
-                                                key={tag}
-                                                onClick={() => handleSituationTagClick(tag)}
-                                                className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-all shrink-0 flex items-center gap-1 ${
-                                                    isSelected
-                                                        ? 'bg-indigo-600 text-white shadow-xs'
-                                                        : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
-                                                }`}
-                                            >
-                                                <span>{tag}</span>
-                                                <span className={`text-[10px] ${
-                                                    isSelected ? 'text-indigo-200' : 'text-slate-400 dark:text-slate-500'
-                                                }`}>
-                                                    ({count})
+                                <div role="group" aria-label="溝通功能" className="flex flex-wrap gap-1.5">
+                                    {availableSituationTags.map(tag => (
+                                        <Chip key={tag} on={effectiveSituationTag === tag} onClick={() => handleSituationTagClick(tag)} className="min-h-8 px-3 text-xs">
+                                            <span className="break-words">{tag}</span>
+                                            <span className="font-normal text-muted">({situationTagCounts[tag] || 0})</span>
+                                        </Chip>
+                                    ))}
+                                </div>
+                            ) : (
+                                <p className="text-xs text-muted">此分類下無溝通功能標籤</p>
+                            )}
+                        </div>
+                    )}
+                </aside>
+
+                <section className="@container flex min-w-0 flex-col gap-6">
+                    {/* 選取模式操作列（批次刪除） */}
+                    {selectMode && (
+                        <div className="sticky top-0 z-20 flex flex-wrap items-center gap-2 rounded-2xl border border-accent/40 bg-surface/95 px-3 py-2.5 backdrop-blur-md">
+                            <span className="min-w-20 flex-1 text-sm font-bold text-ink">已選 {selectedExisting.length} 個</span>
+                            <Button variant="ghost" size="sm" onClick={toggleSelectAllVisible} disabled={visibleIds.length === 0}>
+                                {allVisibleSelected ? '取消全選' : '全選目前結果'}
+                            </Button>
+                            <button
+                                type="button"
+                                onClick={() => setPendingDeleteIds(selectedExisting.map(p => p.id))}
+                                disabled={selectedExisting.length === 0 || !!deleteProgress}
+                                className="flex min-h-10 items-center gap-1.5 rounded-full bg-danger px-4 text-[13px] font-medium text-white transition-[filter] hover:brightness-110 disabled:opacity-50 dark:text-ground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-danger"
+                            >
+                                <Trash2 size={14} aria-hidden="true" />
+                                刪除
+                            </button>
+                            <Button variant="secondary" size="sm" onClick={exitSelectMode} disabled={!!deleteProgress}>完成</Button>
+                        </div>
+                    )}
+
+                    {(deleteProgress || deleteMessage) && (
+                        <div
+                            role={deleteMessage?.isError ? 'alert' : 'status'}
+                            className={`flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-medium break-words ${deleteMessage?.isError ? 'bg-danger/10 text-danger' : 'bg-accent-soft text-ink'}`}
+                        >
+                            {deleteProgress ? (
+                                <>
+                                    <Loader2 size={16} className="shrink-0 animate-spin" aria-hidden="true" />
+                                    刪除中 {deleteProgress.done}/{deleteProgress.total}…
+                                </>
+                            ) : (
+                                <>
+                                    {deleteMessage?.isError && <AlertCircle size={16} className="shrink-0" aria-hidden="true" />}
+                                    {deleteMessage?.text}
+                                </>
+                            )}
+                        </div>
+                    )}
+
+                    {finalFilteredPatterns.length === 0 ? (
+                        <div className="flex flex-col items-center gap-3 rounded-[20px] border border-line bg-surface px-6 py-14 text-center">
+                            <Search size={28} className="text-muted" aria-hidden="true" />
+                            <h2 className="text-base font-bold text-ink">沒有符合條件的句型</h2>
+                            <p className="text-[13px] text-muted">請嘗試更換搜尋關鍵字或調整篩選條件</p>
+                            <Button variant="secondary" size="sm" onClick={handleClearFilters} icon={<RotateCcw size={14} aria-hidden="true" />}>清除篩選</Button>
+                        </div>
+                    ) : (
+                        Object.keys(grouped).sort().map(primaryCategory => (
+                            <div key={primaryCategory} className="flex flex-col gap-2.5">
+                                <h2 className="text-[13px] font-medium text-muted">{primaryCategory}・{grouped[primaryCategory].length}</h2>
+                                <div className="grid grid-cols-1 gap-3 @[40rem]:grid-cols-2 @[40rem]:gap-4">
+                                    {grouped[primaryCategory].map(pattern => {
+                                        const all = pattern.exampleSentences || [];
+                                        const createdCount = all.filter(s => s.checked).length;
+                                        const masteredCount = all.filter(s => s.checked && (s.mastery || 0) >= 1000).length;
+                                        const isSelected = selectMode && selectedIds.has(pattern.id);
+                                        const stage = getPatternStage(pattern);
+
+                                        const body = (title: React.ReactNode, trailing: React.ReactNode) => (
+                                            <>
+                                                <span className="flex w-full items-start justify-between gap-3">
+                                                    <span className="flex min-w-0 flex-col gap-1">
+                                                        {title}
+                                                        {pattern.meaningZh && <span className="text-[13px] leading-relaxed text-muted break-words">{pattern.meaningZh}</span>}
+                                                    </span>
+                                                    {trailing}
                                                 </span>
-                                            </button>
+                                                <span className="flex w-full flex-col gap-1.5">
+                                                    <GroupSegments counts={groupMasteredCounts(pattern.exampleSentences)} />
+                                                    <span className="text-xs text-muted tabular-nums">已造句 {createdCount}/100・已精熟 {masteredCount}/100</span>
+                                                </span>
+                                                <span className="flex flex-wrap items-center gap-1.5">
+                                                    <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium ${stage.className}`}>{stage.label}</span>
+                                                    <span className="rounded-full border border-line bg-surface-2 px-2.5 py-0.5 text-[11px] text-muted">{categoryLabels[pattern.category] || pattern.category}</span>
+                                                    {pattern.sourceLabel && (
+                                                        <span className="min-w-0 max-w-full text-[11px] text-muted break-words">來自: {pattern.sourceLabel}</span>
+                                                    )}
+                                                </span>
+                                            </>
+                                        );
+
+                                        if (selectMode) {
+                                            return (
+                                                <article key={pattern.id}>
+                                                    <button
+                                                        type="button"
+                                                        aria-pressed={isSelected}
+                                                        onClick={() => toggleSelected(pattern.id)}
+                                                        className={`flex w-full flex-col gap-3 rounded-[18px] border bg-surface px-[18px] py-4 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent lg:px-5 ${
+                                                            isSelected ? 'border-accent bg-accent-soft/40' : 'border-line hover:border-accent/50'
+                                                        }`}
+                                                    >
+                                                        {body(
+                                                            <span lang="en" className="font-reading text-[21px] leading-tight text-ink break-words lg:text-[22px]">{pattern.text}</span>,
+                                                            <span aria-hidden="true" className={`mt-1 flex size-5 shrink-0 items-center justify-center rounded-md border-[1.5px] ${isSelected ? 'border-accent bg-accent text-on-accent' : 'border-muted/60'}`}>
+                                                                {isSelected && <Check size={14} strokeWidth={3} />}
+                                                            </span>
+                                                        )}
+                                                    </button>
+                                                </article>
+                                            );
+                                        }
+
+                                        return (
+                                            <article key={pattern.id} className="relative flex flex-col gap-3 rounded-[18px] border border-line bg-surface px-[18px] py-4 transition-colors hover:border-accent/50 lg:px-5">
+                                                {body(
+                                                    <h3 className="min-w-0">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => onPatternClick(pattern.id)}
+                                                            lang="en"
+                                                            className="text-left font-reading text-[21px] leading-tight text-ink break-words outline-hidden after:absolute after:inset-0 after:rounded-[18px] focus-visible:after:outline-2 focus-visible:after:outline-offset-2 focus-visible:after:outline-accent lg:text-[22px]"
+                                                        >
+                                                            {pattern.text}
+                                                        </button>
+                                                    </h3>,
+                                                    <IconButton
+                                                        aria-label="刪除句型"
+                                                        title="刪除句型"
+                                                        onClick={() => setPendingDeleteIds([pattern.id])}
+                                                        disabled={!!deleteProgress}
+                                                        className="relative z-10 -mt-1.5 -mr-2 size-9 text-muted hover:text-danger disabled:opacity-50"
+                                                    >
+                                                        <Trash2 size={16} aria-hidden="true" />
+                                                    </IconButton>
+                                                )}
+                                            </article>
                                         );
                                     })}
                                 </div>
-                            ) : (
-                                <span className="text-xs text-slate-400 dark:text-slate-500 mt-1">此分類下無溝通功能標籤</span>
-                            )}
-                        </div>
-                    </div>
-                )}
+                            </div>
+                        ))
+                    )}
+                </section>
             </div>
-
-            {/* 篩選結果列表 或 無結果提示 */}
-            {finalFilteredPatterns.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-16 text-center bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-8 shadow-xs">
-                    <div className="w-14 h-14 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center mb-4 text-slate-400">
-                        <Search size={28} />
-                    </div>
-                    <h3 className="text-base font-bold text-slate-700 dark:text-slate-300 mb-1">
-                        沒有符合條件的句型
-                    </h3>
-                    <p className="text-xs text-slate-400 dark:text-slate-500 mb-4">
-                        請嘗試更換搜尋關鍵字或調整篩選條件
-                    </p>
-                    <button
-                        onClick={handleClearFilters}
-                        className="px-4 py-2 bg-indigo-50 dark:bg-indigo-900/30 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5"
-                    >
-                        <RotateCcw size={14} />
-                        清除篩選
-                    </button>
-                </div>
-            ) : (
-                <div className="space-y-8">
-                    {Object.keys(grouped).sort().map(primaryCategory => (
-                        <div key={primaryCategory}>
-                            <div className="flex items-center gap-2 mb-4">
-                                <h3 className="text-lg font-bold text-slate-700 dark:text-slate-300">
-                                    {primaryCategory}
-                                </h3>
-                                <span className="text-xs bg-slate-200 dark:bg-slate-800 text-slate-500 dark:text-slate-400 px-2 py-0.5 rounded-full font-bold">
-                                    {grouped[primaryCategory].length}
-                                </span>
-                            </div>
-                            
-                            <div className="grid grid-cols-1 gap-4">
-                                {grouped[primaryCategory].map(pattern => {
-                                    const all = pattern.exampleSentences || [];
-                                    const createdCount = all.filter(s => s.checked).length;
-                                    const masteredCount = all.filter(s => s.checked && (s.mastery || 0) >= 1000).length;
-                                    const isSelected = selectMode && selectedIds.has(pattern.id);
-
-                                    return (
-                                        <div 
-                                            key={pattern.id}
-                                            onClick={() => (selectMode ? toggleSelected(pattern.id) : onPatternClick(pattern.id))}
-                                            className={`bg-white dark:bg-slate-900 rounded-xl p-4 shadow-xs border hover:shadow-md transition-all cursor-pointer group flex flex-col ${
-                                                isSelected
-                                                    ? 'border-indigo-500 ring-2 ring-indigo-500/30'
-                                                    : 'border-slate-200 dark:border-slate-800 hover:border-indigo-200 dark:hover:border-indigo-800'
-                                            }`}
-                                        >
-                                            <div className="flex items-start justify-between mb-1">
-                                                <h4 className="text-lg font-black text-slate-800 dark:text-slate-100 flex-1 pr-2 leading-tight">
-                                                    {pattern.text}
-                                                </h4>
-                                                {selectMode ? (
-                                                    isSelected
-                                                        ? <CheckSquare size={20} className="text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5" />
-                                                        : <Square size={20} className="text-slate-300 dark:text-slate-600 shrink-0 mt-0.5" />
-                                                ) : (
-                                                    <div className="flex items-center gap-1 shrink-0">
-                                                        <button
-                                                            type="button"
-                                                            onClick={(e) => { e.stopPropagation(); setPendingDeleteIds([pattern.id]); }}
-                                                            disabled={!!deleteProgress}
-                                                            title="刪除句型"
-                                                            className="p-1.5 text-slate-300 hover:text-red-500 dark:text-slate-600 dark:hover:text-red-400 rounded-lg transition-colors disabled:opacity-50"
-                                                        >
-                                                            <Trash2 size={16} />
-                                                        </button>
-                                                        <ChevronRight size={18} className="text-slate-300 group-hover:text-indigo-500 transition-colors" />
-                                                    </div>
-                                                )}
-                                            </div>
-                                            {pattern.meaningZh && (
-                                                <p className="text-sm text-slate-500 dark:text-slate-400 line-clamp-1 mb-2">
-                                                    {pattern.meaningZh}
-                                                </p>
-                                            )}
-
-                                            <div className="mt-auto pt-3">
-                                                <div className="text-xs text-slate-500 dark:text-slate-400 mb-1.5 font-bold">
-                                                    已造句 {createdCount}/100・已精熟 {masteredCount}/100
-                                                </div>
-                                                <div className="w-full h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                                                    <div 
-                                                        className="h-full bg-indigo-500 rounded-full transition-all duration-300"
-                                                        style={{ width: `${Math.min(100, Math.max(0, masteredCount))}%` }}
-                                                    />
-                                                </div>
-                                            </div>
-
-                                            <div className="flex flex-wrap items-center gap-2 pt-3">
-                                                <span className={`text-[10px] font-bold px-2 py-1 rounded-md ${getPatternStage(pattern).className}`}>
-                                                    {getPatternStage(pattern).label}
-                                                </span>
-                                                <span className="text-[10px] font-bold bg-indigo-50 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400 px-2 py-1 rounded-md">
-                                                    {categoryLabels[pattern.category] || pattern.category}
-                                                </span>
-                                                {pattern.sourceLabel && (
-                                                    <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-md truncate max-w-[150px]">
-                                                        來自: {pattern.sourceLabel}
-                                                    </span>
-                                                )}
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            )}
 
             <ConfirmDialog
                 isOpen={!!pendingDeleteIds && pendingPatterns.length > 0}

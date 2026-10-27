@@ -1,9 +1,12 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { doc, getDoc } from 'firebase/firestore';
 import { db, auth, appId } from '../firebase';
 import { LanguagePattern } from '../types';
 import { getPatternStage, getMasteredCount } from '../utils/patternStage';
 import { Loader2, X } from 'lucide-react';
+import IconButton from './ui/IconButton';
+import { GroupSegments } from './ui/MasterySegments';
+import { groupMasteredCounts } from '../utils/groupMastery';
 
 const categoryLabels: Record<string, string> = {
   structural: '結構句型',
@@ -29,56 +32,64 @@ export default function PatternQuickCard({ patternId, onClose }: { patternId: st
     return () => { cancelled = true; };
   }, [patternId]);
 
+  // 只是檢視，沒有副作用：Esc 關閉；開啟時焦點放在關閉鈕
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  useEffect(() => {
+    closeRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onCloseRef.current(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   const createdCount = (pattern?.exampleSentences || []).filter(s => s.checked).length;
   const masteredCount = pattern ? getMasteredCount(pattern) : 0;
   const stage = pattern ? getPatternStage(pattern) : null;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-xs p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-100 flex items-center justify-center bg-black/40 p-4 backdrop-blur-xs" onClick={onClose}>
       <div
-        className="bg-white dark:bg-slate-900 rounded-3xl p-6 w-full max-w-sm shadow-2xl border border-slate-100 dark:border-slate-800"
+        role="dialog"
+        aria-modal="true"
+        aria-label={pattern?.text || '句型速覽'}
+        className="relative w-full max-w-sm rounded-3xl border border-line bg-surface p-7 shadow-[0_24px_48px_-12px_rgb(0_0_0/0.25)]"
         onClick={e => e.stopPropagation()}
       >
-        <div className="flex justify-end -mt-2 -mr-2">
-          <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg">
-            <X size={20} />
-          </button>
-        </div>
+        <IconButton ref={closeRef} aria-label="關閉" onClick={onClose} className="absolute top-3 right-3 text-muted">
+          <X size={20} aria-hidden="true" />
+        </IconButton>
 
         {!pattern && !notFound && (
           <div className="flex justify-center py-8">
-            <Loader2 size={28} className="animate-spin text-indigo-500" />
+            <Loader2 size={26} className="animate-spin text-accent" aria-hidden="true" />
           </div>
         )}
 
         {notFound && (
-          <p className="text-center text-sm font-bold text-slate-500 dark:text-slate-400 py-8">這個句型已經不存在</p>
+          <p className="py-8 text-center text-sm text-muted">這個句型已經不存在</p>
         )}
 
         {pattern && stage && (
-          <div className="space-y-4">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[11px] font-bold bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300 px-2 py-0.5 rounded-full">
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-wrap items-center gap-1.5 pr-10">
+              <span className="rounded-full border border-line bg-surface-2 px-2.5 py-0.5 text-[11px] text-muted">
                 {categoryLabels[pattern.category] || pattern.category}
               </span>
-              <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${stage.className}`}>
+              <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium ${stage.className}`}>
                 {stage.label}
               </span>
             </div>
-            <h3 className="text-2xl font-black text-slate-800 dark:text-white leading-tight">{pattern.text}</h3>
-            <p className="text-sm font-bold text-slate-600 dark:text-slate-300 leading-relaxed">{pattern.meaningZh}</p>
+            <h3 lang="en" className="font-reading text-[28px] leading-tight text-ink break-words">{pattern.text}</h3>
+            <p className="text-[15px] leading-relaxed text-ink">{pattern.meaningZh}</p>
             {pattern.usageContext && (
-              <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">{pattern.usageContext}</p>
+              <p className="text-[13px] leading-relaxed text-muted">{pattern.usageContext}</p>
             )}
-            <div>
-              <div className="text-xs font-bold text-slate-500 dark:text-slate-400 mb-1.5">
-                已造句 {createdCount}/100・已精熟 {masteredCount}/100
-              </div>
-              <div className="w-full h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                <div className="h-full bg-indigo-500 rounded-full" style={{ width: `${Math.min(100, masteredCount)}%` }} />
-              </div>
+            <div className="flex flex-col gap-1.5">
+              <GroupSegments counts={groupMasteredCounts(pattern.exampleSentences)} />
+              <span className="text-xs text-muted tabular-nums">已造句 {createdCount}/100・已精熟 {masteredCount}/100</span>
             </div>
-            <p className="text-[11px] text-slate-400 dark:text-slate-500">到「語言模型」分頁可以查看與練習這個句型</p>
+            <p className="text-xs text-muted">到「語言模型」分頁可以查看與練習這個句型</p>
           </div>
         )}
       </div>

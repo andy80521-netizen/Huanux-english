@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { db, auth, appId } from '../firebase';
-import { Library, Play, Pause } from 'lucide-react';
+import { Play, Pause } from 'lucide-react';
 
 interface Sighting {
   id: string;
@@ -69,54 +69,47 @@ export default function PatternSightingsSection({ patternId }: { patternId: stri
   const activeTotal = sightings.reduce((sum, s) => sum + (s.activeCount || 0), 0);
 
   return (
-    <div className="space-y-4 mt-8">
+    <section className="flex flex-col gap-3">
       <audio ref={audioRef} className="hidden" preload="none" onTimeUpdate={handleTimeUpdate} onEnded={() => setPlayingId(null)} onPause={() => setPlayingId(null)} />
-      <div>
-        <h3 className="text-lg font-black text-slate-800 dark:text-white flex items-center gap-2">
-          <Library size={20} className="text-purple-500" />
-          在教材中出現
-        </h3>
+      <div className="flex flex-col gap-1">
+        <h2 className="text-[15px] font-bold text-ink">在教材中出現</h2>
         {sightings.length > 0 && (
-          <p className="text-xs font-bold text-slate-500 dark:text-slate-400 mt-1">
+          <p className="text-xs text-muted">
             在 {materialCount} 份教材出現 {sightings.length} 次，親口念過 {activeTotal} 次
           </p>
         )}
       </div>
 
       {sightings.length === 0 ? (
-        <p className="text-sm font-bold text-slate-400 dark:text-slate-500 py-4 text-center">
+        <p className="py-4 text-sm leading-relaxed text-muted">
           還沒有在其他教材遇到這個句型。匯入新教材後會自動比對，舊教材可以在教材頁按「比對已學句型」。
         </p>
       ) : (
-        <div className="space-y-3">
+        <ul className="flex flex-col gap-2.5">
           {sightings.map(s => (
-            <div key={s.id} className="bg-white dark:bg-slate-900 rounded-xl p-4 shadow-xs border border-slate-200 dark:border-slate-800 flex items-start gap-3">
+            <li key={s.id} className="flex items-start gap-3 rounded-2xl border border-line bg-surface p-3.5">
               <button
+                type="button"
                 onClick={() => handlePlay(s)}
                 disabled={!s.audioUrl}
-                className="shrink-0 w-10 h-10 rounded-xl flex items-center justify-center bg-purple-50 text-purple-600 dark:bg-purple-900/30 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-900/50 transition-colors disabled:opacity-40"
+                aria-label={playingId === s.id ? '暫停原音' : '播放原音'}
                 title="播放原音"
+                className="flex size-10 shrink-0 items-center justify-center rounded-full bg-accent-soft text-ink transition-[filter] hover:brightness-[0.97] disabled:opacity-40 dark:hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
               >
-                {playingId === s.id ? <Pause size={18} className="fill-current" /> : <Play size={18} className="fill-current ml-0.5" />}
+                {playingId === s.id ? <Pause size={15} className="fill-current" aria-hidden="true" /> : <Play size={15} className="ml-0.5 fill-current" aria-hidden="true" />}
               </button>
-              <div className="flex-1 min-w-0">
-                <p className="font-bold text-slate-800 dark:text-slate-200 leading-relaxed">{s.text}</p>
-                {s.translation && <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">{s.translation}</p>}
-                <div className="flex flex-wrap items-center gap-2 mt-2">
-                  <span className="text-[11px] font-bold text-slate-400 dark:text-slate-500 truncate max-w-[200px]">
-                    {s.materialTitle || '教材'}
-                  </span>
-                  {(s.activeCount || 0) > 0 && (
-                    <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
-                      親口念過 {s.activeCount} 次
-                    </span>
-                  )}
-                </div>
+              <div className="flex min-w-0 flex-1 flex-col gap-1">
+                <p lang="en" className="font-reading text-[17px] leading-snug text-ink break-words">{s.text}</p>
+                {s.translation && <p className="text-[13px] text-muted">{s.translation}</p>}
+                <p className="text-[11px] text-muted break-words">
+                  {s.materialTitle || '教材'}
+                  {(s.activeCount || 0) > 0 && <span className="text-ink">・親口念過 {s.activeCount} 次</span>}
+                </p>
               </div>
-            </div>
+            </li>
           ))}
-        </div>
+        </ul>
       )}
-    </div>
+    </section>
   );
 }
