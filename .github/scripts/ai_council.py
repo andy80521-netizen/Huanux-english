@@ -40,11 +40,12 @@ class Retryable(RuntimeError):
     """暫時性錯誤：值得重試（例如 HTTP 503 過載、429 限流、連線逾時）"""
 
 
-def _check(r):
+def _check(r, no_retry=()):
+    """no_retry：這些狀態碼不重試（例如 Gemini 免費版 429＝額度用完，重試只會浪費時間與額度）。"""
     if r.status_code == 200:
         return
-    err = Retryable if r.status_code in RETRY_STATUS else RuntimeError
-    raise err(f"HTTP {r.status_code}: {r.text[:300]}")
+    retry = r.status_code in RETRY_STATUS and r.status_code not in no_retry
+    raise (Retryable if retry else RuntimeError)(f"HTTP {r.status_code}: {r.text[:300]}")
 
 
 # ---------------- 呼叫各家 API ----------------
@@ -75,7 +76,7 @@ def call_google(model, prompt, timeout=REQUEST_TIMEOUT):
         json={"contents": [{"role": "user", "parts": [{"text": prompt}]}]},
         timeout=timeout,
     )
-    _check(r)
+    _check(r, no_retry={429})  # Gemini 429＝額度用完：不重試，直接換下一個模型
     data = r.json()
     if not data.get("candidates") or "content" not in data["candidates"][0]:
         raise Retryable(f"回傳格式不符：{str(data)[:300]}")
@@ -124,8 +125,9 @@ def call(member, prompt, waits=RETRY_WAITS, deadline=None):
 
 # Gemini 免費版常因過載回 503：主要模型重試仍失敗時，依序改用這些 Gemini 模型（不存在的模型會立即跳過）
 # 2.5 系列自 2026-09-18 起不開放給新專案，所以不列入
+# Flash Lite 免費額度較多（每分鐘 15 次）排第一；3.6 Flash 常 503 排後面
 GEMINI_FALLBACK = [m.strip() for m in (os.environ.get("AI_GEMINI_FALLBACK")
-                   or "gemini-3.6-flash,gemini-3.5-flash-lite,gemini-flash-lite-latest").split(",") if m.strip()]
+                   or "gemini-3.5-flash-lite,gemini-3.6-flash,gemini-flash-lite-latest").split(",") if m.strip()]
 
 
 def chain(member):
