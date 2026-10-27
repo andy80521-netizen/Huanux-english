@@ -16,9 +16,6 @@ import PersonalMode from './components/PersonalMode';
 import MaterialImportMode from './components/MaterialImportMode';
 import LanguageModelMode from './components/LanguageModelMode';
 
-// 桌機內容最寬 1200px 的分頁（其他分頁尚未改版，維持 768px）
-const WIDE_TABS = ['material', 'languageModel'];
-
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState('material'); 
   const [vocabData, setVocabData] = useState<VocabItem[]>([]);
@@ -353,8 +350,8 @@ const App: React.FC = () => {
                 aria-current={active ? 'page' : undefined}
                 className={`flex h-11 items-center gap-3 rounded-xl px-3 text-[15px] text-left transition-colors duration-[var(--dur-fast)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${
                   active
-                    ? 'bg-accent-soft text-indigo-800 dark:text-accent font-bold'
-                    : 'text-slate-600 dark:text-slate-400 hover:bg-surface-2 hover:text-ink'
+                    ? 'bg-accent-soft text-ink dark:text-accent font-bold'
+                    : 'text-muted hover:bg-surface-2 hover:text-ink'
                 }`}
               >
                 <Icon size={19} strokeWidth={active ? 2.2 : 1.8} aria-hidden="true" />
@@ -374,15 +371,15 @@ const App: React.FC = () => {
       <div className="flex-1 min-h-0 min-w-0 flex flex-col">
         {syncError && (
           <div className="shrink-0 px-4 pt-3 lg:px-8 lg:pt-6">
-            <div role="alert" className="mx-auto flex w-full max-w-3xl items-center gap-2 rounded-xl bg-danger/10 px-4 py-2.5 text-[13px] font-medium text-danger">
+            <div role="alert" className="mx-auto flex w-full max-w-[1200px] items-center gap-2 rounded-xl bg-danger/10 px-4 py-2.5 text-[13px] font-medium text-danger">
               <AlertCircle size={15} className="shrink-0" aria-hidden="true" />
               <span>{syncError}</span>
             </div>
           </div>
         )}
         <main className="relative flex-1 min-h-0 overflow-hidden">
-          {/* 「啟蒙的開始」已改版成寬版（列表三欄、詳情兩欄、跟讀側欄），其他分頁改版前維持 768px */}
-          <div className={`mx-auto h-full w-full ${WIDE_TABS.includes(activeTab) ? 'lg:max-w-[1200px]' : 'lg:max-w-3xl'}`}>
+          {/* 四個分頁都已改版成寬版（UI 改版 ④ 起），內容區最大 1200px */}
+          <div className="mx-auto h-full w-full lg:max-w-[1200px]">
             {activeTab === 'material' && <MaterialImportMode />}
             {activeTab === 'languageModel' && <LanguageModelMode />}
             {activeTab === 'badges' && <BadgeMode />}
@@ -402,7 +399,7 @@ const App: React.FC = () => {
               onClick={() => setActiveTab(id)}
               aria-current={active ? 'page' : undefined}
               className={`relative flex min-h-14 flex-col items-center justify-center gap-1 pt-1.5 pb-1 text-[11px] transition-colors duration-[var(--dur-fast)] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent ${
-                active ? 'text-accent font-bold' : 'text-slate-600 dark:text-slate-400'
+                active ? 'text-accent font-bold' : 'text-muted'
               }`}
             >
               <span

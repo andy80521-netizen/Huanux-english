@@ -64,9 +64,11 @@ describe('版面', () => {
     expect(src.mode).toContain('SegmentedControl');
     expect(src.mode).not.toContain('max-w-3xl');
   });
-  it('App：語言模型分頁桌機寬度 1200px', () => {
-    expect(app).toMatch(/WIDE_TABS\s*=\s*\[[^\]]*'languageModel'/);
+  // ④（PR #16）拿掉 WIDE_TABS、四個分頁都用 1200px；擁有者 2026-10-27 同意把這條改成新狀態
+  it('App：語言模型分頁桌機寬度 1200px（四個分頁一律 1200px）', () => {
     expect(app).toContain('lg:max-w-[1200px]');
+    expect(app).not.toContain('WIDE_TABS');
+    expect(app).not.toContain('lg:max-w-3xl');
   });
   it('今日複習的卡片不是可點的 div', () => {
     expect(src.today).not.toMatch(/<div[^>]*onClick/);
