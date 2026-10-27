@@ -7,6 +7,8 @@ import PatternPracticeSessionView from './PatternPracticeSessionView';
 import { Sparkles, ShieldCheck, Loader2, AlertCircle, ChevronRight, CircleSlash } from 'lucide-react';
 import Button from './ui/Button';
 import { groupMasteryBars, GroupMasteryBar } from '../utils/groupMastery';
+import { sessionHighlights } from '../utils/sessionHighlights';
+import BadgeSeal from './ui/BadgeSeal';
 import { prefetchSpeech } from '../services/speech';
 import { needsMaintenanceInit, initMaintenance, isMaintenanceDue, pickMaintenanceSentences, applyMaintenanceResult, MaintenanceOutcome, MAINTENANCE_SIZE, MAINTENANCE_PASS_COUNT } from '../services/maintenance';
 
@@ -441,6 +443,9 @@ export default function TodayReviewView({ tabs }: { tabs?: React.ReactNode }) {
             if (pId === activeGroup.pattern.id) startById[sId] = Number(v) || 0;
         });
         const bars = groupMasteryBars(latestGroupPattern.exampleSentences, activeGroup.groupIndex, startById, sessionAfter);
+        // 高光時刻：這次是否跨過勳章門檻（依實際門檻顯示可用／熟練／精通）、是否剛好整組精熟
+        const highlights = sessionHighlights(latestGroupPattern.exampleSentences, activeGroup.groupIndex, startById, sessionAfter);
+        const newTier = highlights.newTier;
 
         const diffDisplay = totalMasteryDiff >= 0 ? `+${totalMasteryDiff}` : `${totalMasteryDiff}`;
 
@@ -460,6 +465,20 @@ export default function TodayReviewView({ tabs }: { tabs?: React.ReactNode }) {
                         <p lang="en" className="font-reading text-[22px] leading-snug text-ink break-words">{activeGroup.pattern.text}</p>
                     </div>
 
+                    {newTier && (
+                        <section aria-label="新勳章" className="flex items-center gap-[18px] rounded-[22px] border border-gold/35 bg-surface px-5 py-[18px] animate-glow-gold">
+                            <span className="relative inline-flex shrink-0">
+                                <span aria-hidden="true" className={`absolute inset-0 rounded-full border-2 animate-ripple ${newTier.tier === '精通' ? 'border-gold' : 'border-accent'}`} />
+                                <span className="inline-flex animate-stamp"><BadgeSeal tier={newTier.tier} size={76} /></span>
+                            </span>
+                            <div className="flex min-w-0 flex-col gap-1 animate-rise-in [animation-delay:320ms]">
+                                <span className="text-[12px] font-medium text-gold">新勳章</span>
+                                <span className="text-xl font-bold text-ink">{newTier.tier}</span>
+                                <span className="text-[13px] text-muted">這個句型已精熟 {newTier.mastered} 句</span>
+                            </div>
+                        </section>
+                    )}
+
                     <section aria-label={`本組 10 句熟練度`} className="flex flex-col gap-3">
                         <MasteryBars bars={bars} size="lg" showGain={summaryBarsShown} />
                         <div className="flex justify-between gap-2 text-xs text-muted">
@@ -467,6 +486,9 @@ export default function TodayReviewView({ tabs }: { tabs?: React.ReactNode }) {
                             <span>金色＝這次增加的熟練度</span>
                             <span>第 10 句</span>
                         </div>
+                        {highlights.groupCompleted && (
+                            <p className="text-[13px] font-medium text-gold animate-rise-in [animation-delay:400ms]">第 {activeGroup.groupIndex + 1} 組 10 句全部精熟</p>
+                        )}
                     </section>
 
                     <section className="grid grid-cols-3 border-y border-line">
@@ -556,7 +578,7 @@ export default function TodayReviewView({ tabs }: { tabs?: React.ReactNode }) {
                     key={item.pattern.id}
                     type="button"
                     onClick={() => startMaintenance(item)}
-                    className="flex w-full items-center gap-3.5 rounded-[18px] border border-gold/35 bg-surface px-[18px] py-4 text-left transition-colors hover:border-gold/70 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                    className="flex w-full items-center gap-3.5 rounded-[18px] border border-gold/35 bg-surface px-[18px] py-4 text-left transition-[border-color,transform] duration-150 active:scale-[0.985] hover:border-gold/70 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
                 >
                     <span className="flex min-w-0 flex-1 flex-col gap-1">
                         <span lang="en" className="font-reading text-[21px] leading-tight text-ink break-words">{item.pattern.text}</span>
@@ -604,7 +626,7 @@ export default function TodayReviewView({ tabs }: { tabs?: React.ReactNode }) {
                                             key={group.key}
                                             type="button"
                                             onClick={() => startSession(group)}
-                                            className="flex w-full flex-col gap-3.5 rounded-[18px] border border-line bg-surface px-[18px] py-4 text-left transition-colors hover:border-accent/50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent lg:px-[22px] lg:py-5"
+                                            className="flex w-full flex-col gap-3.5 rounded-[18px] border border-line bg-surface px-[18px] py-4 text-left transition-[border-color,transform] duration-150 active:scale-[0.985] hover:border-accent/50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent lg:px-[22px] lg:py-5"
                                         >
                                             <span className="flex w-full items-start justify-between gap-3">
                                                 <span className="flex min-w-0 flex-col gap-1">

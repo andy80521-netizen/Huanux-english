@@ -548,11 +548,12 @@ export default function LanguageModelListView({ tabs, onPatternClick, filters, o
                                         }
 
                                         return (
-                                            <article key={pattern.id} className="relative flex flex-col gap-3 rounded-[18px] border border-line bg-surface px-[18px] py-4 transition-colors hover:border-accent/50 lg:px-5">
+                                            <article key={pattern.id} className="relative flex flex-col gap-3 rounded-[18px] border border-line bg-surface px-[18px] py-4 transition-[border-color,transform] duration-150 has-[[data-card-link]:active]:scale-[0.985] hover:border-accent/50 lg:px-5">
                                                 {body(
                                                     <h3 className="min-w-0">
                                                         <button
                                                             type="button"
+                                                            data-card-link
                                                             onClick={() => onPatternClick(pattern.id)}
                                                             lang="en"
                                                             className="text-left font-reading text-[21px] leading-tight text-ink break-words outline-hidden after:absolute after:inset-0 after:rounded-[18px] focus-visible:after:outline-2 focus-visible:after:outline-offset-2 focus-visible:after:outline-accent lg:text-[22px]"

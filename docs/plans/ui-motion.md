@@ -97,3 +97,8 @@
 ### 接受的風險
 - 轉場 200ms 內立刻開啟的 `position: fixed` 對話框會短暫相對容器定位
 - 其他組的監聽資料較慢時，新勳章可能少算（只影響顯示）
+- 2026-10-27：擁有者核准規劃；驗收測試 commit `35b5e6c`（`tests/sessionHighlights.test.ts`、`tests/uiCopyMotion.test.ts`），修改前失敗
+- 2026-10-27：實作完成：`utils/sessionHighlights.ts`、`ui/PageEnter.tsx`、`app.css` 動畫與減少動態延遲歸零、App／教材／語言模型轉場、三種卡片輕壓、本組練習完成印章卡、解鎖動畫、勳章房進場；`check.sh` 通過
+  - 分頁內的畫面第一次出現時不播自己的轉場（`animate={viewMounted}`），避免和外層分頁轉場疊加
+  - 自我檢查（本機假資料預覽）：練完 4 句跨過「可用」並整組精熟 → 印章卡與金色文字出現；減少動態時一樣直接出現；句型庫→詳情轉場後刪除確認框置中；勳章房數字跑到 3／2／1；減少動態時所有列立即可見
+  - 自檢修正：`page-in` 用 `both` 時 Chrome 結束後留下 identity matrix（仍會讓 fixed 對話框以容器定位）→ 改 `backwards`，結束後 transform 為 none；印章卡光暈太粗 → 6px、22%

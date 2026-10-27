@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import LanguageModelListView from './LanguageModelListView';
 import LanguageModelDetailView from './LanguageModelDetailView';
 import TodayReviewView from './TodayReviewView';
 import SegmentedControl from './ui/SegmentedControl';
+import PageEnter from './ui/PageEnter';
 
 export interface PatternFilterState {
     search: string;
@@ -27,6 +28,9 @@ export default function LanguageModelMode() {
     const [currentView, setCurrentView] = useState<'list' | 'detail'>('list');
     const [activeTab, setActiveTab] = useState<'review' | 'library'>('review');
     const [selectedPatternId, setSelectedPatternId] = useState<string | null>(null);
+    // 分頁第一次出現時由 App 的轉場負責；之後在分頁內換畫面才播自己的轉場
+    const [viewMounted, setViewMounted] = useState(false);
+    useEffect(() => { setViewMounted(true); }, []);
     const [filters, setFilters] = useState<PatternFilterState>(defaultFilters);
 
     const tabs = (
@@ -41,18 +45,21 @@ export default function LanguageModelMode() {
 
     if (currentView === 'detail' && selectedPatternId) {
         return (
-            <LanguageModelDetailView
-                patternId={selectedPatternId}
-                onBack={() => setCurrentView('list')}
-            />
+            <PageEnter animate={viewMounted} key={`detail-${selectedPatternId}`}>
+                <LanguageModelDetailView
+                    patternId={selectedPatternId}
+                    onBack={() => setCurrentView('list')}
+                />
+            </PageEnter>
         );
     }
 
     if (activeTab === 'review') {
-        return <TodayReviewView tabs={tabs} />;
+        return <PageEnter animate={viewMounted} key="review"><TodayReviewView tabs={tabs} /></PageEnter>;
     }
 
     return (
+        <PageEnter animate={viewMounted} key="library">
         <LanguageModelListView
             tabs={tabs}
             onPatternClick={(id) => {
@@ -62,5 +69,6 @@ export default function LanguageModelMode() {
             filters={filters}
             onFiltersChange={setFilters}
         />
+        </PageEnter>
     );
 }

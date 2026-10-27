@@ -15,6 +15,7 @@ import BadgeMode from './components/BadgeMode';
 import PersonalMode from './components/PersonalMode';
 import MaterialImportMode from './components/MaterialImportMode';
 import LanguageModelMode from './components/LanguageModelMode';
+import PageEnter from './components/ui/PageEnter';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState('material'); 
@@ -380,10 +381,12 @@ const App: React.FC = () => {
         <main className="relative flex-1 min-h-0 overflow-hidden">
           {/* 四個分頁都已改版成寬版（UI 改版 ④ 起），內容區最大 1200px */}
           <div className="mx-auto h-full w-full lg:max-w-[1200px]">
-            {activeTab === 'material' && <MaterialImportMode />}
-            {activeTab === 'languageModel' && <LanguageModelMode />}
-            {activeTab === 'badges' && <BadgeMode />}
-            {activeTab === 'personal' && <PersonalMode user={user} voicePrefs={voicePrefs} setVoicePrefs={setVoicePrefs} themeMode={themeMode} setThemeMode={setThemeMode} />}
+            <PageEnter key={activeTab}>
+              {activeTab === 'material' && <MaterialImportMode />}
+              {activeTab === 'languageModel' && <LanguageModelMode />}
+              {activeTab === 'badges' && <BadgeMode />}
+              {activeTab === 'personal' && <PersonalMode user={user} voicePrefs={voicePrefs} setVoicePrefs={setVoicePrefs} themeMode={themeMode} setThemeMode={setThemeMode} />}
+            </PageEnter>
           </div>
         </main>
       </div>

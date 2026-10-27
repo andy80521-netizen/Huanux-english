@@ -154,7 +154,7 @@ export default function MaterialListView({ onAddClick, onMaterialClick }: { onAd
                         const { total, completed } = materialProgress(m.sentences);
                         const coverGenerating = m.coverStatus === 'generating' && m.coverRequestedAt && (Date.now() - m.coverRequestedAt < 5 * 60 * 1000);
                         return (
-                            <article key={m.id} className="group relative overflow-hidden rounded-[18px] border border-line bg-surface transition-[border-color,box-shadow] duration-[var(--dur-base)] hover:border-muted/40 hover:shadow-[0_12px_32px_-16px_rgb(0_0_0/0.25)]">
+                            <article key={m.id} className="group relative overflow-hidden rounded-[18px] border border-line bg-surface transition-[border-color,box-shadow,transform] duration-[var(--dur-base)] has-[[data-card-link]:active]:scale-[0.985] hover:border-muted/40 hover:shadow-[0_12px_32px_-16px_rgb(0_0_0/0.25)]">
                                 {/* 16:9 封面 */}
                                 <div className="relative aspect-video w-full overflow-hidden bg-surface-2 flex items-center justify-center">
                                     {m.coverUrl && m.coverStatus !== 'generating' ? (
@@ -181,6 +181,7 @@ export default function MaterialListView({ onAddClick, onMaterialClick }: { onAd
                                             {/* 標題按鈕的點擊範圍延伸到整張卡片（::after），刪除鈕疊在上層、與它同層而不是包在裡面 */}
                                             <button
                                                 type="button"
+                                                data-card-link
                                                 onClick={() => onMaterialClick(m)}
                                                 className="text-left after:absolute after:inset-0 after:rounded-[18px] after:content-[''] focus-visible:outline-hidden focus-visible:after:outline-2 focus-visible:after:-outline-offset-2 focus-visible:after:outline-accent"
                                             >

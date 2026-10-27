@@ -13,6 +13,7 @@ import { savePatternsWithDedup, formatSaveResult } from '../services/patternSave
 import { requestSightingDetection } from '../services/sightings';
 import MaterialReviewPanel, { ReviewSentence } from './MaterialReviewPanel';
 import MaterialListView from './MaterialListView';
+import PageEnter from './ui/PageEnter';
 import MaterialDetailView from './MaterialDetailView';
 import { ChevronLeft } from 'lucide-react';
 import ExtractPreviewDialog from './ExtractPreviewDialog';
@@ -35,6 +36,9 @@ export type PendingMaterial = {
 export default function MaterialImportMode() {
     const [currentView, setCurrentView] = useState<'list' | 'import' | 'detail'>('list');
     const [selectedMaterial, setSelectedMaterial] = useState<string | null>(null);
+    // 分頁第一次出現時由 App 的轉場負責；之後在分頁內換畫面才播自己的轉場
+    const [viewMounted, setViewMounted] = useState(false);
+    useEffect(() => { setViewMounted(true); }, []);
     const [loadingState, setLoadingState] = useState<'idle' | 'processing' | 'uploading' | 'analyzing' | 'generating' | 'timestamping' | 'uploadingAudio' | 'transcribing' | 'translating'>('idle');
     const [timestampWarning, setTimestampWarning] = useState(false);
     const [lowConfidenceTimestamps, setLowConfidenceTimestamps] = useState(false);
@@ -708,6 +712,7 @@ export default function MaterialImportMode() {
 
     if (currentView === 'list') {
         return (
+            <PageEnter animate={viewMounted} key="list">
             <MaterialListView 
                 onAddClick={() => {
                     setSaveSuccess(false);
@@ -723,15 +728,18 @@ export default function MaterialImportMode() {
                     setCurrentView('detail');
                 }} 
             />
+            </PageEnter>
         );
     }
 
     if (currentView === 'detail' && selectedMaterial) {
         return (
-            <MaterialDetailView 
-                materialId={selectedMaterial} 
-                onBack={() => setCurrentView('list')} 
-            />
+            <PageEnter animate={viewMounted} key={`detail-${selectedMaterial}`}>
+                <MaterialDetailView 
+                    materialId={selectedMaterial} 
+                    onBack={() => setCurrentView('list')} 
+                />
+            </PageEnter>
         );
     }
 
@@ -830,6 +838,7 @@ export default function MaterialImportMode() {
     );
 
     return (
+        <PageEnter animate={viewMounted} key="import">
         <div ref={scrollRef} className={`flex h-full flex-col gap-6 overflow-y-auto px-5 pt-2 sm:px-8 lg:gap-8 lg:px-14 lg:pt-8 lg:pb-14 ${reviewing ? 'pb-0' : 'pb-12'}`}>
             {!reviewing && (
                 <header className="flex flex-col gap-1">
@@ -1067,5 +1076,6 @@ export default function MaterialImportMode() {
                 />
             )}
         </div>
+        </PageEnter>
     );
 }

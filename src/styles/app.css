@@ -186,14 +186,105 @@
   animation: rise-in 360ms var(--ease-out-soft) both;
 }
 
+/* ── UI 改版 ⑤：動效與微互動 ── */
+
+/* 換畫面：淡入＋上浮 8px。結束值用 transform: none，不留下會影響 position: fixed 對話框的 transform */
+@keyframes page-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
+@utility animate-page-in {
+  /* 用 backwards 而不是 both：動畫結束後完全不留下 transform（Chrome 會把 none 留成 identity matrix，仍會讓 fixed 對話框以容器定位） */
+  animation: page-in 200ms var(--ease-out-soft) backwards;
+}
+
+/* 新勳章：印章蓋下（放大旋轉→略壓→落定） */
+@keyframes stamp {
+  0% { opacity: 0; transform: scale(1.6) rotate(-14deg); }
+  60% { opacity: 1; transform: scale(0.94) rotate(-6deg); }
+  100% { opacity: 1; transform: scale(1) rotate(-6deg); }
+}
+
+@utility animate-stamp {
+  animation: stamp 520ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+/* 印章外圈漣漪：蓋下那一刻擴散一次 */
+@keyframes ripple {
+  0% { opacity: 0; transform: scale(0.8); }
+  30% { opacity: 0.9; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.55); }
+}
+
+@utility animate-ripple {
+  animation: ripple 900ms ease-out 300ms both;
+}
+
+/* 金色光暈：印章卡外框亮一下 */
+@keyframes glow-gold {
+  0% { box-shadow: 0 0 0 0 transparent; }
+  30% { box-shadow: 0 0 0 6px color-mix(in oklab, var(--gold) 22%, transparent); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+@utility animate-glow-gold {
+  animation: glow-gold 1100ms ease-out 300ms both;
+}
+
+/* 解鎖卡片彈出 */
+@keyframes pop-in {
+  0% { opacity: 0; transform: scale(0.9); }
+  60% { opacity: 1; transform: scale(1.04); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+@utility animate-pop-in {
+  animation: pop-in 420ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+/* 鎖環往上打開（transform-origin 由使用處設定） */
+@keyframes unlock {
+  0% { transform: none; }
+  100% { transform: translateY(-3px) rotate(-18deg); }
+}
+
+@utility animate-unlock {
+  animation: unlock 380ms cubic-bezier(0.2, 0.8, 0.2, 1) 200ms both;
+}
+
+/* 金點向外散開：位移量由 --burst-x、--burst-y 指定 */
+@keyframes burst {
+  0% { opacity: 0; transform: translate(0, 0) scale(0.6); }
+  25% { opacity: 1; }
+  100% { opacity: 0; transform: translate(var(--burst-x, 0), var(--burst-y, 0)) scale(1); }
+}
+
+@utility animate-burst {
+  animation: burst 700ms ease-out 220ms both;
+}
+
+/* 長條從 0 長到目前值 */
+@keyframes grow-x {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+
+@utility animate-grow-x {
+  transform-origin: left center;
+  animation: grow-x 700ms var(--ease-out-soft) both;
+}
+
 /* 系統開啟「減少動態效果」：轉場與裝飾動畫降到近 0，但保留載入中的轉圈（否則評分中看起來像當掉） */
 @media (prefers-reduced-motion: reduce) {
   *,
   ::before,
   ::after {
     animation-duration: 0.01ms !important;
+    animation-delay: 0s !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
     scroll-behavior: auto !important;
   }
 
