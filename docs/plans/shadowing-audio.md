@@ -2,7 +2,7 @@
 
 - **級別**：大（擁有者 2026-10-28 決定；改到跟讀練習的播放與錄音流程）
 - **PR**：#20
-- **狀態**：規劃中
+- **狀態**：已核准，實作中
 
 ## 目標
 使用者反應：影子跟讀辨識不到、分數很低；語言模型複習辨識很準。
@@ -44,6 +44,8 @@
 - `tests/uiCopy.test.ts`
 
 ## 做法（委員會第一輪後修訂）
+> **2026-10-28 擁有者決定先不設定 Firebase Storage 的 CORS** → 本 PR **不實作 Web Audio 路線**：不能設定 `audio.volume` 的裝置（iPhone／iPad）不調音量、改顯示「建議戴耳機，讓收音更清楚」。下方 Web Audio／CORS 相關段落保留作為日後設定 CORS 後的做法參考，本 PR 不做；`<audio>` 不加 `crossOrigin`，因此不會有「原音變無聲」的風險（Codex 🔴 的情境不會發生）。
+
 ### 音量控制（重點：iPhone）
 - iOS／iPadOS（Safari 與 iOS 上的 Chrome）的 `HTMLMediaElement.volume` **唯讀**（設了也是 1）
 - `canSetElementVolume()`：**只在一個暫時建立、沒有載入任何音檔的 `new Audio()` 上偵測一次並快取**（設 0.5 讀回、丟錯視為 false），不碰正在用的原音元素（Grok、DeepSeek）
@@ -93,13 +95,13 @@
 3a. ✅ 播放控制器（`tests/shadowingPlayback.test.ts`，替身元素＋假計時器）：原音播到句尾自動停；`endTime` 無效時以錄音長度停；重疊播放錄音先播、原音延後 offset 再播且音量 0.5；按另一個按鈕先停兩路；同一個再按＝停止；停止／換句後延遲中的回呼不會再啟動播放；結束後原音音量還原 1
 4. ✅ 音量常數為 0.5（擁有者決定，守住不被隨手改）（同上）
 5. ✅ 文案：新文案存在；既有「請戴上耳機練習。…」「重播我的錄音」「開始跟讀」等仍在（`tests/uiCopyShadowingAudio.test.ts`＋既有 `tests/uiCopy.test.ts`）
-6. ✅ 結構：提醒卡 `role="dialog"`、`aria-modal`；元件使用 `createListenPlayer`、`restoreOriginalVolume` 在換句／重錄／卸載路徑都有呼叫；`MediaElementSource` 只在 `canplay` 之後建立；載入失敗會換 `key`（同上，原始碼守門只做輔助，行為以 3a 為準）
+6. ✅ 結構：提醒卡 `role="dialog"`、`aria-modal`；元件使用 `createListenPlayer`、`restoreOriginalVolume` 在換句／重錄／卸載路徑都有呼叫；**原音 `<audio>` 不設 `crossOrigin`、不使用 `createMediaElementSource`**（本 PR 不做 Web Audio）（同上，原始碼守門只做輔助，行為以 3a 為準）
 7. 👀 iPhone（Safari）沒戴耳機：錄音時原音明顯變小聲；結果頁三個按鈕都能播，重疊播放兩段對齊；**原音不會變成完全無聲**（CORS 檢查）
 8. 👀 Android 或電腦：同上
 9. 👀 第一次跟讀出現提醒卡；勾「不再提醒」後重新整理不再出現；不勾則下次仍出現
 10. 👀 辨識改善：同一句、同一支手機、沒戴耳機，改版前後各念 3 次，比較「您實際念的內容」與分數（樣本小，只看「斷斷續續」有沒有改善，不當成統計結論）
 11. 👀 **靜音對照**：按開始跟讀後完全不出聲，看分數是否很低；若分數不低，代表模型把喇叭漏進來的原音當成你念的（Grok）
-12. 👀 刻意讓 CORS 失敗（或在未設 CORS 的環境）：iPhone 上原音仍有聲音、換句後也有聲音，說明文字改成「建議戴耳機…」（Codex 🔴）
+12. 👀 iPhone：原音維持原本音量且正常有聲，錄音中說明文字是「建議戴耳機，讓收音更清楚」
 
 ## 手動試用步驟
 1. 預覽網站用 **Email 測試帳號**登入（手機 Safari）
@@ -124,6 +126,7 @@
 ## 決策紀錄
 - 2026-10-28：擁有者確認使用者情境為「手機、沒戴耳機」；選方案 A（保留邊播邊錄）＋錄音時原音調小聲、重疊播放、練習前耳機提醒；不做「辨識失敗不算分」；級別「大」
 - 2026-10-28：擁有者核准設計稿與文案；錄音時原音先用 50%
+- 2026-10-28：擁有者核准整合後規劃；**先不設定 Storage CORS**（iPhone 不調音量）；不能調音量時的說明文字「建議戴耳機，讓收音更清楚」；有戴耳機也一律 50%
 
 ## 進度紀錄
 - 2026-10-28：建立分支 `ai/shadowing-audio` 與規劃文件，開草稿 PR #20；委員會（Gemini Lite、Nemotron、Poolside、DeepSeek、Grok）＋Codex 第一輪全部回覆，已整合
