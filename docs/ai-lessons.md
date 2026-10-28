@@ -31,6 +31,9 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 - 本機假資料預覽要測寫入流程時，Firestore 模擬要支援 `runTransaction` 的 `get`／`update` 並重新通知監聽；錄音用 `--use-file-for-fake-audio-capture=<靜音 wav>`，靜音偵測才會自動停止
 - `Button` 元件的基本 class 有 `inline-flex`，直接加 `hidden lg:inline-flex` 不會隱藏（PR #14 手機出現兩個刪除鈕）；要在外面包 `<span className="hidden lg:block">`
 - React 19＋TS：檔案內的區域函式元件被傳 `key` 會型別錯誤，宣告成 `React.FC<Props>`
+- iPhone／iPad 的 `audio.volume` 唯讀（設了讀回仍是 1）；要調音量只能走 Web Audio，而跨網域音檔（Firebase Storage）接 Web Audio 需要 CORS，沒有時依規範輸出靜音且元素拆不回來。2026-10-28 擁有者決定先不設 Storage CORS（PR #20）
+- 跟讀是「邊播原音邊錄音」：手機沒戴耳機時原音進麥克風、回音消除會連人聲一起壓 → 辨識差。語言模型複習錄音時不播聲音，所以辨識好（兩邊用同一套轉錄）
+- 播放「一句」的保險計時不要從 play() 起算就硬停：網路緩衝會截斷句尾；到期時看 currentTime 有沒有前進（PR #20）
 - 讀取狀態的「已有資料」要看實際筆數：空集合的 snapshot 之後監聽失敗，若當成已有資料就會停在空狀態、沒有重試（PR #16）
 - 同一份規格跨 PR 會互相牽動：③a 的測試鎖住了 `WIDE_TABS`，④ 拿掉時要先問擁有者改測試；規劃時就先 `grep tests` 找出會被影響的舊斷言
 - 轉場動畫的 `animation-fill-mode` 不要用 `both`／`forwards`：Chrome 會把結束值 `transform: none` 留成 identity matrix，祖先仍是 `position: fixed` 的定位容器；用 `backwards`（PR #18）
@@ -91,3 +94,7 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 | UI 改版⑤（PR #18，規劃） | DeepSeek | 4 | 0 | 逐列延遲上限、數字跑動獨立元件、手機輕壓 transition、fixed 對話框風險 |
 | UI 改版⑤（PR #18，規劃） | Nemotron／Gemini Lite／Poolside | 3 | 3 | StrictMode 旗標、空資料、data-card-link；誤判：整組精熟用平均值（Poolside）、要 will-change／分批（Nemotron、Gemini）；Grok 未出現 |
 | UI 改版⑤（PR #18，審查） | Codex／Gemini Lite | 0 | 0 | 第 1 輪皆無意見 |
+| 跟讀辨識改善（PR #20，規劃） | Codex | 2 | 0 | iOS CORS 退回不能沿用已接 Web Audio 的元素（🔴）、播放流程要有行為測試 |
+| 跟讀辨識改善（PR #20，規劃） | Grok／DeepSeek | 9 | 0 | 偵測音量用暫時元素、AudioContext 分開、音量在所有中斷路徑還原、endTime 為 0、對齊基準、aria、localStorage 帶版本、靜音對照 |
+| 跟讀辨識改善（PR #20，規劃） | Nemotron／Poolside／Gemini Lite | 2 | 2 | CORS 風險、資源清理；誤判：提醒卡會破壞 iPhone 手勢（Gemini）、不再提醒後隱藏既有提示（Poolside） |
+| 跟讀辨識改善（PR #20，審查） | Codex／Gemini Flash | 2 | 0 | 保險計時在緩衝延後時截斷句尾（兩者都抓到）、自動播放被擋仍顯示播放中（Gemini）；第 2 輪 Codex 卡住 18 分鐘，重新留言後完成 |
