@@ -97,7 +97,21 @@ export function createListenPlayer(opts: ListenPlayerOptions): ListenPlayer {
       if (gen === generation && original.currentTime >= end) finish();
     });
     listen(original, 'ended', finish);
-    later((end - start) * 1000 + 500, finish);
+    // 保險計時：timeupdate 沒來時也要停。到期時若原音「有在前進」但還沒到句尾（例如等緩衝延後才開始），
+    // 繼續每 500ms 檢查，不提早截斷；完全沒前進（卡住、播放失敗）就停止。最多再等 30 秒
+    let lastPos = start;
+    let extraChecks = 0;
+    const check = () => {
+      if (gen !== generation || originalDone) return;
+      const pos = original.currentTime;
+      if (pos >= end) { finish(); return; }
+      const progressed = pos > lastPos + 0.05;
+      lastPos = pos;
+      if (!progressed || extraChecks >= 60) { finish(); return; }
+      extraChecks += 1;
+      later(500, check);
+    };
+    later((end - start) * 1000 + 500, check);
     safePlay(original);
   };
 

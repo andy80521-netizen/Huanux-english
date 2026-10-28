@@ -542,8 +542,11 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                 playbackUrlRef.current = url;
                 recordedAudioRef.current.src = url;
                 recordedAudioRef.current.currentTime = 0;
-                recordedAudioRef.current.play().catch(() => {});
-                playerRef.current?.markPlaying('mine');
+                // 播放真的開始才同步成「我的錄音」播放中（被瀏覽器擋下時不顯示成播放中）
+                const startToken = scoringTokenRef.current;
+                recordedAudioRef.current.play()
+                    .then(() => { if (startToken === scoringTokenRef.current) playerRef.current?.markPlaying('mine'); })
+                    .catch(() => {});
             }
             
         } catch (err: any) {

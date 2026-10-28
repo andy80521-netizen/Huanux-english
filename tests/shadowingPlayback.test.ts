@@ -151,3 +151,34 @@ describe('互斥與失效', () => {
     expect(player.playing()).toBeNull();
   });
 });
+
+// 審查第 1 輪（Codex、Gemini）：等緩衝延後才開始播放時，不可在句尾前截斷
+describe('原音延後開始或途中緩衝', () => {
+  it('保險計時到期時原音有在前進但還沒到句尾 → 繼續播，到句尾才停', () => {
+    const { original, player } = setup({ start: 10, end: 13 });
+    player.toggle('original');
+    vi.advanceTimersByTime(1500);
+    original.currentTime = 10.4; // 緩衝後才開始
+    vi.advanceTimersByTime(2000); // 已過 3500ms 保險時間
+    original.currentTime = 11;
+    vi.advanceTimersByTime(500);
+    expect(original.paused).toBe(false);
+    expect(player.playing()).toBe('original');
+    original.currentTime = 12.5;
+    vi.advanceTimersByTime(500);
+    expect(original.paused).toBe(false);
+    original.currentTime = 13.02; original.emit('timeupdate');
+    expect(original.paused).toBe(true);
+    expect(player.playing()).toBeNull();
+  });
+  it('前進後卡住不動 → 停止，不會無限等待', () => {
+    const { original, player } = setup({ start: 10, end: 13 });
+    player.toggle('original');
+    original.currentTime = 11;
+    vi.advanceTimersByTime(3500);
+    expect(original.paused).toBe(false);
+    vi.advanceTimersByTime(500);
+    expect(original.paused).toBe(true);
+    expect(player.playing()).toBeNull();
+  });
+});
