@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Material } from '../types';
-import { ChevronLeft, Mic, AlertCircle, RotateCcw, Send, Loader2, Headphones, Check } from 'lucide-react';
+import { ChevronLeft, Mic, AlertCircle, RotateCcw, Send, Loader2, Headphones, Check, Play, Pause, Layers, Volume1 } from 'lucide-react';
 import { transcribeRecording } from '../services/gemini';
 import { calculateShadowingScores, isShadowingPass, PracticeScores, SHADOWING_PASS_CONTENT, SHADOWING_PASS_TOTAL } from '../utils/scoring';
 import WordDiffView from './WordDiffView';
@@ -15,10 +15,75 @@ import { countUpValue } from '../utils/countUp';
 import Button from './ui/Button';
 import IconButton from './ui/IconButton';
 import ProgressBar from './ui/ProgressBar';
+import { RECORDING_ORIGINAL_VOLUME, canSetElementVolume, overlayOffsetMs, sentenceSegment, shouldShowHeadphoneTip, dismissHeadphoneTip } from '../utils/shadowingAudio';
+import { createListenPlayer, ListenMode, ListenPlayer } from '../utils/shadowingPlayback';
 
 /** 系統是否開啟「減少動態效果」（分數跑動是 JS，全域 CSS 規則管不到，要自己判斷） */
 const prefersReducedMotion = () => {
     try { return !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches; } catch { return false; }
+};
+
+/**
+ * 這台裝置能不能調原音音量（iPhone／iPad 的 audio.volume 唯讀）。只在暫時元素上偵測一次並快取。
+ * 本 PR 不走 Web Audio（Storage 尚未設定 CORS），不能調的裝置維持原本音量、改提示戴耳機。
+ */
+let volumeAdjustable: boolean | null = null;
+const canAdjustVolume = () => {
+    if (volumeAdjustable === null) {
+        try { volumeAdjustable = canSetElementVolume(typeof Audio !== 'undefined' ? new Audio() : null); } catch { volumeAdjustable = false; }
+    }
+    return volumeAdjustable;
+};
+
+const getStorage = () => window.localStorage;
+
+/** 結果頁「聽聽看」的裝飾波形高度（px） */
+const WAVE = [6, 10, 16, 22, 14, 8, 18, 24, 20, 12, 6, 9, 15, 21, 17, 11, 7, 13, 19, 23, 16, 10];
+
+const LISTEN_BUTTONS: Array<{ mode: ListenMode; label: string; ariaLabel?: string }> = [
+    { mode: 'mine', label: '我的錄音', ariaLabel: '重播我的錄音' },
+    { mode: 'original', label: '原音' },
+    { mode: 'overlay', label: '重疊播放' },
+];
+
+/** 第一次開始跟讀前的耳機提醒（底部彈出）。「開始跟讀」在同一次點擊裡同步開始錄音，iPhone 才不會擋 */
+const HeadphoneTip: React.FC<{ onStart: (dontShowAgain: boolean) => void; onCancel: () => void }> = ({ onStart, onCancel }) => {
+    const [dontShow, setDontShow] = useState(false);
+    const startRef = useRef<HTMLButtonElement>(null);
+    const onCancelRef = useRef(onCancel);
+    onCancelRef.current = onCancel;
+    useEffect(() => {
+        startRef.current?.focus();
+        const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onCancelRef.current(); };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, []);
+    return (
+        <div className="fixed inset-0 z-100 flex items-end justify-center bg-black/40 backdrop-blur-xs sm:items-center sm:p-4" onClick={onCancel}>
+            <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="headphone-tip-h"
+                onClick={(e) => e.stopPropagation()}
+                className="flex w-full max-w-md flex-col gap-4 rounded-t-[28px] border border-line bg-surface px-6 pt-7 pb-[max(2rem,env(safe-area-inset-bottom))] shadow-[0_24px_48px_-12px_rgb(0_0_0/0.25)] animate-rise-in sm:rounded-3xl sm:pb-7"
+            >
+                <span className="flex size-14 items-center justify-center rounded-full bg-accent-soft" aria-hidden="true">
+                    <Headphones size={26} className="text-accent" />
+                </span>
+                <h2 id="headphone-tip-h" className="text-xl font-bold text-ink">建議戴有線耳機練習</h2>
+                <p className="text-sm leading-relaxed text-muted">跟讀時會同時播放原音和錄你的聲音。沒戴耳機時，原音會被麥克風收進去，你的聲音容易被壓掉，辨識變差、分數偏低。</p>
+                <p className="text-sm leading-relaxed text-muted">藍牙耳機在錄音時音質會變差，有線耳機效果最好。沒有耳機也可以練，{canAdjustVolume() ? '錄音時原音會自動調小聲。' : '但這台裝置無法自動調小原音。'}</p>
+                <label className="flex min-h-11 cursor-pointer items-center gap-2.5 text-sm text-ink">
+                    <input type="checkbox" checked={dontShow} onChange={(e) => setDontShow(e.target.checked)} className="size-5 accent-[var(--accent)]" />
+                    不再提醒
+                </label>
+                <Button ref={startRef} size="lg" fullWidth onClick={() => onStart(dontShow)} icon={<Mic size={20} aria-hidden="true" />}>
+                    開始跟讀
+                </Button>
+                <Button variant="ghost" fullWidth onClick={onCancel} className="text-muted">取消</Button>
+            </div>
+        </div>
+    );
 };
 
 type PracticeState = 'idle' | 'recording' | 'buffer' | 'finished' | 'scoring' | 'scored' | 'scoreError';
@@ -54,6 +119,15 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
     const [showGain, setShowGain] = useState(false);
     // 每次換句或離開就加一；評分回來時若已換句，不再更新畫面
     const scoringTokenRef = useRef(0);
+    // 跟讀辨識改善（PR #20）：耳機提醒、結果頁「聽聽看」
+    const [showTip, setShowTip] = useState(false);
+    const [listenMode, setListenMode] = useState<ListenMode | null>(null);
+    const playerRef = useRef<ListenPlayer | null>(null);
+    // 重疊播放對齊用：錄音實際開始（MediaRecorder start）與原音實際開始（playing）的時間
+    const recordStartAtRef = useRef<number | null>(null);
+    const originalPlayingAtRef = useRef<number | null>(null);
+    const sentenceRef = useRef(sentence);
+    sentenceRef.current = sentence;
     const listItemRefs = useRef<Record<number, HTMLButtonElement | null>>({});
     
     const recordingStartTimeRef = useRef<number>(0);
@@ -73,6 +147,13 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
     const requestAnimationFrameRef = useRef<number>(0);
     const audioChunksRef = useRef<Blob[]>([]);
     const timerRef = useRef<NodeJS.Timeout | null>(null);
+
+    /** 設定原音音量；這台裝置不能調（iPhone／iPad）時不做事 */
+    const setOriginalVolume = (v: number) => {
+        if (!canAdjustVolume() || !audioRef.current) return;
+        try { audioRef.current.volume = v; } catch { /* 忽略 */ }
+    };
+    const restoreOriginalVolume = () => setOriginalVolume(1);
 
     const cleanupAudio = () => {
         isBufferPhaseRef.current = false;
@@ -116,11 +197,39 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
         }
         stopRecordingSafely();
         cleanupAudio();
+        restoreOriginalVolume();
     };
+
+    // 結果頁「聽聽看」的播放控制器：元件存活期間只建立一次
+    useEffect(() => {
+        const rec = recordedAudioRef.current;
+        const org = audioRef.current;
+        if (!rec || !org) return;
+        const player = createListenPlayer({
+            recording: rec,
+            original: org,
+            setOriginalVolume,
+            segment: () => {
+                const s = sentenceRef.current;
+                const recSec = Number.isFinite(rec.duration) ? rec.duration : (lastRecordingRef.current?.speechSec ?? 0);
+                return sentenceSegment(s.startTime, s.endTime, recSec);
+            },
+            offsetMs: () => overlayOffsetMs(recordStartAtRef.current, originalPlayingAtRef.current),
+            onChange: setListenMode,
+        });
+        playerRef.current = player;
+        return () => {
+            player.dispose();
+            playerRef.current = null;
+        };
+    }, []);
 
     // Reset state when sentence changes
     useEffect(() => {
         scoringTokenRef.current += 1;
+        playerRef.current?.stop();
+        restoreOriginalVolume();
+        setShowTip(false);
         // 換句時一併停止教材原音（錄音中跳句時原音還在播放）
         if (audioRef.current) {
             audioRef.current.pause();
@@ -171,6 +280,7 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                 playbackUrlRef.current = null;
             }
             abortRecording();
+            restoreOriginalVolume();
             if (recordedBlobUrl) URL.revokeObjectURL(recordedBlobUrl);
         };
     }, [recordedBlobUrl]);
@@ -259,8 +369,13 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                 }
             };
 
+            mediaRecorder.onstart = () => {
+                recordStartAtRef.current = performance.now();
+            };
+
             mediaRecorder.onstop = () => {
                 cleanupAudio();
+                restoreOriginalVolume();
                 let speechSec = 0;
                 if (lastSoundTimeRef.current > 0 && recordingStartTimeRef.current > 0) {
                     speechSec = Math.max(0, (lastSoundTimeRef.current - recordingStartTimeRef.current) / 1000);
@@ -276,8 +391,15 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
             };
 
             // Set up audio to play exactly at startTime
+            recordStartAtRef.current = null;
+            originalPlayingAtRef.current = null;
             if (audioRef.current) {
                 audioRef.current.currentTime = sentence.startTime;
+                // 錄音時原音調小聲，讓使用者的聲音蓋過原音（不能調的裝置不變）
+                setOriginalVolume(RECORDING_ORIGINAL_VOLUME);
+                audioRef.current.addEventListener('playing', () => {
+                    if (originalPlayingAtRef.current === null) originalPlayingAtRef.current = performance.now();
+                }, { once: true });
             }
 
             // Sync start: record + play audio at the same time
@@ -335,6 +457,8 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
     };
 
     const handleRetry = () => {
+        playerRef.current?.stop();
+        restoreOriginalVolume();
         if (recordedAudioRef.current) {
             recordedAudioRef.current.pause();
             recordedAudioRef.current.currentTime = 0;
@@ -419,6 +543,7 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                 recordedAudioRef.current.src = url;
                 recordedAudioRef.current.currentTime = 0;
                 recordedAudioRef.current.play().catch(() => {});
+                playerRef.current?.markPlaying('mine');
             }
             
         } catch (err: any) {
@@ -429,11 +554,13 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
         }
     };
 
-    const handleReplayRecording = () => {
-        if (recordedAudioRef.current) {
-            recordedAudioRef.current.currentTime = 0;
-            recordedAudioRef.current.play().catch(() => {});
+    // 開始跟讀：第一次先顯示耳機提醒；提醒卡上的「開始跟讀」在同一次點擊裡同步開始
+    const handleStartClick = () => {
+        if (shouldShowHeadphoneTip(getStorage)) {
+            setShowTip(true);
+            return;
         }
+        handleStart();
     };
 
     // 結果頁動效：總分從 0 跑到實際分數；約 300ms 後補上金色的熟練度增加段。減少動態效果時直接顯示結果
@@ -487,6 +614,16 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                 className="hidden"
                 preload="auto"
             />
+            {showTip && (
+                <HeadphoneTip
+                    onCancel={() => setShowTip(false)}
+                    onStart={(dontShowAgain) => {
+                        if (dontShowAgain) dismissHeadphoneTip(getStorage);
+                        setShowTip(false);
+                        handleStart();
+                    }}
+                />
+            )}
 
             {/* 主區 */}
             <div className="flex h-full min-h-0 flex-col overflow-y-auto">
@@ -548,6 +685,13 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                                 <span className="size-2.5 rounded-full bg-danger animate-breathe" aria-hidden="true" />
                                 <p className="text-[15px] font-medium text-ink">正在播放並同步錄音中...</p>
                             </div>
+                        )}
+                        {(practiceState === 'recording' || practiceState === 'buffer') && (
+                            <p className="mt-3 flex items-center gap-1.5 text-[13px] text-muted">
+                                {canAdjustVolume()
+                                    ? <><Volume1 size={15} aria-hidden="true" />錄音時原音會調小聲，讓你的聲音更清楚</>
+                                    : <><Headphones size={15} aria-hidden="true" />建議戴耳機，讓收音更清楚</>}
+                            </p>
                         )}
 
                         {practiceState === 'buffer' && (
@@ -638,20 +782,54 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                                 </div>
                             )}
 
+                            <section aria-labelledby="listen-h" className="flex flex-col gap-3.5 rounded-[20px] border border-line bg-surface p-[18px]">
+                                <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                                    <h3 id="listen-h" className="text-[15px] font-bold text-ink">聽聽看</h3>
+                                    <span className="text-xs text-muted">重疊播放：同時聽你的錄音和原音</span>
+                                </div>
+                                <div aria-hidden="true" className="flex flex-col gap-2">
+                                    {([['原音', 'bg-muted', listenMode === 'original' || listenMode === 'overlay'], ['我的', 'bg-accent', listenMode === 'mine' || listenMode === 'overlay']] as const).map(([label, color, active]) => (
+                                        <div key={label} className="flex items-center gap-2.5">
+                                            <span className={`w-9 shrink-0 text-[11px] ${label === '我的' ? 'text-accent' : 'text-muted'}`}>{label}</span>
+                                            <span className="flex h-6 min-w-0 flex-1 items-center gap-[3px] overflow-hidden">
+                                                {WAVE.map((h, i) => (
+                                                    <span
+                                                        key={i}
+                                                        className={`w-[3px] shrink-0 rounded-full ${color} ${active ? 'animate-wave' : 'opacity-50'}`}
+                                                        style={{ height: h, animationDelay: `${(i % 7) * 120}ms` }}
+                                                    />
+                                                ))}
+                                            </span>
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="grid grid-cols-3 gap-2">
+                                    {LISTEN_BUTTONS.map(({ mode, label, ariaLabel }) => {
+                                        const on = listenMode === mode;
+                                        return (
+                                            <button
+                                                key={mode}
+                                                type="button"
+                                                aria-pressed={on}
+                                                aria-label={ariaLabel}
+                                                onClick={() => playerRef.current?.toggle(mode)}
+                                                className={`flex min-h-11 items-center justify-center gap-1.5 rounded-full px-2 text-[13px] transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${
+                                                    on ? 'bg-accent font-medium text-on-accent' : 'border border-line text-ink hover:bg-surface-2'
+                                                }`}
+                                            >
+                                                {on ? <Pause size={14} aria-hidden="true" /> : mode === 'overlay' ? <Layers size={14} aria-hidden="true" /> : <Play size={14} aria-hidden="true" />}
+                                                {label}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </section>
+
                             <div className="flex flex-col gap-2">
                                 <p className="text-xs text-muted">您實際念的內容：</p>
                                 <p className="text-[15px] leading-relaxed text-ink/80 break-words">
                                     {userText || "(未偵測到語音)"}
                                 </p>
-                                <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={handleReplayRecording}
-                                    icon={<RotateCcw size={15} aria-hidden="true" />}
-                                    className="-ml-3 mt-1 self-start"
-                                >
-                                    重播我的錄音
-                                </Button>
                             </div>
                         </section>
                     )}
@@ -664,7 +842,7 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                                     <Headphones size={17} className="mt-0.5 shrink-0" aria-hidden="true" />
                                     <span>請戴上耳機練習。跟讀時會同時播放原音和錄音，沒戴耳機時麥克風會錄到原音，導致評分失準。</span>
                                 </p>
-                                <Button size="lg" onClick={handleStart} icon={<Mic size={22} aria-hidden="true" />} className="w-full lg:w-auto lg:shrink-0">
+                                <Button size="lg" onClick={handleStartClick} icon={<Mic size={22} aria-hidden="true" />} className="w-full lg:w-auto lg:shrink-0">
                                     開始跟讀
                                 </Button>
                             </div>

@@ -264,6 +264,16 @@
   animation: burst 700ms ease-out 220ms both;
 }
 
+/* 跟讀結果頁「聽聽看」的裝飾波形（PR #20） */
+@keyframes wave {
+  0%, 100% { transform: scaleY(0.35); }
+  50% { transform: scaleY(1); }
+}
+
+@utility animate-wave {
+  animation: wave 1s ease-in-out infinite;
+}
+
 /* 長條從 0 長到目前值 */
 @keyframes grow-x {
   from { transform: scaleX(0); }

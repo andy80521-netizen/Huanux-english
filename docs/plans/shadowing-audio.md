@@ -145,3 +145,7 @@
 - 「不再提醒」後不顯示原本的耳機提示文字（Poolside）— 守門測試要求保留，且不提醒卡≠不提示
 - 用真實波形（Grok 提問）— 會再搶一次 MediaElementSource、增加負擔
 - 支援 LINE 等 App 內建瀏覽器（DeepSeek、Grok）— 本次不處理，麥克風與自動播放原本就不可靠
+- 2026-10-28：驗收測試 commit `baa3101`（`tests/shadowingAudio.test.ts`、`tests/shadowingPlayback.test.ts`、`tests/uiCopyShadowingAudio.test.ts`），修改前失敗
+- 2026-10-28：實作完成：`utils/shadowingAudio.ts`、`utils/shadowingPlayback.ts`、`ShadowingPracticeView`（耳機提醒卡、錄音時原音 50%、依裝置切換說明、結果頁聽聽看）、`app.css` 波形動畫；`check.sh` 通過（734 測試）
+  - 自我檢查（本機假資料預覽，含模擬 iPhone 音量唯讀）：提醒卡出現、焦點在「開始跟讀」、勾不再提醒後不再出現；錄音中原音 0.5（模擬 iPhone 維持 1 並顯示「建議戴耳機…」）；評分後音量還原 1；自動播放時「我的錄音」為按下狀態；重疊播放按下／再按停止
+  - 提醒卡第二段在不能調音量的裝置改為「沒有耳機也可以練，但這台裝置無法自動調小原音。」（避免顯示不實的「會自動調小聲」；待擁有者確認文字）
