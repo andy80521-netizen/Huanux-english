@@ -43,41 +43,63 @@
 - `src/components/ConfirmDialog.tsx`
 - `tests/uiCopy.test.ts`
 
-## 做法
+## 做法（委員會第一輪後修訂）
 ### 音量控制（重點：iPhone）
-- iOS Safari 的 `HTMLMediaElement.volume` **唯讀**（設了也是 1），所以：
-  - 新純函式 `canSetElementVolume(el)`：設 0.5 後讀回是否為 0.5，再設回 1
-  - 可以設 → 直接用 `audio.volume`（Android、桌機）
-  - 不能設（iOS）→ 用 Web Audio：`createMediaElementSource(audio) → GainNode → destination`
-- Web Audio 的限制與處理：
-  - 一個 `<audio>` 只能建立一次 `MediaElementSource`，建立後聲音只從 AudioContext 出來 → 建立一個**專用、跟著元件存活**的播放 AudioContext（在使用者點擊當下建立並 `resume()`），每次播放前確認是 running
-  - 跨網域音檔（Firebase Storage 的 `audioUrl`）接 Web Audio 需要 CORS；沒有 CORS 時會**完全沒聲音**。所以只在需要 Web Audio 的平台設 `crossOrigin="anonymous"`；若載入失敗（`error` 事件）→ 拿掉 `crossOrigin` 重新載入，**這台裝置就不調音量**（照舊 100% 播放），不讓練習壞掉
-  - 沙盒連不到 Firebase Storage，無法事先確認 CORS；列為手動試用必驗項目
-- 新純函式（`src/utils/shadowingAudio.ts`）：
-  - `RECORDING_ORIGINAL_VOLUME = 0.5`、`OVERLAY_ORIGINAL_VOLUME = 0.5`
-  - `canSetElementVolume(el)`
-  - `overlayOffsetMs(recordStartAt, originalPlayingAt)`：原音實際開始播放（`playing` 事件）比錄音開始晚多少毫秒，夾在 0～1500；重疊播放時錄音先播、原音晚這麼多再播，讓兩段對齊
-  - `shouldShowHeadphoneTip(storage)`、`dismissHeadphoneTip(storage)`：讀寫 localStorage 鍵 `huanux_headphone_tip_dismissed`，storage 不可用時視為「要提醒、但不擋練習」
+- iOS／iPadOS（Safari 與 iOS 上的 Chrome）的 `HTMLMediaElement.volume` **唯讀**（設了也是 1）
+- `canSetElementVolume()`：**只在一個暫時建立、沒有載入任何音檔的 `new Audio()` 上偵測一次並快取**（設 0.5 讀回、丟錯視為 false），不碰正在用的原音元素（Grok、DeepSeek）
+- 可以設 → 直接用 `audio.volume`（Android、桌機，含桌機 Safari）
+- 不能設（iOS）→ Web Audio：`createMediaElementSource(audio) → GainNode → destination`
+- **CORS 是 iOS 這條路的前提**（Codex 🔴、DeepSeek、Grok、Nemotron）：
+  - 跨網域音檔接 Web Audio 必須有 CORS；沒有時依規範輸出**靜音**，而且一個元素一旦建立 `MediaElementSource` 就拆不掉
+  - 所以：需要 Web Audio 的平台在**元件掛載時**就以 `crossOrigin="anonymous"` 載入（`crossOrigin` 必須在 `src` 之前生效）；**只有在這個元素成功載入（`canplay`）之後才建立 `MediaElementSource`**
+  - 載入失敗（`error`）→ 用新的 React `key` 換掉 `<audio>`，產生一個**從未接過 Web Audio、沒有 `crossOrigin`** 的新元素，照舊 100% 播放；這台裝置本次不調音量，畫面改顯示替代說明（見下）
+  - Firebase Storage 是否已設 CORS 無法從沙盒確認（連不到），需擁有者決定（見「需要擁有者決定」）
+- 播放用 AudioContext 與麥克風分析用的 `audioContextRef` **分開**（`playbackCtxRef`），只在元件卸載時 close；每次播放前 `resume()`；開麥後再確認一次是 running（iOS 開麥可能把它暫停）（DeepSeek、Grok）
+- StrictMode 重掛：`MediaElementSource` 以元素為鍵快取，不重複建立（Grok）
+- **音量一定會還原**：集中在一個 `restoreOriginalVolume()`，由 `onstop`、`abortRecording`、`handleRetry`、換句 effect、`onBack`、卸載、`play()` 失敗、評分失敗都呼叫（DeepSeek、Grok）
+
+### 錄音中的說明文字（依裝置能力）
+- 能調小聲：「錄音時原音會調小聲，讓你的聲音更清楚」
+- 不能調（CORS 失敗或 Web Audio 不可用）：「建議戴耳機，讓收音更清楚」（新文案，需擁有者核准）
+- 放在既有 `aria-live="polite"` 的狀態區裡（Grok）
 
 ### 耳機提醒卡
-- 沿用 `ConfirmDialog` 的外觀（底部彈出、`role="dialog"`、`aria-modal`、Esc＝取消、開啟時焦點在「開始跟讀」）
-- 「開始跟讀」必須在**同一次點擊**裡呼叫 `handleStart`（iPhone 只允許使用者點擊當下啟動播放與錄音）
+- 外觀沿用 `ConfirmDialog`（底部彈出、`role="dialog"`、`aria-modal`、Esc＝取消、開啟時焦點在「開始跟讀」）
+- 卡上「開始跟讀」在**同一個 click handler 裡同步呼叫 `handleStart`**（不經 setState＋effect），點卡上按鈕本身就是使用者手勢，iPhone 的播放／錄音權限不受影響（Gemini 的疑慮已處理）
+- localStorage 鍵 `huanux_headphone_tip_dismissed_v1`（帶版本，日後改文案可再提醒一次）（Grok）；取得 `window.localStorage` 本身也包 try/catch（DeepSeek）
+- 「不再提醒」本次不做重設入口；清除瀏覽器資料即可恢復
 
-### 重疊播放
-- 錄音 blob（同網域 blob URL）＋原音（`audioRef` 跳到 `sentence.startTime`、播到 `endTime` 停止）
-- 停止、換句、離開、重錄時一律停掉兩邊並清掉計時器（沿用既有 `scoringTokenRef` 過期判斷）
+### 結果頁「聽聽看」
+- 抽成可測試的播放控制器 `src/utils/shadowingPlayback.ts`（`createListenPlayer`）：注入「錄音元素」「原音元素」「設定原音音量的函式」「時鐘／計時器」，不直接碰 DOM，Vitest 用替身元素與 `vi.useFakeTimers()` 驗行為（Codex 🟠；不新增套件）
+- 「原音」與重疊播放只播**這一句**（`startTime`～`endTime`）；`endTime` 無效（≤ startTime 或 0）時改用錄音長度當上限，不會播到整份教材結尾（DeepSeek、Grok）
+- 句尾停止由控制器自己的計時／`timeupdate` 判斷，不依賴目前只在 `recording` 狀態運作的 `handleTimeUpdate`（Codex）
+- 重疊播放：錄音先播，原音延後 `overlayOffsetMs` 再播（原音 50%）；原音播完、錄音繼續到結束（DeepSeek）
+- 對齊基準：錄音起點用 `MediaRecorder` 的 `start` 事件時間，原音起點用 `play()` 前掛上的 `playing` 事件時間；延遲上限 3000ms，只用來擋壞掉的時間戳（Grok）
+- 互斥：按另一個按鈕＝先停兩路再播；播放中再按同一個＝停止；三個按鈕用 `aria-pressed` 反映狀態；自動播放「我的錄音」也同步成播放中狀態（Grok）
+- 控制器有自己的世代號：停止、換句、重錄、離開都會讓延遲中的回呼失效（`scoringTokenRef` 在重錄時不會變，不能只靠它）（Grok）
+- 波形是裝飾動畫（`aria-hidden`，減少動態時靜止），不分析音訊（DeepSeek、Grok）
+
+### 新純函式（`src/utils/shadowingAudio.ts`）
+- `RECORDING_ORIGINAL_VOLUME = 0.5`、`OVERLAY_ORIGINAL_VOLUME = 0.5`
+- `canSetElementVolume(probe)`
+- `overlayOffsetMs(recordStartAt, originalPlayingAt)`：夾在 0～3000，缺值為 0
+- `sentenceSegment(startTime, endTime, recordingSec)`：回傳要播的起訖秒數（`endTime` 無效時用錄音長度）
+- `shouldShowHeadphoneTip(getStorage)`、`dismissHeadphoneTip(getStorage)`
 
 ## 驗收條件
 1. ✅ `canSetElementVolume`：可設／不可設（模擬 iOS 讀回 1）／設定時丟錯 都正確；結束後音量還原為 1（`tests/shadowingAudio.test.ts`）
-2. ✅ `overlayOffsetMs`：正常延遲、負值→0、超過上限→1500、缺值→0（同上）
-3. ✅ 耳機提醒：沒設過→要提醒；按不再提醒後→不提醒；storage 讀寫丟錯→要提醒且不丟錯（同上）
+2. ✅ `overlayOffsetMs`：正常延遲、負值→0、超過上限→3000、缺值→0；`sentenceSegment`：正常、`endTime` 為 0 或小於開始時用錄音長度（同上）
+3. ✅ 耳機提醒：沒設過→要提醒；按不再提醒後→不提醒；取得 storage 或讀寫丟錯→要提醒且不丟錯（同上）
+3a. ✅ 播放控制器（`tests/shadowingPlayback.test.ts`，替身元素＋假計時器）：原音播到句尾自動停；`endTime` 無效時以錄音長度停；重疊播放錄音先播、原音延後 offset 再播且音量 0.5；按另一個按鈕先停兩路；同一個再按＝停止；停止／換句後延遲中的回呼不會再啟動播放；結束後原音音量還原 1
 4. ✅ 音量常數為 0.5（擁有者決定，守住不被隨手改）（同上）
 5. ✅ 文案：新文案存在；既有「請戴上耳機練習。…」「重播我的錄音」「開始跟讀」等仍在（`tests/uiCopyShadowingAudio.test.ts`＋既有 `tests/uiCopy.test.ts`）
-6. ✅ 結構：提醒卡 `role="dialog"`、`aria-modal`；`crossOrigin` 只在 Web Audio 路線設定且有載入失敗退回；錄音開始時套用錄音音量、結束時還原（同上）
+6. ✅ 結構：提醒卡 `role="dialog"`、`aria-modal`；元件使用 `createListenPlayer`、`restoreOriginalVolume` 在換句／重錄／卸載路徑都有呼叫；`MediaElementSource` 只在 `canplay` 之後建立；載入失敗會換 `key`（同上，原始碼守門只做輔助，行為以 3a 為準）
 7. 👀 iPhone（Safari）沒戴耳機：錄音時原音明顯變小聲；結果頁三個按鈕都能播，重疊播放兩段對齊；**原音不會變成完全無聲**（CORS 檢查）
 8. 👀 Android 或電腦：同上
 9. 👀 第一次跟讀出現提醒卡；勾「不再提醒」後重新整理不再出現；不勾則下次仍出現
-10. 👀 辨識改善：同一句、同一支手機、沒戴耳機，改版前後各念 3 次，比較「您實際念的內容」與分數
+10. 👀 辨識改善：同一句、同一支手機、沒戴耳機，改版前後各念 3 次，比較「您實際念的內容」與分數（樣本小，只看「斷斷續續」有沒有改善，不當成統計結論）
+11. 👀 **靜音對照**：按開始跟讀後完全不出聲，看分數是否很低；若分數不低，代表模型把喇叭漏進來的原音當成你念的（Grok）
+12. 👀 刻意讓 CORS 失敗（或在未設 CORS 的環境）：iPhone 上原音仍有聲音、換句後也有聲音，說明文字改成「建議戴耳機…」（Codex 🔴）
 
 ## 手動試用步驟
 1. 預覽網站用 **Email 測試帳號**登入（手機 Safari）
@@ -104,4 +126,19 @@
 - 2026-10-28：擁有者核准設計稿與文案；錄音時原音先用 50%
 
 ## 進度紀錄
-- 2026-10-28：建立分支 `ai/shadowing-audio` 與規劃文件
+- 2026-10-28：建立分支 `ai/shadowing-audio` 與規劃文件，開草稿 PR #20；委員會（Gemini Lite、Nemotron、Poolside、DeepSeek、Grok）＋Codex 第一輪全部回覆，已整合
+
+## 委員會整合（第一輪）
+### 採納
+- iOS 的 CORS 退回不能沿用已接 Web Audio 的元素：只在 `canplay` 後才建立 source，失敗就換新元素（Codex 🔴、DeepSeek、Grok、Nemotron）
+- 播放流程要有行為測試：抽出播放控制器，用替身元素與假計時器測（Codex 🟠）
+- 偵測音量能力用暫時元素、只偵測一次（Grok、DeepSeek）
+- 播放與麥克風分析的 AudioContext 分開；音量在所有中斷路徑都還原（DeepSeek、Grok）
+- 「原音」只播這一句、`endTime` 無效的處理；對齊用 MediaRecorder start 與 playing 事件、上限 3000ms（DeepSeek、Grok）
+- 說明文字依裝置能力切換、放進 aria-live 區；按鈕 aria-pressed（DeepSeek、Grok）
+- localStorage 鍵帶版本；靜音對照列入手動試用（Grok）
+### 駁回或不做
+- 改掉提醒卡、只在按鈕旁放勾選框（Gemini）— 點卡上的按鈕本身就是使用者手勢，只要同步呼叫 `handleStart` 就不會被 iPhone 擋；設計稿已核准
+- 「不再提醒」後不顯示原本的耳機提示文字（Poolside）— 守門測試要求保留，且不提醒卡≠不提示
+- 用真實波形（Grok 提問）— 會再搶一次 MediaElementSource、增加負擔
+- 支援 LINE 等 App 內建瀏覽器（DeepSeek、Grok）— 本次不處理，麥克風與自動播放原本就不可靠
