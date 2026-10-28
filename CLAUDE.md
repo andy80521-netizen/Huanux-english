@@ -3,7 +3,7 @@
 ## 專案
 - 英文練習 App：React 19 + TypeScript + Vite，資料存 Firebase Firestore，部署在 Netlify（main 一更新就上線正式版）
 - AI 功能在 `netlify/functions/`（Gemini、Whisper、語音、圖片），前端呼叫在 `src/services/`
-- 共用邏輯 `src/utils/`、型別 `src/types.ts`、常數與徽章門檻 `src/constants.ts`
+- 共用邏輯 `src/utils/`、型別 `src/types.ts`、常數 `src/constants.ts`、勳章門檻 `src/utils/patternStage.ts`（`STAGE_THRESHOLDS`）
 - 擁有者的設計決策（除非擁有者改口，否則不可違反）：
   - 教材匯入是「逐句斷句＋翻譯」，**不可摘要或改寫原文**（要對上真人 mp3 時間軸）
   - 語言模型練習評分是「**精準背出原句**」，不放寬相似度
