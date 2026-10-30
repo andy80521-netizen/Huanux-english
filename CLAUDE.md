@@ -15,7 +15,7 @@
 - `bash scripts/check.sh` ＝ 型別檢查 → Vitest 測試（`tests/`，設定以受保護的 `vitest.config.ts` 為準）→ build。**這是「通過」的唯一定義**；有任何測試被跳過或 todo 也算失敗
 - 安裝套件一律用 `npm ci --ignore-scripts`（與 GitHub 驗證一致）
 - 畫面操作與 AI 生成內容無法自動驗證 → 列為「👀 手動試用」，寫清楚步驟
-- **預覽網站連的是正式 Firebase**：手動試用一律請擁有者用 **Email 測試帳號**登入。預覽網站**無法用 GitHub 登入**（每個 PR 網址不同，不在 Firebase 授權網域），也不應該用真實帳號
+- **預覽網站連的是正式 Firebase**：手動試用一律請擁有者用 **Email 測試帳號**登入。預覽網站**無法用 Google 登入**（每個 PR 網址不同，不在 Firebase 授權網域），也不應該用真實帳號
 
 ## 工作環境限制
 - **連不到 Gemini / OpenAI / OpenRouter 等 API**：其他 AI 一律透過 GitHub 參與
