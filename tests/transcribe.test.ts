@@ -123,3 +123,21 @@ describe('runTranscribeChain', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 });
+
+// 審查第 1 輪（Codex）：Gemini 缺少文字的異常回應不可當成「沒有人聲」
+import { transcriptFromGeminiResponse } from '../netlify/shared/transcribe';
+describe('transcriptFromGeminiResponse', () => {
+  it('有文字（含空字串）→ 回傳', () => {
+    expect(transcriptFromGeminiResponse({ text: ' I used to walk. ' })).toBe('I used to walk.');
+    expect(transcriptFromGeminiResponse({ text: '' })).toBe('');
+  });
+  it('沒有文字但正常結束 → 視為沒有人聲', () => {
+    expect(transcriptFromGeminiResponse({ candidates: [{ finishReason: 'STOP' }] })).toBe('');
+  });
+  it('被擋下、截斷、沒有回應 → null（當成失敗）', () => {
+    expect(transcriptFromGeminiResponse({ candidates: [{ finishReason: 'SAFETY' }] })).toBeNull();
+    expect(transcriptFromGeminiResponse({ candidates: [] })).toBeNull();
+    expect(transcriptFromGeminiResponse({})).toBeNull();
+    expect(transcriptFromGeminiResponse(null)).toBeNull();
+  });
+});

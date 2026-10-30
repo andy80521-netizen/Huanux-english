@@ -117,3 +117,16 @@ export async function runTranscribeChain(opts: {
   }
   return { ok: false, status: 502, error: '語音轉文字暫時失敗' };
 }
+
+/**
+ * Gemini 備援的回應 → 轉錄文字（PR B 審查第 1 輪，Codex）：
+ * 有文字（含空字串）→ 回傳；沒有文字但模型正常結束（finishReason 為 STOP）→ 視為沒有人聲，回傳 ''；
+ * 其他（被安全機制擋下、截斷、格式異常）→ null，呼叫端當成失敗，不可把供應商異常當成「使用者沒說話」
+ */
+export function transcriptFromGeminiResponse(resp: unknown): string | null {
+  const r = resp as { text?: unknown; candidates?: Array<{ finishReason?: string }> } | null | undefined;
+  if (!r) return null;
+  if (typeof r.text === 'string') return r.text.trim();
+  if (r.text === undefined && Array.isArray(r.candidates) && r.candidates[0]?.finishReason === 'STOP') return '';
+  return null;
+}

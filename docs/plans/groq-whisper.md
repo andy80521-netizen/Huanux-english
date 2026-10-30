@@ -127,3 +127,4 @@
 - 前端排隊／每位使用者限流（Nemotron、Grok）— 個人練習用量遠低於每分鐘 20 次，之後若 429 變多再考慮
 - 2026-10-30：驗收測試 commit `ed170e4`（`tests/transcribe.test.ts`、`tests/transcribeOrder.test.ts`），修改前失敗（推送前修正一處測試替身的型別宣告，斷言未變）
 - 2026-10-30：實作完成：`netlify/shared/transcribe.ts`（轉錄鏈、空白防呆、時間預算）、`transcribe-recording.ts` 改為 Groq → OpenAI、`ai-text` 的 Gemini 備援不用 flash-lite 且接受空字串、`TRANSCRIBE_PROMPT` 改寫、前端順序改為 Whisper → Gemini（413 不重試）、複述顯示模型並限制 64 kbps；`check.sh` 通過（775 測試）
+- 2026-10-30：審查第 1 輪（`31b2e68`）：Codex 🟠 Gemini 缺少文字的異常回應被當成「沒有人聲」→ 新增 `transcriptFromGeminiResponse`（有文字或正常結束才算成功），補 3 條測試（只新增）；Gemini 無意見；防作弊注意事項：`transcribeOrder.test.ts` mock 的是 Firebase、Firebase Storage、Gemini SDK 與 fetch／FileReader（外部依賴），被測的 `transcribeRecordingDetailed` 是真的
