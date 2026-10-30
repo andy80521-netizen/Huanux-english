@@ -50,6 +50,8 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 - 評分比對的英美拼字對照在 `src/utils/spellingVariants.ts`：只收發音相同的拼法、全部明確列出；不要加 `-our→-or`、`-ise→-ize` 通用規則（會誤改 hour、rise、promise），也不要做「相鄰兩字合併」（now here／nowhere 會被算對）（PR #24）
 - 個人頁同步狀態由 `App.tsx` 的 `createConnectionWatcher`（`src/utils/syncStatus.ts`）決定；只偵測網路與恢復連線後的上傳、以及 `syncError`，有網路時單筆寫入被拒絕不會反映在這裡（PR #26）
 - `tests/uiCopyBadgesProfile.test.ts` 規定 `animate-pulse` 一定要加 `motion-safe:`（減少動態時不閃）
+- 語言模型練習的評分是「一字不差」，所以題目必須足以還原原句：開放式「回答問題」「情境任務」「只看圖」會讓使用者照情境回答反被判錯（2026-10-31 擁有者回報 All that she wrote will be published 的題目變成「一本書」）。新題目（`cueVersion` 2）一律含完整意思，見 `src/utils/practiceCue.ts`（PR #29）
+- 檢查「是否直接用了句型」要依序比對句型片段（so ... that ...），不能把佔位拿掉後接成連續字串（PR #29 Codex 抓到）
 
 ## 防作弊機制的已知限制（2026-10-25 多輪攻擊測試後）
 - 「把斷言改弱」「mock 掉被測程式」「程式偵測測試環境」只能列為 ⚠️ 注意事項，無法自動判定是否作弊，要靠審查者與完成報告說明
@@ -119,3 +121,7 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 | 刪除 enableBackgroundAudioHack（PR #25，審查） | Codex／Gemini Flash | 0 | 0 | 小級刪除死碼，第 1 輪皆無意見 |
 | 個人頁同步狀態（PR #26，審查） | Codex／Gemini Flash | 0 | 0 | 小級，第 1 輪皆無意見 |
 | Google 登入＋忘記密碼（PR #27，審查） | Codex／Gemini Flash | 0 | 0 | 小級，第 1 輪皆無意見 |
+| 出題方式（PR #29，規劃） | Codex | 3 | 0 | 中文全意仍可能有多種譯法、要保留完整意思（🔴）；反向作答只能當篩檢；檢查耗盡與失敗的終止行為 |
+| 出題方式（PR #29，規劃） | Gemini／Nemotron／Poolside／DeepSeek／Grok | 6 | 3 | 新欄位並存、漸進更新不批次、看圖要附文字、方向 B 延後、單字庫（Grok）；駁回：中文題目不能朗讀（Gemini）、檢查不過就擋練習（Nemotron、Poolside）、允許 1 字差異（DeepSeek） |
+| 出題方式（PR #29，審查） | Codex | 2 | 0 | 當場產生的題目品質檢查結果被清空、句型中間有佔位時檢查失效 |
+| 出題方式（PR #29，審查） | Gemini Flash Lite（3.8 Flash 503／逾時） | 0 | 1 | 把 👀 手動項目判成「達成」（無法從程式判斷） |
