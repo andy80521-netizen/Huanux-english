@@ -2,7 +2,7 @@
 
 - **級別**：中（改動評分比對規則，影響影子跟讀與語言模型練習；不改資料結構、不新增套件）
 - **PR**：#24
-- **狀態**：已核准
+- **狀態**：審查中
 
 ## 目標
 原句用英式拼法（favourite、colour、realise、centre…），語音辨識（Whisper／Gemini）多半輸出美式拼法（favorite、color、realize、center）。兩種拼法**念起來一樣**，現在卻被算成念錯，造成：
@@ -33,7 +33,7 @@
   |---|---|---|
   | -our／-or | colour、favour、flavour、honour、humour、labour、neighbour、behaviour、harbour、rumour、vapour、endeavour、savour、tumour、odour、armour、vigour、rigour、parlour、candour、valour、splendour | 原形、+s、+ed、+ing、+ful、+fully、+less、+able、+ably、+ite、+ites、+hood、+hoods、+al、+ally、+er、+ers、+y、+ism |
   | -ise／-ize（明確動詞清單） | realise、organise、recognise、apologise、criticise、emphasise、memorise、summarise、prioritise、specialise、minimise、maximise、finalise、categorise、customise、familiarise、normalise、optimise、personalise、socialise、standardise、sympathise、utilise、visualise、authorise、modernise、characterise、civilise、globalise、hospitalise、immunise、legalise、mobilise、stabilise、symbolise、fertilise、harmonise、jeopardise、patronise、colonise、scrutinise、energise、agonise | 原形、+s、+d、去 e +ing、+r、+rs、去 e +ation、+ations、+able |
-  | -yse／-yze | analyse、paralyse、catalyse | 原形、+s、+d、去 e +ing |
+  | -yse／-yze | analyse、paralyse、catalyse | 原形、+d、去 e +ing（不收 analyses：也是 analysis 的複數，發音不同） |
   | -re／-er | centre、theatre、metre、litre、fibre、kilometre、centimetre、millimetre、calibre、sombre、lustre、spectre、meagre | 原形、+s、-red→-ered、-ring→-ering |
   | 雙 l／單 l | travel、cancel、label、model、fuel、signal、level、channel、marvel、quarrel、counsel、total、dial、duel | +led、+ling、+ler、+lers、+lor、+lors |
   | 個別字 | grey(s／ed／ish／ing)→gray、programme(s)→program(s)、programming／programing、cheque(s)→check(s)、tyre(s)→tire(s)、defence→defense、offence→offense、licence→license、pretence→pretense、practise(s／d)、practising→practice、catalogue(s)→catalog(s)、dialogue(s)→dialog(s)、analogue→analog、enrol(s)、enrolment(s)→enroll(s)、enrollment(s)、fulfil(s)、fulfilment→fulfill(s)、fulfillment、skilful(ly)→skillful(ly)、wilful(ly)→willful(ly)、judgement(s)→judgment(s)、ageing→aging、plough(s)→plow(s)、mould(s／y)→mold、doughnut(s)→donut(s)、storey(s)→story／stories、kerb→curb、sceptic(al)→skeptic(al)、manoeuvre(s)→maneuver(s)、cosy→cozy、moustache→mustache、draught→draft、gramme→gram、gaol→jail、okay→ok | 個別列出 |
@@ -99,4 +99,5 @@
 
 ## 進度紀錄
 - 2026-10-30：建立規劃文件，開草稿 PR #24，委員會與 Codex 第一輪完成，擁有者核准
-- 下一步：寫驗收測試（單獨 commit）→ 實作
+- 2026-10-30：驗收測試 `ec70084`（修改前因 spellingVariants 不存在而失敗）；實作完成，check.sh 通過（823 測試）
+- 下一步：Codex／Gemini 審查

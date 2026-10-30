@@ -1,4 +1,5 @@
 import { expandContractions } from '../utils';
+import { canonicalSpelling, COMPOUND_SPLITS } from './spellingVariants';
 
 const levenshteinDistance = (a: string, b: string) => {
   const matrix = [];
@@ -183,7 +184,7 @@ const numberTokens = (neg: string | undefined, intPart: string, frac: string | u
 // 一般文字片段（不含數字）：處理縮寫、所有格、符號
 const wordTokens = (segment: string, src: number, side: 'target' | 'user'): Token[] => {
     const tokens: Token[] = [];
-    const cleaned = segment.replace(/&/g, ' and ').replace(/%/g, ' percent ');
+    const cleaned = segment.replace(/&/g, ' and ').replace(/%/g, ' percent ').replace(/\be-mail/g, 'email');
     for (const raw of cleaned.split(/[^a-z0-9']+/)) {
         const w = raw.replace(/^'+|'+$/g, '');
         if (!w) continue;
@@ -191,7 +192,13 @@ const wordTokens = (segment: string, src: number, side: 'target' | 'user'): Toke
             tokens.push({ alts: [w.replace(/'/g, '')], src });   // 英數混合字（B12、1st、1990s）保留原樣比對
             continue;
         }
-        const parts = expandWord(w);
+        const split = COMPOUND_SPLITS.get(w);
+        if (split) {
+            split.forEach(x => tokens.push({ alts: [x], src }));   // 合寫字（alright → all right）
+            continue;
+        }
+        // 英美拼字換成同一種寫法（colour → color），原句與辨識結果兩邊都換
+        const parts = expandWord(w).map(alts => alts.map(canonicalSpelling));
         if (parts.length === 1 && side === 'user' && FILLER_WORDS.has(parts[0][0])) {
             tokens.push({ alts: parts[0], src, kind: 'filler' });
             continue;
@@ -202,7 +209,7 @@ const wordTokens = (segment: string, src: number, side: 'target' | 'user'): Toke
 };
 
 export const tokenizeForCompare = (text: string, side: 'target' | 'user'): { tokens: Token[]; words: string[] } => {
-    const words = (text || '').replace(/[‘’ʼ`]/g, "'").replace(/[−–—]/g, '-').split(/\s+/).filter(Boolean);
+    const words = (text || '').replace(/[‘’ʼ`]/g, "'").replace(/[−–—\u2010\u2011]/g, '-').split(/\s+/).filter(Boolean);
     const tokens: Token[] = [];
     words.forEach((word, src) => {
         const lower = word.toLowerCase();
