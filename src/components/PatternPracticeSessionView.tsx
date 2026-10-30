@@ -127,7 +127,7 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
     const [isPromptReady, setIsPromptReady] = useState<boolean>(true);
     const [promptStatus, setPromptStatus] = useState<'idle' | 'generating' | 'error'>('idle');
     const [promptError, setPromptError] = useState<string | null>(null);
-    const [generatedCue, setGeneratedCue] = useState<PracticeCue | null>(null);
+    const [generatedCue, setGeneratedCue] = useState<(PracticeCue & { cueVerified: boolean }) | null>(null);
     // 題目顯示依「開始練這一句時」的熟練度決定（念完分數上升也不會換題型）
     const [cueMastery, setCueMastery] = useState(0);
     const [showHint, setShowHint] = useState(false);        // 看提示：句型、中文意思（不影響熟練度）
@@ -172,7 +172,8 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
         || (sentenceObj && !needsNewCue(sentenceObj)
             ? { situationZh: sentenceObj.situationZh || '', meaningZh: sentenceObj.meaningZh || '', partnerLineEn: sentenceObj.partnerLineEn, meaningEn: sentenceObj.meaningEn }
             : null);
-    const cueVerified = generatedCue ? undefined : sentenceObj?.cueVerified;
+    // 當場產生的題目優先（Firestore 更新可能還沒回來）
+    const cueVerified = generatedCue ? generatedCue.cueVerified : sentenceObj?.cueVerified;
     const hasEnglish = !!(cue?.partnerLineEn && cue?.meaningEn);
     const display = cueDisplay(cueMastery, hasEnglish);
     const wordBank = sentenceObj?.text ? buildWordBank(sentenceObj.text) : [];

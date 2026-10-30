@@ -243,3 +243,18 @@ describe('畫面不再使用舊題目欄位（驗收 9）', () => {
     for (const f of ['cueVersion?: number', 'situationZh?: string', 'meaningZh?: string', 'cueVerified?: boolean']) expect(t).toContain(f);
   });
 });
+
+describe('審查修正（Codex 第 1 輪）', () => {
+  it('句型中間有佔位時，改寫仍依序用到句型 → 不可用', () => {
+    const base = { situationZh: '情境', meaningZh: '意思', partnerLineEn: 'How was your day?' };
+    const target = 'She was so tired that she fell asleep.';
+    expect(englishCueUsable({ ...base, meaningEn: 'She became so exhausted that she immediately drifted off.' }, target, 'so ... that ...')).toBe(false);
+    expect(englishCueUsable({ ...base, meaningEn: 'She was exhausted, and as a result she dozed off right away.' }, target, 'so ... that ...')).toBe(true);
+    expect(englishCueUsable({ ...base, meaningEn: 'Not only did he sing, but also he danced all night.' }, 'He not only sang but also danced.', 'not only ... but also ...')).toBe(false);
+    expect(englishCueUsable({ ...base, meaningEn: 'He sang and he danced as well, the whole night.' }, 'He not only sang but also danced.', 'not only ... but also ...')).toBe(true);
+  });
+  it('當場產生的題目保留品質檢查結果，畫面優先讀它', () => {
+    const view = read('src/components/PatternPracticeSessionView.tsx');
+    expect(view).toMatch(/const cueVerified = generatedCue \? generatedCue\.cueVerified : sentenceObj\?\.cueVerified;/);
+  });
+});

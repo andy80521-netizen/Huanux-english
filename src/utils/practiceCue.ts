@@ -28,12 +28,44 @@ export const cueDisplay = (mastery: number, hasEnglish: boolean): { lang: 'zh' |
 
 const CJK = /[\u3400-\u9fff\uf900-\ufaff]/;
 
-// 句型裡的實際單字（去掉 ...、[someone]、sb／sth、one's 這類佔位）
-const patternWords = (patternText: string): string[] =>
-    (patternText || '').toLowerCase()
-        .replace(/\[[^\]]*\]|\([^)]*\)|\.{2,}|…/g, ' ')
-        .split(/[^a-z']+/)
-        .filter(w => w && !['sb', 'sth', 'somebody', 'something', 'someone', "one's", 'do', 'doing', 'v', 'ving', 'n'].includes(w));
+// 句型拆成有順序的片段：佔位（...、[someone]、sb／sth、+ V 等）是片段之間的間隔
+// 例：so ... that ... → [so] [that]；not only ... but also → [not only] [but also]
+const PLACEHOLDER = new Set(['sb', 'sth', 'somebody', 'something', 'someone', "one's", 'do', 'doing', 'v', 'ving', 'n', 'adj', 'adv', 'noun', 'verb', 'clause']);
+const patternSegments = (patternText: string): string[][] => {
+    const marked = (patternText || '').toLowerCase()
+        .replace(/\[[^\]]*\]|\([^)]*\)|\.{2,}|…|\+|\/|=/g, ' | ');
+    const segments: string[][] = [];
+    let cur: string[] = [];
+    for (const tok of marked.split(/\s+/)) {
+        const w = tok.replace(/[^a-z'|]/g, '');
+        if (!w) continue;
+        if (w === '|' || PLACEHOLDER.has(w)) {
+            if (cur.length) segments.push(cur);
+            cur = [];
+        } else {
+            cur.push(w);
+        }
+    }
+    if (cur.length) segments.push(cur);
+    return segments;
+};
+
+// 句子是否依序用到句型的每個片段（片段內要連續，片段之間可以隔其他字）
+const usesPattern = (text: string, patternText: string): boolean => {
+    const segments = patternSegments(patternText);
+    if (segments.length === 0) return false;
+    const words = text.toLowerCase().replace(/[^a-z'\s]/g, ' ').split(/\s+/).filter(Boolean);
+    let from = 0;
+    for (const seg of segments) {
+        let found = -1;
+        for (let i = from; i + seg.length <= words.length; i++) {
+            if (seg.every((w, k) => words[i + k] === w)) { found = i; break; }
+        }
+        if (found < 0) return false;
+        from = found + seg.length;
+    }
+    return true;
+};
 
 // 英文題目可不可用：要有對方的話與英文改寫、都是英文、改寫和原句差夠多、沒有直接用句型
 export const englishCueUsable = (cue: PracticeCue, sentenceText: string, patternText: string): boolean => {
@@ -42,11 +74,7 @@ export const englishCueUsable = (cue: PracticeCue, sentenceText: string, pattern
     if (!partner || !meaning || CJK.test(partner) || CJK.test(meaning)) return false;
     const cmp = compareWords(meaning, sentenceText);
     if (cmp.errors < Math.max(2, Math.ceil(cmp.targetCount * 0.4))) return false;   // 太接近原句，等於給答案
-    const pw = patternWords(patternText);
-    if (pw.length > 0) {
-        const m = ` ${meaning.toLowerCase().replace(/[^a-z'\s]/g, ' ').replace(/\s+/g, ' ')} `;
-        if (m.includes(` ${pw.join(' ')} `)) return false;   // 直接用了句型
-    }
+    if (usesPattern(meaning, patternText)) return false;   // 直接用了句型
     return true;
 };
 
