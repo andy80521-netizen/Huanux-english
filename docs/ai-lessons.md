@@ -47,6 +47,8 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 - 用正則檢查原始碼的驗收測試，`[\s\S]*?` 可能跨到別處的程式而誤判通過；寫完要確認修改前真的會失敗（PR #15 有一條原本誤判通過，推送前已收緊）
 - 文案守門測試用正則抓屬性時，`onChange={(e) => …}` 裡的 `=>` 會讓 `[^>]*` 提早結束；className 放在事件屬性前面
 - 評分比對的英美拼字對照在 `src/utils/spellingVariants.ts`：只收發音相同的拼法、全部明確列出；不要加 `-our→-or`、`-ise→-ize` 通用規則（會誤改 hour、rise、promise），也不要做「相鄰兩字合併」（now here／nowhere 會被算對）（PR #24）
+- 個人頁同步狀態由 `App.tsx` 的 `createConnectionWatcher`（`src/utils/syncStatus.ts`）決定；只偵測網路與恢復連線後的上傳、以及 `syncError`，有網路時單筆寫入被拒絕不會反映在這裡（PR #26）
+- `tests/uiCopyBadgesProfile.test.ts` 規定 `animate-pulse` 一定要加 `motion-safe:`（減少動態時不閃）
 
 ## 防作弊機制的已知限制（2026-10-25 多輪攻擊測試後）
 - 「把斷言改弱」「mock 掉被測程式」「程式偵測測試環境」只能列為 ⚠️ 注意事項，無法自動判定是否作弊，要靠審查者與完成報告說明
@@ -114,3 +116,4 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 | 英美拼字（PR #24，規劃） | Gemini／Nemotron／Poolside／DeepSeek | 5 | 3 | 單字轉換與合寫拆字分開、e-mail 在切字前已被拆開、所有格順序、補齊缺字；駁回：IPA lint、NFC、超長輸入（超出範圍）；DeepSeek 建議納入 maybe 等合寫，擁有者選不納入 |
 | 英美拼字（PR #24，審查） | Codex／Gemini Flash | 0 | 0 | 第 1 輪皆無意見 |
 | 刪除 enableBackgroundAudioHack（PR #25，審查） | Codex／Gemini Flash | 0 | 0 | 小級刪除死碼，第 1 輪皆無意見 |
+| 個人頁同步狀態（PR #26，審查） | Codex／Gemini Flash | 0 | 0 | 小級，第 1 輪皆無意見 |
