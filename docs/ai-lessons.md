@@ -115,4 +115,5 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 | 英美拼字（PR #24，規劃） | Codex | 1 | 0 | 通用相鄰字合併會讓 now here／nowhere 算對（🔴） |
 | 英美拼字（PR #24，規劃） | Gemini／Nemotron／Poolside／DeepSeek | 5 | 3 | 單字轉換與合寫拆字分開、e-mail 在切字前已被拆開、所有格順序、補齊缺字；駁回：IPA lint、NFC、超長輸入（超出範圍）；DeepSeek 建議納入 maybe 等合寫，擁有者選不納入 |
 | 英美拼字（PR #24，審查） | Codex／Gemini Flash | 0 | 0 | 第 1 輪皆無意見 |
+| 刪除 enableBackgroundAudioHack（PR #25，審查） | Codex／Gemini Flash | 0 | 0 | 小級刪除死碼，第 1 輪皆無意見 |
 | 個人頁同步狀態（PR #26，審查） | Codex／Gemini Flash | 0 | 0 | 小級，第 1 輪皆無意見 |
