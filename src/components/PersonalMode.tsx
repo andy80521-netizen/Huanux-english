@@ -4,19 +4,21 @@ import { User as FirebaseUser, signOut, signInWithEmailAndPassword, createUserWi
 import { auth, isFirebaseReady, githubProvider, isUsingDefaultConfig } from '../firebase';
 import { getVoices, speakTextPromise } from '../utils';
 import { ThemeMode } from '../utils/theme';
+import type { SyncStatus } from '../utils/syncStatus';
 import SegmentedControl from './ui/SegmentedControl';
 import Button from './ui/Button';
 import IconButton from './ui/IconButton';
 
 interface Props {
   user: FirebaseUser | null;
+  syncStatus: SyncStatus;
   voicePrefs: { zh?: string, en?: string };
   setVoicePrefs: React.Dispatch<React.SetStateAction<{ zh: string, en: string }>>;
   themeMode: ThemeMode;
   setThemeMode: (mode: ThemeMode) => void;
 }
 
-const PersonalMode: React.FC<Props> = ({ user, voicePrefs, setVoicePrefs, themeMode, setThemeMode }) => {
+const PersonalMode: React.FC<Props> = ({ user, syncStatus, voicePrefs, setVoicePrefs, themeMode, setThemeMode }) => {
     const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([]);
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
@@ -288,7 +290,7 @@ const PersonalMode: React.FC<Props> = ({ user, voicePrefs, setVoicePrefs, themeM
                                     <div className="flex min-w-0 flex-col gap-1">
                                         <p className="text-lg font-bold text-ink break-words">{displayName}</p>
                                         <p className="text-[13px] text-muted break-all">{user.isAnonymous ? 'Anonymous User' : user.email}</p>
-                                        <p className="inline-flex items-center gap-1.5 text-[12px] text-accent"><span className="size-1.5 rounded-full bg-accent" aria-hidden="true" />資料同步中</p>
+                                        <SyncBadge status={syncStatus} />
                                     </div>
                                 </section>
                                 {user.isAnonymous && (
@@ -428,6 +430,23 @@ const PersonalMode: React.FC<Props> = ({ user, voicePrefs, setVoicePrefs, themeM
 };
 
 // Firebase 設定對話框：外觀沿用 ConfirmDialog；role="dialog"、Esc 關閉、開啟時焦點在關閉鈕（不自動聚焦輸入框，避免手機彈出鍵盤）
+// 同步狀態：已同步／同步中／離線／同步失敗（App.tsx 依網路與 Firestore 監聽結果決定）
+const SYNC_DISPLAY: Record<SyncStatus, { label: string; text: string; dot: string }> = {
+    synced: { label: '資料已同步', text: 'text-accent', dot: 'bg-accent' },
+    pending: { label: '資料同步中…', text: 'text-accent', dot: 'bg-accent motion-safe:animate-pulse' },
+    offline: { label: '離線中，恢復連線後會自動上傳', text: 'text-warn', dot: 'bg-warn' },
+    error: { label: '同步失敗', text: 'text-danger', dot: 'bg-danger' },
+};
+
+const SyncBadge: React.FC<{ status: SyncStatus }> = ({ status }) => {
+    const d = SYNC_DISPLAY[status];
+    return (
+        <p role="status" className={`inline-flex items-center gap-1.5 text-[12px] ${d.text}`}>
+            <span className={`size-1.5 shrink-0 rounded-full ${d.dot}`} aria-hidden="true" />{d.label}
+        </p>
+    );
+};
+
 const ConfigDialog: React.FC<{
     configJson: string;
     setConfigJson: (v: string) => void;
