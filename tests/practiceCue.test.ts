@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
-  CUE_VERSION, needsNewCue, cueDisplay, buildWordBank, createVerifiedCue, applyCueToSentence, canAccumulateWithHint,
+  CUE_VERSION, needsNewCue, cueDisplay, buildWordBank, createVerifiedCue, applyCueToSentence, canAccumulateWithHint, englishCueUsable,
 } from '../src/utils/practiceCue';
 import { buildPracticeCuePrompt, buildPracticeCueCheckPrompt } from '../netlify/shared/prompts';
 import { sanitizePracticeCue, sanitizeCueCheckAnswer, validCuePayload, validCueCheckPayload } from '../netlify/shared/practiceCue';
@@ -24,7 +24,7 @@ describe('出題提示詞（驗收 1）', () => {
   it('附上擁有者案例當反例（把「她寫的」換成「一本書」）', () => {
     expect(p).toContain('一本書');
   });
-  it('只要求 situationZh、meaningZh 兩個欄位', () => {
+  it('要求 situationZh、meaningZh 欄位，不再有舊題型', () => {
     expect(p).toContain('"situationZh"');
     expect(p).toContain('"meaningZh"');
     expect(p).not.toContain('qaQuestion');
@@ -113,16 +113,58 @@ describe('產生流程與品質檢查（驗收 3）', () => {
   });
 });
 
-describe('依熟練度顯示（驗收 4）', () => {
+describe('依熟練度顯示（驗收 4，擁有者 10/31 加上 500 以上改英文題目）', () => {
   it.each([
-    [0, { situation: true, pattern: true }],
-    [399, { situation: true, pattern: true }],
-    [400, { situation: false, pattern: true }],
-    [699, { situation: false, pattern: true }],
-    [700, { situation: false, pattern: false }],
-    [1000, { situation: false, pattern: false }],
-  ])('熟練度 %i', (m, expected) => {
-    expect(cueDisplay(m)).toEqual({ meaning: true, ...expected });
+    [0, { lang: 'zh', situation: true, pattern: true }],
+    [399, { lang: 'zh', situation: true, pattern: true }],
+    [400, { lang: 'zh', situation: false, pattern: true }],
+    [499, { lang: 'zh', situation: false, pattern: true }],
+    [500, { lang: 'en', situation: false, pattern: true }],
+    [699, { lang: 'en', situation: false, pattern: true }],
+    [700, { lang: 'en', situation: false, pattern: false }],
+    [1000, { lang: 'en', situation: false, pattern: false }],
+  ])('熟練度 %i（有英文題目）', (m, expected) => {
+    expect(cueDisplay(m, true)).toEqual(expected);
+  });
+  it('沒有可用的英文題目時，500 以上仍用中文', () => {
+    expect(cueDisplay(600, false)).toEqual({ lang: 'zh', situation: false, pattern: true });
+    expect(cueDisplay(800, false)).toEqual({ lang: 'zh', situation: false, pattern: false });
+  });
+});
+
+describe('英文題目（驗收 4b：對方的一句話＋英文改寫的意思）', () => {
+  const p = buildPracticeCuePrompt(OWNER, 'all that ...');
+  it('提示詞要求對方的一句話與不用原句用字的英文改寫', () => {
+    expect(p).toContain('"partnerLineEn"');
+    expect(p).toContain('"meaningEn"');
+    expect(p).toMatch(/不可使用句型/);
+  });
+  it('後端整理：英文欄位可有可無，含中文字時丟掉', () => {
+    expect(sanitizePracticeCue({ situationZh: '情境', meaningZh: '意思', partnerLineEn: ' Any news? ', meaningEn: ' Every piece of her writing is going to be released. ' }))
+      .toEqual({ situationZh: '情境', meaningZh: '意思', partnerLineEn: 'Any news?', meaningEn: 'Every piece of her writing is going to be released.' });
+    expect(sanitizePracticeCue({ situationZh: '情境', meaningZh: '意思', partnerLineEn: '有消息嗎', meaningEn: 'x' }))
+      .toEqual({ situationZh: '情境', meaningZh: '意思', partnerLineEn: '', meaningEn: 'x' });
+  });
+  it('英文改寫太接近原句、用了句型、缺對方的話 → 不可用', () => {
+    const base = { situationZh: '情境', meaningZh: '意思', partnerLineEn: 'Any news about her manuscripts?' };
+    expect(englishCueUsable({ ...base, meaningEn: 'Every piece of her writing is going to be released.' }, OWNER, 'all that ...')).toBe(true);
+    expect(englishCueUsable({ ...base, meaningEn: 'All that she wrote will be published.' }, OWNER, 'all that ...')).toBe(false);
+    expect(englishCueUsable({ ...base, meaningEn: 'All that she has written is going to be released.' }, OWNER, 'all that ...')).toBe(false);
+    expect(englishCueUsable({ ...base, meaningEn: '' }, OWNER, 'all that ...')).toBe(false);
+    expect(englishCueUsable({ ...base, partnerLineEn: '', meaningEn: 'Every piece of her writing is going to be released.' }, OWNER, 'all that ...')).toBe(false);
+  });
+  it('寫入時不可用的英文題目不存', () => {
+    const s: PatternExampleSentence = { id: 's1', text: OWNER, checked: true, groupIndex: 0, mastery: 0, attemptCount: 0 };
+    const withEn = applyCueToSentence(s, { situationZh: '情', meaningZh: '意', partnerLineEn: 'Hi?', meaningEn: 'Para.', cueVerified: true });
+    expect(withEn.partnerLineEn).toBe('Hi?');
+    expect(withEn.meaningEn).toBe('Para.');
+    const without = applyCueToSentence({ ...s, partnerLineEn: 'old', meaningEn: 'old' }, { situationZh: '情', meaningZh: '意', cueVerified: true });
+    expect('partnerLineEn' in without).toBe(false);
+    expect('meaningEn' in without).toBe(false);
+  });
+  it('練習畫面：英文題目先播語音、文字預設隱藏，中文意思在「看提示」', () => {
+    const view = read('src/components/PatternPracticeSessionView.tsx');
+    for (const w of ['顯示文字', '對方說', '你想表達', '看提示']) expect(view).toContain(w);
   });
 });
 
