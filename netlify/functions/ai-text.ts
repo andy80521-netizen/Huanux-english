@@ -1,6 +1,7 @@
 import { ThinkingLevel } from '@google/genai';
 import { verifyRealUser } from '../shared/auth';
-import { callGeminiFreeThenPaid, callQualityText } from '../shared/aiKeys';
+import { callGeminiFreeThenPaid, callQualityText, TRANSCRIBE_GEMINI_MODELS } from '../shared/aiKeys';
+import { transcriptFromGeminiResponse } from '../shared/transcribe';
 import {
     buildCheckSentencePrompt,
     buildPracticePromptsPrompt,
@@ -484,11 +485,13 @@ export default async (req: Request) => {
             const response = await callGeminiFreeThenPaid(task, (ai, model) => {
                 usedModel = model;
                 return ai.models.generateContent({ model, contents, config });
-            });
-            if (!response.text) {
-                throw new Error('Gemini API 回傳空內容');
+            }, TRANSCRIBE_GEMINI_MODELS);
+            // 空字串是合法結果（指令要求「沒有人聲就回傳空白」）；缺少文字的異常回應則當成失敗
+            const transcript = transcriptFromGeminiResponse(response);
+            if (transcript === null) {
+                throw new Error('Gemini API 回傳格式異常');
             }
-            result = { text: response.text.trim(), model: usedModel };
+            result = { text: transcript, model: usedModel };
         }
 
         return json(200, result);

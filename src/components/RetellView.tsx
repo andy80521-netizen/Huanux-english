@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Material } from '../types';
 import { ChevronLeft, Mic, Square, Loader2, Play, RotateCcw, Headphones, ChevronDown, AlertCircle } from 'lucide-react';
-import { transcribeRecording, RetellFeedback } from '../services/gemini';
+import { transcribeRecordingDetailed, RetellFeedback } from '../services/gemini';
+import { transcriberLabel } from '../utils/transcriber';
 import { RetellSegment, RetellTargetPattern, RetellRecord, reviewRetell, saveRetell, listRetells } from '../services/retell';
 import { getSpeechUrl } from '../services/speech';
 import { getSupportedMimeType } from '../utils/mediaRecorder';
@@ -28,6 +29,8 @@ export default function RetellView({ material, segment, segmentIndex, targetPatt
   const [processingText, setProcessingText] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [transcript, setTranscript] = useState('');
+  // 這次由哪個模型轉錄（只顯示當次，不存進歷史紀錄）
+  const [transcriber, setTranscriber] = useState('');
   const [feedback, setFeedback] = useState<RetellFeedback | null>(null);
   const [segmentPlaying, setSegmentPlaying] = useState(false);
   const [modelLoading, setModelLoading] = useState(false);
@@ -105,7 +108,9 @@ export default function RetellView({ material, segment, segmentIndex, targetPatt
       let text = transcriptRef.current;
       if (!text) {
         setProcessingText('語音辨識中…');
-        text = (await transcribeRecording(new File([blob], 'retell.webm', { type: blob.type }))).trim();
+        const r = await transcribeRecordingDetailed(new File([blob], 'retell.webm', { type: blob.type }));
+        text = r.text.trim();
+        setTranscriber(transcriberLabel(r.model));
         if (!text) throw new Error('沒有辨識到內容，請再說一次');
         transcriptRef.current = text;
         setTranscript(text);
@@ -160,7 +165,8 @@ export default function RetellView({ material, segment, segmentIndex, targetPatt
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
       streamRef.current = stream;
       const mimeType = getSupportedMimeType();
-      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      // 限制 64 kbps：3 分鐘約 1.5 MB，不會超過上傳上限；語音已足夠清楚
+      const recorder = new MediaRecorder(stream, { ...(mimeType ? { mimeType } : {}), audioBitsPerSecond: 64000 });
       mediaRecorderRef.current = recorder;
       chunksRef.current = [];
       recorder.ondataavailable = (e) => {
@@ -367,7 +373,10 @@ export default function RetellView({ material, segment, segmentIndex, targetPatt
             <div ref={resultRef} className="mt-10 flex max-w-[680px] scroll-mt-4 flex-col gap-8 border-t border-line pt-8">
               {transcript && (
                 <section className="flex flex-col gap-1.5">
-                  <p className="text-xs text-muted">你說的（語音辨識）</p>
+                  <p className="flex flex-wrap items-baseline justify-between gap-x-3 text-xs text-muted">
+                    <span>你說的（語音辨識）</span>
+                    {transcriber && <span className="text-[11px] text-muted/80">語音辨識：{transcriber}</span>}
+                  </p>
                   <p lang="en" className="text-[15px] leading-relaxed text-ink">{transcript}</p>
                 </section>
               )}
