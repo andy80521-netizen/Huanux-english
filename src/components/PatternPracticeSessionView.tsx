@@ -1,7 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { LanguagePattern, PatternExampleSentence } from '../types';
 import { getSupportedMimeType } from '../utils/mediaRecorder';
-import { transcribeRecording } from '../services/gemini';
+import { transcribeRecordingDetailed } from '../services/gemini';
+import { shouldStopForSilence } from '../utils/silenceDetection';
+import { transcriberLabel } from '../utils/transcriber';
 import { calculateFinalScores, canAccumulatePattern, PracticeScores } from '../utils/scoring';
 import WordDiffView from './WordDiffView';
 import { generateAndSavePracticePrompts } from '../services/practicePrompts';
@@ -141,6 +143,8 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
     const [scoreResult, setScoreResult] = useState<PracticeScores | null>(null);
     const [userText, setUserText] = useState<string>('');
+    // 這次由哪個模型轉錄（結果頁小字顯示，診斷用）
+    const [transcriber, setTranscriber] = useState('');
     const [currentMastery, setCurrentMastery] = useState<number>(0);
     const [tierBlockInfo, setTierBlockInfo] = useState<{ blocked: boolean, waitDays: number } | null>(null);
     const [isPromptReady, setIsPromptReady] = useState<boolean>(true);
@@ -167,6 +171,8 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
     const analyserRef = useRef<AnalyserNode | null>(null);
     const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
     const silenceTimerRef = useRef<number>(0);
+    // 是否已經偵測到開口：開口前給較長的等待時間（回想句子），開口後中途停頓也不會太快被切斷
+    const heardSpeechRef = useRef(false);
     const requestAnimationFrameRef = useRef<number>(0);
     const audioChunksRef = useRef<Blob[]>([]);
     const recordingStartTimeRef = useRef<number>(0);
@@ -386,14 +392,20 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
         if (averageVolume < 20) {
             if (silenceTimerRef.current === 0) {
                 silenceTimerRef.current = Date.now();
-            } else if (Date.now() - silenceTimerRef.current > 1500) {
-                // Silence detected for 1.5 seconds
+            }
+            if (shouldStopForSilence({
+                now: Date.now(),
+                startedAt: recordingStartTimeRef.current,
+                heardSpeech: heardSpeechRef.current,
+                silentSince: silenceTimerRef.current,
+            })) {
                 if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
                     mediaRecorderRef.current.stop();
                 }
                 return;
             }
         } else {
+            heardSpeechRef.current = true;
             silenceTimerRef.current = 0;
         }
 
@@ -407,8 +419,9 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
         const file = new File([blob], 'record.webm', { type: blob.type });
 
         try {
-            const transcribedText = await transcribeRecording(file);
+            const { text: transcribedText, model } = await transcribeRecordingDetailed(file);
             setUserText(transcribedText);
+            setTranscriber(transcriberLabel(model));
             const scores = calculateFinalScores(transcribedText, sentenceObj.text, durationSec);
             setScoreResult(scores);
             // 【v3.11】精準背出原句：一字不差才累加熟練度
@@ -501,6 +514,7 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
             mediaRecorderRef.current = mediaRecorder;
             audioChunksRef.current = [];
             silenceTimerRef.current = 0;
+            heardSpeechRef.current = false;
 
             const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
             const audioCtx = new AudioContextClass();
@@ -799,7 +813,10 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
                         {/* 您念的內容與逐字比對 */}
                         {scored && scoreResult && (
                                     <div className="flex min-w-0 flex-col gap-2 @[60rem]:col-start-2 @[60rem]:row-start-2">
-                                        <span className="text-xs text-muted">您念的內容 (語音辨識)</span>
+                                        <span className="flex flex-wrap items-baseline justify-between gap-x-3 text-xs text-muted">
+                                            <span>您念的內容 (語音辨識)</span>
+                                            {transcriber && <span className="text-[11px] text-muted/80">語音辨識：{transcriber}</span>}
+                                        </span>
                                         <p lang="en" className="text-[15px] leading-relaxed text-ink break-words">{userText}</p>
                                         <WordDiffView diff={scoreResult.diff} />
                                         <button

@@ -6,6 +6,8 @@ export const RECORDING_ORIGINAL_VOLUME = 0.5;
 export const OVERLAY_ORIGINAL_VOLUME = 0.5;
 /** 重疊播放對齊延遲上限：只用來擋壞掉的時間戳 */
 export const OVERLAY_OFFSET_MAX_MS = 3000;
+/** 先開始錄音、等這麼久再播原音：避免錄音還沒真正開始，原音開頭沒錄到（PR A，2026-10-30） */
+export const PLAYBACK_LEAD_MS = 300;
 /** 「不再提醒」記在瀏覽器（帶版本，日後改提醒內容可再顯示一次） */
 export const HEADPHONE_TIP_KEY = 'huanux_headphone_tip_dismissed_v1';
 

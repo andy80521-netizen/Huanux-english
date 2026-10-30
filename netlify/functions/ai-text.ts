@@ -479,13 +479,16 @@ export default async (req: Request) => {
                 temperature: 0.1,
                 thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL }
             };
-            const response = await callGeminiFreeThenPaid(task, (ai, model) =>
-                ai.models.generateContent({ model, contents, config })
-            );
+            // 記下實際成功的模型（依序嘗試，最後一次呼叫的就是成功的那個），回傳給前端顯示（診斷用）
+            let usedModel = '';
+            const response = await callGeminiFreeThenPaid(task, (ai, model) => {
+                usedModel = model;
+                return ai.models.generateContent({ model, contents, config });
+            });
             if (!response.text) {
                 throw new Error('Gemini API 回傳空內容');
             }
-            result = { text: response.text.trim() };
+            result = { text: response.text.trim(), model: usedModel };
         }
 
         return json(200, result);

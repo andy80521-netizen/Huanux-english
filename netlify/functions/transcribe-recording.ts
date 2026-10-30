@@ -75,7 +75,7 @@ export default async (req: Request) => {
             console.error('Whisper API error:', openAiResponse.status, data?.error?.message);
             return json(502, { error: `Whisper 轉錄失敗 (${openAiResponse.status})` });
         }
-        return json(200, { text: typeof data?.text === 'string' ? data.text : '' });
+        return json(200, { text: typeof data?.text === 'string' ? data.text : '', model: 'whisper-1' });
     } catch (err: any) {
         console.error('transcribe-recording error:', err?.message);
         return json(500, { error: 'Whisper 轉錄過程發生錯誤' });
