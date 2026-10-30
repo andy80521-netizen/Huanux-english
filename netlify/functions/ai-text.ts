@@ -1,10 +1,12 @@
 import { ThinkingLevel } from '@google/genai';
 import { verifyRealUser } from '../shared/auth';
 import { callGeminiFreeThenPaid, callQualityText, TRANSCRIBE_GEMINI_MODELS } from '../shared/aiKeys';
+import { validCuePayload, validCueCheckPayload, sanitizePracticeCue, sanitizeCueCheckAnswer } from '../shared/practiceCue';
 import { transcriptFromGeminiResponse } from '../shared/transcribe';
 import {
     buildCheckSentencePrompt,
-    buildPracticePromptsPrompt,
+    buildPracticeCuePrompt,
+    buildPracticeCueCheckPrompt,
     buildRegenerateSeedsPrompt,
     buildExtractFromSentencePrompt,
     buildExtractFromTextPrompt,
@@ -106,7 +108,8 @@ export default async (req: Request) => {
     const { task, payload } = body || {};
     const ALLOWED_TASKS = [
         'checkSentence',
-        'practicePrompts',
+        'practiceCue',
+        'practiceCueCheck',
         'regenerateSeeds',
         'extractFromSentence',
         'extractFromText',
@@ -164,25 +167,27 @@ export default async (req: Request) => {
                     ...(revisionNotes.length > 0 ? { revisionNotes } : {})
                 } : {})
             };
-        } else if (task === 'practicePrompts') {
-            if (
-                !payload ||
-                typeof payload.sentenceText !== 'string' ||
-                typeof payload.patternText !== 'string' ||
-                payload.sentenceText.length < 1 ||
-                payload.sentenceText.length > 500 ||
-                payload.patternText.length < 1 ||
-                payload.patternText.length > 500
-            ) {
+        } else if (task === 'practiceCue') {
+            if (!validCuePayload(payload)) {
                 return json(400, { error: '輸入格式不正確' });
             }
-            const prompt = buildPracticePromptsPrompt(payload.sentenceText, payload.patternText);
-            const config = { temperature: 0.3 };
-            const text = await callQualityText(task, prompt, config.temperature);
+            const prompt = buildPracticeCuePrompt(payload.sentenceText, payload.patternText);
+            const text = await callQualityText(task, prompt, 0.4);
             if (!text) {
                 throw new Error('無法從 Gemini 取得內容');
             }
-            result = cleanAndParseJSON(text);
+            const cue = sanitizePracticeCue(cleanAndParseJSON(text));
+            if (!cue) {
+                throw new Error('產生的題目格式不正確');
+            }
+            result = cue;
+        } else if (task === 'practiceCueCheck') {
+            if (!validCueCheckPayload(payload)) {
+                return json(400, { error: '輸入格式不正確' });
+            }
+            const prompt = buildPracticeCueCheckPrompt({ situationZh: payload.situationZh, meaningZh: payload.meaningZh, patternText: payload.patternText });
+            const text = await callQualityText(task, prompt, 0);
+            result = { answer: sanitizeCueCheckAnswer(text || '') };
         } else if (task === 'regenerateSeeds') {
             const pattern = payload?.pattern;
             const avoidSentences = payload?.avoidSentences;

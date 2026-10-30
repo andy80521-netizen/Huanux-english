@@ -231,7 +231,7 @@ export default function TodayReviewView({ tabs }: { tabs?: React.ReactNode }) {
             ...maintenanceItems.reduce<PatternExampleSentence[]>((acc, m) => acc.concat(m.sentences), []),
             ...reviewGroups.reduce<PatternExampleSentence[]>((acc, g) => acc.concat(g.items.map(it => it.sentence)), [])
         ];
-        void prefetchSpeech(sentences.reduce<string[]>((acc, s) => acc.concat([s.qaQuestion || '', s.situationalPrompt || '', s.text || '']), []));
+        void prefetchSpeech(sentences.reduce<string[]>((acc, s) => acc.concat([s.meaningZh || '', s.partnerLineEn || '', s.meaningEn || '', s.text || '']), []));
     }, [loading, maintenanceItems, reviewGroups]);
 
     // 本組完成畫面：長條的金色增加段只長高一次；減少動態效果時直接顯示
@@ -307,7 +307,7 @@ export default function TodayReviewView({ tabs }: { tabs?: React.ReactNode }) {
         setIsSummary(false);
         setActiveItemKey(`${queue[0].pattern.id}::${queue[0].sentence.id}`);
         // 預先產生第 2、3 題的語音（第 1 題由練習畫面當場取得）
-        void prefetchSpeech(item.sentences.slice(1).reduce<string[]>((acc, s) => acc.concat([s.qaQuestion || '', s.situationalPrompt || '', s.text || '']), []));
+        void prefetchSpeech(item.sentences.slice(1).reduce<string[]>((acc, s) => acc.concat([s.meaningZh || '', s.partnerLineEn || '', s.meaningEn || '', s.text || '']), []));
     };
 
     // 三句都做完才結算；任何一句沒有結果（例如跳過）就不計算，下次重做

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { LanguagePattern, PatternExampleSentence } from '../types';
+import { needsNewCue } from '../utils/practiceCue';
 import { ChevronLeft, ChevronDown, Target, Sparkles, Image as ImageIcon, PenTool } from 'lucide-react';
 import Button from './ui/Button';
 import IconButton from './ui/IconButton';
@@ -104,13 +105,15 @@ export default function GroupDetailView({ pattern, groupIndex, onBack, onEnterGr
 
                 {isExpanded && sentence && (
                   <div className="flex flex-col gap-3.5 border-t border-line px-4 pt-3.5 pb-4">
-                    {promptBlock(<Target size={14} aria-hidden="true" />, '問答題',
-                      <p lang={sentence.qaQuestion ? 'en' : undefined} className="text-sm leading-relaxed text-ink">{sentence.qaQuestion || '尚未產生（練習時會自動產生）'}</p>)}
-                    {promptBlock(<Sparkles size={14} aria-hidden="true" />, '情境題',
-                      <p className="text-sm leading-relaxed text-ink">{sentence.situationalPrompt || '尚未產生（練習時會自動產生）'}</p>)}
-                    {promptBlock(<ImageIcon size={14} aria-hidden="true" />, '看圖題',
+                    {promptBlock(<Target size={14} aria-hidden="true" />, '中文意思',
+                      <p className="text-sm leading-relaxed text-ink">{(!needsNewCue(sentence) && sentence.meaningZh) || '尚未產生（練習時會自動產生）'}</p>)}
+                    {promptBlock(<Sparkles size={14} aria-hidden="true" />, '情境',
+                      <p className="text-sm leading-relaxed text-ink">{(!needsNewCue(sentence) && sentence.situationZh) || '尚未產生（練習時會自動產生）'}</p>)}
+                    {!needsNewCue(sentence) && sentence.partnerLineEn && sentence.meaningEn && promptBlock(<Sparkles size={14} aria-hidden="true" />, '英文題目（熟練度 500 以上）',
+                      <p lang="en" className="text-sm leading-relaxed text-ink">對方說：{sentence.partnerLineEn}<br />你想表達：{sentence.meaningEn}</p>)}
+                    {promptBlock(<ImageIcon size={14} aria-hidden="true" />, '情境插圖',
                       sentence.imageUrl ? (
-                        <img src={sentence.imageUrl} alt="看圖題圖片" loading="lazy" className="max-h-56 w-full rounded-xl object-cover" referrerPolicy="no-referrer" />
+                        <img src={sentence.imageUrl} alt="情境插圖" loading="lazy" className="max-h-56 w-full rounded-xl object-cover" referrerPolicy="no-referrer" />
                       ) : (
                         <p className="text-sm leading-relaxed text-ink">尚未產生（練習時會自動補產）</p>
                       ))}

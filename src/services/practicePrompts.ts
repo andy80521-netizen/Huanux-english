@@ -1,31 +1,38 @@
 import { doc, runTransaction } from 'firebase/firestore';
 import { db, auth, appId } from '../firebase';
-import { generatePracticePrompts } from './gemini';
+import { generatePracticeCue, checkPracticeCue } from './gemini';
 import { prefetchSpeech } from './speech';
 import { PatternExampleSentence } from '../types';
+import { createVerifiedCue, applyCueToSentence, englishCueUsable, PracticeCue } from '../utils/practiceCue';
 
-export async function generateAndSavePracticePrompts(
+// 產生並儲存練習題目（v2：中文情境＋完整中文意思），取代舊版題目
+// 規劃：docs/plans/practice-prompt-design.md
+export async function generateAndSavePracticeCue(
   patternId: string,
   sentenceId: string,
   sentenceText: string,
   patternText: string
-): Promise<{ qaQuestion: string; situationalPrompt: string }> {
+): Promise<PracticeCue & { cueVerified: boolean }> {
   const uid = auth.currentUser?.uid;
   if (!uid) {
     throw new Error('請先登入');
   }
 
-  const prompts = await generatePracticePrompts(sentenceText, patternText);
-
-  if (
-    !prompts ||
-    typeof prompts.qaQuestion !== 'string' ||
-    typeof prompts.situationalPrompt !== 'string' ||
-    prompts.qaQuestion.trim() === '' ||
-    prompts.situationalPrompt.trim() === ''
-  ) {
-    throw new Error('產生的題目格式不正確，請再試一次');
-  }
+  const verified = await createVerifiedCue({
+    sentenceText,
+    generate: async () => {
+      const c = await generatePracticeCue(sentenceText, patternText);
+      if (!c || typeof c.situationZh !== 'string' || typeof c.meaningZh !== 'string' || !c.meaningZh.trim()) {
+        throw new Error('產生的題目格式不正確，請再試一次');
+      }
+      return { situationZh: c.situationZh, meaningZh: c.meaningZh, partnerLineEn: c.partnerLineEn || '', meaningEn: c.meaningEn || '' };
+    },
+    check: (c) => checkPracticeCue({ situationZh: c.situationZh, meaningZh: c.meaningZh }, patternText),
+  });
+  // 英文題目（熟練度 500 以上用）太接近原句或用了句型時不存，改用中文題目
+  const cue = englishCueUsable(verified, sentenceText, patternText)
+    ? verified
+    : { situationZh: verified.situationZh, meaningZh: verified.meaningZh, cueVerified: verified.cueVerified };
 
   const patternRef = doc(db, `artifacts/${appId}/users/${uid}/languagePatterns/${patternId}`);
 
@@ -46,21 +53,12 @@ export async function generateAndSavePracticePrompts(
       throw new Error('句子內容已變更，請重新進入練習');
     }
 
-    const updatedSentences = sentences.map((s) =>
-      s.id === sentenceId
-        ? {
-            ...s,
-            qaQuestion: prompts.qaQuestion,
-            situationalPrompt: prompts.situationalPrompt
-          }
-        : s
-    );
-
+    const updatedSentences = sentences.map((s) => (s.id === sentenceId ? applyCueToSentence(s, cue) : s));
     tx.update(patternRef, { exampleSentences: updatedSentences });
   });
 
-  // 題目存好後，背景預先產生兩種題目與答案原句的語音
-  void prefetchSpeech([prompts.qaQuestion, prompts.situationalPrompt, sentenceText]);
+  // 題目存好後，背景預先產生題目與答案原句的語音
+  void prefetchSpeech([cue.meaningZh, cue.partnerLineEn || '', cue.meaningEn || '', sentenceText]);
 
-  return prompts;
+  return cue;
 }
