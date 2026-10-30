@@ -46,6 +46,7 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 - `onSnapshot` 一定要處理錯誤回呼：Firestore 出錯後會結束該監聽，只印 console 會讓畫面永遠停在「載入中」；文件監聽也要處理 `exists()` 為 false。重試用 `retryKey` 放進 effect 依賴重新訂閱（PR #15）
 - 用正則檢查原始碼的驗收測試，`[\s\S]*?` 可能跨到別處的程式而誤判通過；寫完要確認修改前真的會失敗（PR #15 有一條原本誤判通過，推送前已收緊）
 - 文案守門測試用正則抓屬性時，`onChange={(e) => …}` 裡的 `=>` 會讓 `[^>]*` 提早結束；className 放在事件屬性前面
+- 評分比對的英美拼字對照在 `src/utils/spellingVariants.ts`：只收發音相同的拼法、全部明確列出；不要加 `-our→-or`、`-ise→-ize` 通用規則（會誤改 hour、rise、promise），也不要做「相鄰兩字合併」（now here／nowhere 會被算對）（PR #24）
 
 ## 防作弊機制的已知限制（2026-10-25 多輪攻擊測試後）
 - 「把斷言改弱」「mock 掉被測程式」「程式偵測測試環境」只能列為 ⚠️ 注意事項，無法自動判定是否作弊，要靠審查者與完成報告說明
@@ -109,3 +110,6 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 | Groq Whisper（PR #23，規劃） | Grok／Gemini／Nemotron | 7 | 2 | Gemini 不用 flash-lite、缺欄位不誤刪、太短不送、413 不重試、64 kbps、日誌不記文字；駁回：whisper-1 改名（Grok）、前端限流（Nemotron） |
 | Groq Whisper（PR #23，審查） | Codex | 1 | 0 | Gemini 缺少文字的回應被當成「沒有人聲」 |
 | Groq Whisper（PR #23，審查） | Gemini Flash | 0 | 0 | 兩輪皆無意見 |
+| 英美拼字（PR #24，規劃） | Codex | 1 | 0 | 通用相鄰字合併會讓 now here／nowhere 算對（🔴） |
+| 英美拼字（PR #24，規劃） | Gemini／Nemotron／Poolside／DeepSeek | 5 | 3 | 單字轉換與合寫拆字分開、e-mail 在切字前已被拆開、所有格順序、補齊缺字；駁回：IPA lint、NFC、超長輸入（超出範圍）；DeepSeek 建議納入 maybe 等合寫，擁有者選不納入 |
+| 英美拼字（PR #24，審查） | Codex／Gemini Flash | 0 | 0 | 第 1 輪皆無意見 |
