@@ -2,7 +2,7 @@
 
 - **級別**：中（改動評分比對規則，影響影子跟讀與語言模型練習；不改資料結構、不新增套件）
 - **PR**：#24
-- **狀態**：審查中
+- **狀態**：完成（等擁有者試用與 Merge）
 
 ## 目標
 原句用英式拼法（favourite、colour、realise、centre…），語音辨識（Whisper／Gemini）多半輸出美式拼法（favorite、color、realize、center）。兩種拼法**念起來一樣**，現在卻被算成念錯，造成：
@@ -100,4 +100,5 @@
 ## 進度紀錄
 - 2026-10-30：建立規劃文件，開草稿 PR #24，委員會與 Codex 第一輪完成，擁有者核准
 - 2026-10-30：驗收測試 `ec70084`（修改前因 spellingVariants 不存在而失敗）；實作完成，check.sh 通過（823 測試）
-- 下一步：Codex／Gemini 審查
+- 2026-10-30：審查第 1 輪 Codex、Gemini Flash 皆無意見；verify／guard 通過
+- 下一步：擁有者試用後 Merge
