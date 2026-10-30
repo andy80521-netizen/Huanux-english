@@ -6,7 +6,8 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 <!-- 容易出錯的地方、隱藏的相依關係、環境差異 -->
 - 預覽網站（Netlify deploy preview）連的是**正式 Firebase**（`src/firebase.ts` 寫死專案），試用一律用測試帳號
 - 預覽網站的 Netlify functions 使用正式的 Gemini／OpenAI 金鑰，試用會產生 API 費用
-- 預覽網站**無法用 GitHub 登入**（每個 PR 網址不同，不在 Firebase 授權網域）；手動試用一律用 **Email 測試帳號**
+- 預覽網站**無法用 Google 登入**（2026-10-30 起取代 GitHub 登入；每個 PR 網址不同，不在 Firebase 授權網域）；手動試用一律用 **Email 測試帳號**
+- Firebase 專案 `huanux-english` 的帳號系統與 CasHu（Google 登入、另一個具名 Firestore 資料庫）共用：未驗證的 Gmail 帳號第一次用 Google 登入時，Firebase 會**移除原本的密碼登入**（UID 不變、資料還在），用「忘記密碼？」或主控台重設密碼即可恢復（2026-10-30 擁有者遇到）
 - push 後幾秒內就轉正式審查，PR 驗證與防作弊檢查可能都變成 skipped；`gh_ai.py wait` 會自動偵測並關閉再重開 PR 重新觸發
 - Gemini Flash 免費版經常 HTTP 503（過載，PR #2、#4 都發生）；委員會與 Gemini 審查會自動重試，仍失敗時依序改用其他 Gemini 模型（可用 variable `AI_GEMINI_FALLBACK` 調整），審查最後才改用 DeepSeek
 - 2026-10-27 起 Gemini 指定 `gemini-3.8-flash`（免費版最新 Flash），不用 `gemini-flash-latest` 別名（依 Google 更新紀錄，別名當時指向 3.5 Flash，該模型 10/8 起被導向 3.6 Flash）；回覆會附上 Google 回報的實際模型。Pro／Argon 只能付費
@@ -117,3 +118,4 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 | 英美拼字（PR #24，審查） | Codex／Gemini Flash | 0 | 0 | 第 1 輪皆無意見 |
 | 刪除 enableBackgroundAudioHack（PR #25，審查） | Codex／Gemini Flash | 0 | 0 | 小級刪除死碼，第 1 輪皆無意見 |
 | 個人頁同步狀態（PR #26，審查） | Codex／Gemini Flash | 0 | 0 | 小級，第 1 輪皆無意見 |
+| Google 登入＋忘記密碼（PR #27，審查） | Codex／Gemini Flash | 0 | 0 | 小級，第 1 輪皆無意見 |

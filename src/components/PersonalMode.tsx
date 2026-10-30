@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useId, useRef } from 'react';
-import { ChevronDown, AudioLines, LogOut, Mail, Lock, LogIn, UserPlus, Loader2, Moon, Sun, Monitor, User, Database, Save, X, Github, RefreshCw, AlertCircle, ExternalLink } from 'lucide-react';
-import { User as FirebaseUser, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword, signInAnonymously, updateProfile, signInWithPopup } from 'firebase/auth';
-import { auth, isFirebaseReady, githubProvider, isUsingDefaultConfig } from '../firebase';
+import { ChevronDown, AudioLines, LogOut, Mail, Lock, LogIn, UserPlus, Loader2, Moon, Sun, Monitor, User, Database, Save, X, RefreshCw, AlertCircle, ExternalLink } from 'lucide-react';
+import { User as FirebaseUser, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword, signInAnonymously, updateProfile, signInWithPopup, sendPasswordResetEmail } from 'firebase/auth';
+import { auth, isFirebaseReady, googleProvider, isUsingDefaultConfig } from '../firebase';
+import { googleLoginErrorMessage, resetPasswordErrorMessage, RESET_SENT_MESSAGE } from '../utils/authMessages';
 import { getVoices, speakTextPromise } from '../utils';
 import { ThemeMode } from '../utils/theme';
 import type { SyncStatus } from '../utils/syncStatus';
@@ -26,6 +27,7 @@ const PersonalMode: React.FC<Props> = ({ user, syncStatus, voicePrefs, setVoiceP
     const [isLoginMode, setIsLoginMode] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
+    const [notice, setNotice] = useState<string | null>(null);   // 重設密碼信已寄出
     
     // Config Modal State
     const [showConfig, setShowConfig] = useState(false);
@@ -48,6 +50,7 @@ const PersonalMode: React.FC<Props> = ({ user, syncStatus, voicePrefs, setVoiceP
     const handleAuth = async (e: React.FormEvent) => {
         e.preventDefault();
         setError(null);
+        setNotice(null);
         setLoading(true);
 
         if (!isFirebaseReady) {
@@ -91,31 +94,53 @@ const PersonalMode: React.FC<Props> = ({ user, syncStatus, voicePrefs, setVoiceP
         }
     };
 
-    const handleGithubLogin = async () => {
+    const handleGoogleLogin = async () => {
         setError(null);
-        setLoading(true);
+        setNotice(null);
         if (!isFirebaseReady) {
             setError('系統未連線：請先設定 Firebase');
-            setLoading(false);
             setShowConfig(true);
             return;
         }
+        setLoading(true);
         try {
-            await signInWithPopup(auth, githubProvider);
+            await signInWithPopup(auth, googleProvider);
         } catch (err: any) {
-            console.error("GitHub Login Error:", err);
-            let msg = err.message || 'GitHub 登入失敗';
-            
-            if (msg.includes('account-exists-with-different-credential')) msg = '此 Email 已使用其他方式登入';
-            else if (msg.includes('popup-closed-by-user')) msg = '登入視窗已關閉';
-            else if (msg.includes('auth/popup-blocked')) msg = '彈出視窗被封鎖，請允許彈出視窗';
-            else if (msg.includes('configuration-not-found')) msg = 'Firebase 尚未啟用 GitHub 登入';
-            else if (msg.includes('auth/unauthorized-domain')) msg = '網域未授權：請至 Firebase Console 新增此網域';
-            else if (msg.includes('api-key-not-valid') || msg.includes('auth/invalid-api-key')) {
-                 msg = 'API Key 無效';
-                 setShowConfig(true);
+            console.error("Google Login Error:", err);
+            if (String(err?.code ?? err?.message ?? '').match(/api-key-not-valid|invalid-api-key/)) {
+                setError('API Key 無效');
+                setShowConfig(true);
+            } else {
+                setError(googleLoginErrorMessage(err));
             }
-            setError(msg);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // 忘記密碼：寄重設信；不論帳號是否存在都顯示同一句提示
+    const handleResetPassword = async () => {
+        setError(null);
+        setNotice(null);
+        const target = email.trim();
+        if (!target) {
+            setError('請先輸入 Email');
+            return;
+        }
+        if (!isFirebaseReady) {
+            setError('系統未連線：請先設定 Firebase');
+            setShowConfig(true);
+            return;
+        }
+        setLoading(true);
+        try {
+            await sendPasswordResetEmail(auth, target);
+            setNotice(RESET_SENT_MESSAGE);
+        } catch (err: any) {
+            console.error("Reset Password Error:", err);
+            const msg = resetPasswordErrorMessage(err);
+            if (msg) setError(msg);
+            else setNotice(RESET_SENT_MESSAGE);
         } finally {
             setLoading(false);
         }
@@ -339,13 +364,13 @@ const PersonalMode: React.FC<Props> = ({ user, syncStatus, voicePrefs, setVoiceP
                             )}
 
                             <button
-                                onClick={handleGithubLogin}
+                                onClick={handleGoogleLogin}
                                 type="button"
                                 disabled={loading}
-                                className="flex min-h-12 items-center justify-center gap-2 rounded-full bg-[#24292e] text-[15px] font-medium text-white transition-[filter] hover:brightness-125 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                                className="flex min-h-12 items-center justify-center gap-2.5 rounded-full border border-line bg-surface text-[15px] font-medium text-ink transition-colors hover:bg-surface-2 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
                             >
-                                {loading ? <Loader2 className="animate-spin" size={18} aria-hidden="true" /> : <Github size={18} aria-hidden="true" />}
-                                使用 GitHub 登入
+                                {loading ? <Loader2 className="animate-spin" size={18} aria-hidden="true" /> : <GoogleMark />}
+                                使用 Google 登入
                             </button>
                             {divider('或使用 Email')}
 
@@ -390,7 +415,18 @@ const PersonalMode: React.FC<Props> = ({ user, syncStatus, voicePrefs, setVoiceP
                                         required
                                     />
                                 </div>
+                                {isLoginMode && (
+                                    <button
+                                        type="button"
+                                        onClick={handleResetPassword}
+                                        disabled={loading}
+                                        className="-mt-1 min-h-11 self-end text-[13px] text-muted hover:text-accent hover:underline disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                                    >
+                                        忘記密碼？
+                                    </button>
+                                )}
                                 {error && !showConfig && <p role="alert" className="rounded-xl bg-danger/10 px-3.5 py-2.5 text-[13px] font-medium text-danger">{error}</p>}
+                                {notice && !error && <p role="status" className="rounded-xl bg-accent-soft px-3.5 py-2.5 text-[13px] font-medium text-accent">{notice}</p>}
                                 <Button
                                     type="submit"
                                     disabled={loading}
@@ -404,7 +440,7 @@ const PersonalMode: React.FC<Props> = ({ user, syncStatus, voicePrefs, setVoiceP
                             <div className="flex flex-wrap items-center justify-between gap-x-4">
                                 <button
                                     type="button"
-                                    onClick={() => setIsLoginMode(!isLoginMode)}
+                                    onClick={() => { setIsLoginMode(!isLoginMode); setNotice(null); }}
                                     className="min-h-11 text-[14px] text-accent hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
                                 >
                                     {isLoginMode ? '沒有帳號？前往註冊' : '已有帳號？前往登入'}
@@ -446,6 +482,16 @@ const SyncBadge: React.FC<{ status: SyncStatus }> = ({ status }) => {
         </p>
     );
 };
+
+// Google 標誌（登入按鈕用，依 Google 登入按鈕規範顯示四色 G）
+const GoogleMark: React.FC = () => (
+    <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
+        <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
+        <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
+        <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
+        <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
+    </svg>
+);
 
 const ConfigDialog: React.FC<{
     configJson: string;
