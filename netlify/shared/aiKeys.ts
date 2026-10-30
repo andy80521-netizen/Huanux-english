@@ -4,6 +4,8 @@ import { isRetryableGeminiError } from './geminiFallback';
 // gemini-3.5-flash 的免費額度與 3.6-flash 共用（錯誤訊息顯示同一個額度），所以免費清單不放 3.5-flash
 const FREE_MODELS = ['gemini-3.6-flash', 'gemini-3.1-flash-lite', 'gemini-3.5-flash-lite'];
 const PAID_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash'];
+/** 語音轉文字的 Gemini 最後備援：不落到 flash-lite（小模型容易猜句，PR B） */
+export const TRANSCRIBE_GEMINI_MODELS = { free: ['gemini-3.6-flash'], paid: PAID_MODELS };
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 

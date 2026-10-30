@@ -125,3 +125,5 @@
 ### 駁回或不做
 - `whisper-1` 顯示改成「Whisper 1」（Grok）— 現在已顯示「Whisper」與「Whisper large-v3」，分得出來；改的話要動 PR A 的驗收測試
 - 前端排隊／每位使用者限流（Nemotron、Grok）— 個人練習用量遠低於每分鐘 20 次，之後若 429 變多再考慮
+- 2026-10-30：驗收測試 commit `ed170e4`（`tests/transcribe.test.ts`、`tests/transcribeOrder.test.ts`），修改前失敗（推送前修正一處測試替身的型別宣告，斷言未變）
+- 2026-10-30：實作完成：`netlify/shared/transcribe.ts`（轉錄鏈、空白防呆、時間預算）、`transcribe-recording.ts` 改為 Groq → OpenAI、`ai-text` 的 Gemini 備援不用 flash-lite 且接受空字串、`TRANSCRIBE_PROMPT` 改寫、前端順序改為 Whisper → Gemini（413 不重試）、複述顯示模型並限制 64 kbps；`check.sh` 通過（775 測試）

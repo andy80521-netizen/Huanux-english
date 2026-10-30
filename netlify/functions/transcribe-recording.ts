@@ -1,5 +1,6 @@
-// 錄音轉文字的第三層備援：Gemini 主要與備用模型都忙碌時，改用 OpenAI Whisper
-// 必須驗證 Firebase 登入權杖，避免 OpenAI 金鑰被任何人拿來使用
+// 錄音轉文字（PR B，2026-10-30 起為主力）：Groq Whisper large-v3 → OpenAI whisper-1；都失敗回 502，前端再改用 Gemini
+// 必須驗證 Firebase 登入權杖，避免金鑰被任何人拿來使用
+import { runTranscribeChain, GROQ_TRANSCRIBE_MODEL, GROQ_TRANSCRIBE_URL, OPENAI_TRANSCRIBE_URL } from '../shared/transcribe';
 
 const MAX_BASE64_LENGTH = 4_000_000; // 約 3MB 音檔，跟讀錄音通常遠小於此
 
@@ -20,15 +21,9 @@ async function verifyFirebaseIdToken(idToken: string): Promise<string | null> {
     return data?.users?.[0]?.localId || null;
 }
 
-// 依錄音格式決定副檔名（Whisper 依副檔名判斷格式）
-function extensionFor(mimeType: string): string {
-    if (mimeType.includes('mp4')) return 'mp4';
-    if (mimeType.includes('ogg')) return 'ogg';
-    if (mimeType.includes('aac')) return 'm4a';
-    return 'webm';
-}
-
 export default async (req: Request) => {
+    // 整條轉錄鏈的時間預算從收到請求開始算（含驗證登入）
+    const startedAt = Date.now();
     if (req.method !== 'POST') return json(405, { error: 'Method Not Allowed' });
 
     const authHeader = req.headers.get('Authorization') || '';
@@ -38,8 +33,7 @@ export default async (req: Request) => {
     const uid = await verifyFirebaseIdToken(idToken);
     if (!uid) return json(401, { error: '登入驗證失敗，請重新登入' });
 
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) return json(500, { error: 'Server configuration error' });
+    if (!process.env.GROQ_API_KEY && !process.env.OPENAI_API_KEY) return json(500, { error: 'Server configuration error' });
 
     let body: any;
     try {
@@ -57,27 +51,23 @@ export default async (req: Request) => {
     }
 
     try {
-        const audioBuffer = Buffer.from(audioBase64, 'base64');
-        const ext = extensionFor(mimeType);
-        const formData = new FormData();
-        formData.append('file', new Blob([audioBuffer], { type: mimeType.split(';')[0] }), `recording.${ext}`);
-        formData.append('model', 'whisper-1');
-        formData.append('language', 'en');
-        formData.append('response_format', 'json');
-
-        const openAiResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${apiKey}` },
-            body: formData
+        const audio = new Uint8Array(Buffer.from(audioBase64, 'base64'));
+        const result = await runTranscribeChain({
+            audio,
+            mimeType,
+            providers: [
+                { name: 'Groq', url: GROQ_TRANSCRIBE_URL, model: GROQ_TRANSCRIBE_MODEL, key: process.env.GROQ_API_KEY },
+                { name: 'OpenAI', url: OPENAI_TRANSCRIBE_URL, model: 'whisper-1', key: process.env.OPENAI_API_KEY },
+            ],
+            fetchImpl: (url, init) => fetch(url, init),
+            now: () => Date.now(),
+            startedAt,
         });
-        const data = await openAiResponse.json();
-        if (!openAiResponse.ok) {
-            console.error('Whisper API error:', openAiResponse.status, data?.error?.message);
-            return json(502, { error: `Whisper 轉錄失敗 (${openAiResponse.status})` });
-        }
-        return json(200, { text: typeof data?.text === 'string' ? data.text : '', model: 'whisper-1' });
+        if (result.ok === false) return json(result.status, { error: result.error });
+        // 空字串是合法結果（沒有人聲）
+        return json(200, { text: result.text, model: result.model });
     } catch (err: any) {
         console.error('transcribe-recording error:', err?.message);
-        return json(500, { error: 'Whisper 轉錄過程發生錯誤' });
+        return json(500, { error: '語音轉文字過程發生錯誤' });
     }
 };

@@ -238,7 +238,7 @@ const fileToBase64 = (file: File): Promise<string> =>
         reader.readAsDataURL(file);
     });
 
-// 第三層：透過後端 Function 呼叫 Whisper（需登入）
+// 主力：透過後端 Function 呼叫 Whisper（伺服器端依序 Groq whisper-large-v3 → OpenAI whisper-1；需登入）
 async function transcribeWithWhisper(audioFile: File): Promise<{ text: string; model: string }> {
     const idToken = await auth.currentUser?.getIdToken();
     if (!idToken) throw new Error('請先登入');
@@ -250,10 +250,13 @@ async function transcribeWithWhisper(audioFile: File): Promise<{ text: string; m
     });
     if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.error || `HTTP ${response.status}`);
+        const err: Error & { status?: number } = new Error(errData.error || `HTTP ${response.status}`);
+        err.status = response.status;
+        throw err;
     }
     const data = await response.json();
     if (typeof data?.text !== 'string') throw new Error('Whisper 回傳格式錯誤');
+    // 空字串是合法結果（沒有人聲）
     return { text: data.text.trim(), model: typeof data?.model === 'string' ? data.model : 'whisper-1' };
 }
 
@@ -261,36 +264,42 @@ export async function transcribeRecording(audioFile: File): Promise<string> {
     return (await transcribeRecordingDetailed(audioFile)).text;
 }
 
-/** 語音轉文字，並回傳實際使用的模型（結果頁顯示，診斷用） */
+/**
+ * 語音轉文字，並回傳實際使用的模型（結果頁顯示，診斷用）。
+ * 順序（PR B，2026-10-30）：Whisper（Groq large-v3 → OpenAI whisper-1，伺服器端）→ 失敗才用 Gemini 最後備援。
+ * 測試用開關：localStorage 設定 huanux_force_gemini = '1' 時直接使用 Gemini（比較用）。
+ */
 export async function transcribeRecordingDetailed(audioFile: File): Promise<{ text: string; model: string }> {
-    // 測試用開關：瀏覽器 localStorage 設定 huanux_force_whisper = '1' 時，直接使用 Whisper
-    let forceWhisper = false;
-    try { forceWhisper = localStorage.getItem('huanux_force_whisper') === '1'; } catch {}
+    let forceGemini = false;
+    try { forceGemini = localStorage.getItem('huanux_force_gemini') === '1'; } catch {}
 
-    if (!forceWhisper) {
-        // 第一、二層：Gemini 主要模型 → 備用模型
-        // 錄音直接以 inlineData 夾帶在請求中（不再先上傳檔案），並關閉思考功能以降低延遲
+    let whisperError = '';
+    if (!forceGemini) {
         const t0 = performance.now();
         try {
-            const audioBase64 = await fileToBase64(audioFile);
-            const mimeType = (audioFile.type || 'audio/webm').split(';')[0];
-            const data = await callAiText<{ text: string; model?: string }>('transcribe', { audioBase64, mimeType });
-            if (!data?.text) throw new Error("Gemini API 回傳空內容");
-            console.log(`[計時] Gemini 語音轉文字完成：${Math.round(performance.now() - t0)} ms（${data.model || '未知模型'}）`);
-            return { text: data.text, model: data.model || 'gemini' };
+            const r = await transcribeWithWhisper(audioFile);
+            console.log(`[計時] 語音轉文字完成：${Math.round(performance.now() - t0)} ms（${r.model || '太短未送出'}）`);
+            return r;
         } catch (e: any) {
-            // 任何錯誤都改用 Whisper（Gemini 官方未保證支援 webm/mp4 格式，Whisper 則明確支援）
-            console.warn(`[模型備援] Gemini 語音轉文字失敗（${Math.round(performance.now() - t0)} ms），改用 Whisper`, e?.message);
+            // 錄音太大：Gemini 的上限一樣，不必再試
+            if (e?.status === 413) throw new Error('錄音太長，請縮短後再試');
+            whisperError = e?.message || '';
+            console.warn(`[模型備援] Whisper 語音轉文字失敗（${Math.round(performance.now() - t0)} ms），改用 Gemini`, whisperError);
         }
     }
 
     const t1 = performance.now();
     try {
-        const r = await transcribeWithWhisper(audioFile);
-        console.log(`[計時] Whisper 語音轉文字完成：${Math.round(performance.now() - t1)} ms`);
-        return r;
+        // 錄音直接以 inlineData 夾帶在請求中，並關閉思考功能以降低延遲
+        const audioBase64 = await fileToBase64(audioFile);
+        const mimeType = (audioFile.type || 'audio/webm').split(';')[0];
+        const data = await callAiText<{ text: string; model?: string }>('transcribe', { audioBase64, mimeType });
+        // 空字串是合法結果（指令要求沒有人聲就回傳空白）；只有格式錯誤才算失敗
+        if (typeof data?.text !== 'string') throw new Error('Gemini 回傳格式錯誤');
+        console.log(`[計時] Gemini 語音轉文字完成：${Math.round(performance.now() - t1)} ms（${data.model || '未知模型'}）`);
+        return { text: data.text.trim(), model: data.model || 'gemini' };
     } catch (e: any) {
-        throw new Error(`語音轉文字失敗：AI 服務暫時忙碌，請稍後再試（${e.message}）`);
+        throw new Error(`語音轉文字失敗：AI 服務暫時忙碌，請稍後再試（${e?.message || whisperError}）`);
     }
 }
 
