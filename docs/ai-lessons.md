@@ -118,3 +118,4 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 | 英美拼字（PR #24，審查） | Codex／Gemini Flash | 0 | 0 | 第 1 輪皆無意見 |
 | 刪除 enableBackgroundAudioHack（PR #25，審查） | Codex／Gemini Flash | 0 | 0 | 小級刪除死碼，第 1 輪皆無意見 |
 | 個人頁同步狀態（PR #26，審查） | Codex／Gemini Flash | 0 | 0 | 小級，第 1 輪皆無意見 |
+| Google 登入＋忘記密碼（PR #27，審查） | Codex／Gemini Flash | 0 | 0 | 小級，第 1 輪皆無意見 |
