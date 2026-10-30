@@ -239,7 +239,7 @@ const fileToBase64 = (file: File): Promise<string> =>
     });
 
 // 第三層：透過後端 Function 呼叫 Whisper（需登入）
-async function transcribeWithWhisper(audioFile: File): Promise<string> {
+async function transcribeWithWhisper(audioFile: File): Promise<{ text: string; model: string }> {
     const idToken = await auth.currentUser?.getIdToken();
     if (!idToken) throw new Error('請先登入');
     const audioBase64 = await fileToBase64(audioFile);
@@ -254,10 +254,15 @@ async function transcribeWithWhisper(audioFile: File): Promise<string> {
     }
     const data = await response.json();
     if (typeof data?.text !== 'string') throw new Error('Whisper 回傳格式錯誤');
-    return data.text.trim();
+    return { text: data.text.trim(), model: typeof data?.model === 'string' ? data.model : 'whisper-1' };
 }
 
 export async function transcribeRecording(audioFile: File): Promise<string> {
+    return (await transcribeRecordingDetailed(audioFile)).text;
+}
+
+/** 語音轉文字，並回傳實際使用的模型（結果頁顯示，診斷用） */
+export async function transcribeRecordingDetailed(audioFile: File): Promise<{ text: string; model: string }> {
     // 測試用開關：瀏覽器 localStorage 設定 huanux_force_whisper = '1' 時，直接使用 Whisper
     let forceWhisper = false;
     try { forceWhisper = localStorage.getItem('huanux_force_whisper') === '1'; } catch {}
@@ -269,10 +274,10 @@ export async function transcribeRecording(audioFile: File): Promise<string> {
         try {
             const audioBase64 = await fileToBase64(audioFile);
             const mimeType = (audioFile.type || 'audio/webm').split(';')[0];
-            const data = await callAiText<{ text: string }>('transcribe', { audioBase64, mimeType });
+            const data = await callAiText<{ text: string; model?: string }>('transcribe', { audioBase64, mimeType });
             if (!data?.text) throw new Error("Gemini API 回傳空內容");
-            console.log(`[計時] Gemini 語音轉文字完成：${Math.round(performance.now() - t0)} ms`);
-            return data.text;
+            console.log(`[計時] Gemini 語音轉文字完成：${Math.round(performance.now() - t0)} ms（${data.model || '未知模型'}）`);
+            return { text: data.text, model: data.model || 'gemini' };
         } catch (e: any) {
             // 任何錯誤都改用 Whisper（Gemini 官方未保證支援 webm/mp4 格式，Whisper 則明確支援）
             console.warn(`[模型備援] Gemini 語音轉文字失敗（${Math.round(performance.now() - t0)} ms），改用 Whisper`, e?.message);
@@ -281,9 +286,9 @@ export async function transcribeRecording(audioFile: File): Promise<string> {
 
     const t1 = performance.now();
     try {
-        const text = await transcribeWithWhisper(audioFile);
+        const r = await transcribeWithWhisper(audioFile);
         console.log(`[計時] Whisper 語音轉文字完成：${Math.round(performance.now() - t1)} ms`);
-        return text;
+        return r;
     } catch (e: any) {
         throw new Error(`語音轉文字失敗：AI 服務暫時忙碌，請稍後再試（${e.message}）`);
     }

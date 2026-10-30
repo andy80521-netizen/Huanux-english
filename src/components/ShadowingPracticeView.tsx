@@ -1,7 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Material } from '../types';
 import { ChevronLeft, Mic, AlertCircle, RotateCcw, Send, Loader2, Headphones, Check, Play, Pause, Layers, Volume1 } from 'lucide-react';
-import { transcribeRecording } from '../services/gemini';
+import { transcribeRecordingDetailed } from '../services/gemini';
+import { transcriberLabel } from '../utils/transcriber';
+import { playAfterRecordingStarts } from '../utils/recordingTiming';
 import { calculateShadowingScores, isShadowingPass, PracticeScores, SHADOWING_PASS_CONTENT, SHADOWING_PASS_TOTAL } from '../utils/scoring';
 import WordDiffView from './WordDiffView';
 import { getSupportedMimeType } from '../utils/mediaRecorder';
@@ -15,7 +17,7 @@ import { countUpValue } from '../utils/countUp';
 import Button from './ui/Button';
 import IconButton from './ui/IconButton';
 import ProgressBar from './ui/ProgressBar';
-import { RECORDING_ORIGINAL_VOLUME, canSetElementVolume, overlayOffsetMs, sentenceSegment, shouldShowHeadphoneTip, dismissHeadphoneTip } from '../utils/shadowingAudio';
+import { PLAYBACK_LEAD_MS, RECORDING_ORIGINAL_VOLUME, canSetElementVolume, overlayOffsetMs, sentenceSegment, shouldShowHeadphoneTip, dismissHeadphoneTip } from '../utils/shadowingAudio';
 import { createListenPlayer, ListenMode, ListenPlayer } from '../utils/shadowingPlayback';
 
 /** 系統是否開啟「減少動態效果」（分數跑動是 JS，全域 CSS 規則管不到，要自己判斷） */
@@ -111,6 +113,9 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
     const [recordedBlobUrl, setRecordedBlobUrl] = useState<string | null>(null);
     const [scoreResult, setScoreResult] = useState<PracticeScores | null>(null);
     const [userText, setUserText] = useState<string>('');
+    // 這次由哪個模型轉錄（結果頁小字顯示，診斷用）
+    const [transcriber, setTranscriber] = useState('');
+    const mainScrollRef = useRef<HTMLDivElement>(null);
     const [userSpeechSec, setUserSpeechSec] = useState<number>(0);
     // 這次評分的熟練度變化：評分當下算一次，寫入與畫面共用（不在資料庫更新回來後重算）
     const [masteryResult, setMasteryResult] = useState<{ before: number; after: number; gain: number } | null>(null);
@@ -318,10 +323,22 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
     };
 
     const handleStart = async () => {
+        // 要看的句子在畫面上半部：開始跟讀時捲回最上方
+        mainScrollRef.current?.scrollTo({ top: 0, behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
         // iPhone 只允許「使用者點擊當下」啟動播放，所以必須在任何 await 之前先解鎖錄音播放器
         if (recordedAudioRef.current) {
             recordedAudioRef.current.src = SILENT_AUDIO;
             recordedAudioRef.current.play().then(() => recordedAudioRef.current?.pause()).catch(() => {});
+        }
+        // 原音會在錄音開始後才播放（不是在點擊當下）：先在點擊當下靜音解鎖一次，iPhone 之後才允許播放
+        let realPlayStarted = false;
+        if (audioRef.current) {
+            const org = audioRef.current;
+            org.muted = true;
+            org.play()
+                .then(() => { if (!realPlayStarted) org.pause(); })
+                .catch(() => {})
+                .finally(() => { org.muted = false; });
         }
 
         setError(null);
@@ -402,21 +419,29 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                 }, { once: true });
             }
 
-            // Sync start: record + play audio at the same time
-            recordingStartTimeRef.current = Date.now();
+            // 先開始錄音；等錄音真正啟動（start 事件）後再等 PLAYBACK_LEAD_MS 才播原音，
+            // 避免錄音還沒開始、原音和使用者開頭的字沒錄到（等待期間已換句、重錄或離開就不播）
             mediaRecorder.start();
             monitorVolume();
-
-            if (audioRef.current) {
-                audioRef.current.play().catch(e => {
-                    console.error("Audio play failed:", e);
-                    abortRecording();
-                    setPracticeState('idle');
-                    setError("無法播放教材音訊，請確認裝置音量設定。");
-                });
-            }
-            
             setPracticeState('recording');
+            const playback = playAfterRecordingStarts(mediaRecorder, {
+                leadMs: PLAYBACK_LEAD_MS,
+                isCancelled: () => isStale() || mediaRecorderRef.current !== mediaRecorder,
+                play: () => {
+                    if (!audioRef.current) return;
+                    // 流暢度的講話時間從原音開始播放算起（不含前面等待的時間）
+                    recordingStartTimeRef.current = Date.now();
+                    realPlayStarted = true;
+                    audioRef.current.muted = false;
+                    audioRef.current.play().catch(e => {
+                        console.error("Audio play failed:", e);
+                        abortRecording();
+                        setPracticeState('idle');
+                        setError("無法播放教材音訊，請確認裝置音量設定。");
+                    });
+                },
+            });
+            await playback;
 
         } catch (err: any) {
             console.error("Mic access error:", err);
@@ -496,8 +521,11 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
             const mimeType = blob.type || 'audio/webm';
             const file = new File([blob], 'recording', { type: mimeType });
             
-            const transcribedText = await transcribeRecording(file);
-            if (!isStale()) setUserText(transcribedText);
+            const { text: transcribedText, model } = await transcribeRecordingDetailed(file);
+            if (!isStale()) {
+                setUserText(transcribedText);
+                setTranscriber(transcriberLabel(model));
+            }
             
             const originalSec = Math.max(0, sentence.endTime - sentence.startTime);
             const scores = calculateShadowingScores(transcribedText, sentence.text, speechSec, originalSec);
@@ -629,7 +657,7 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
             )}
 
             {/* 主區 */}
-            <div className="flex h-full min-h-0 flex-col overflow-y-auto">
+            <div ref={mainScrollRef} className="flex h-full min-h-0 flex-col overflow-y-auto">
                 <header className="flex items-center gap-2 px-2 pt-2 sm:px-5 lg:px-9 lg:pt-6">
                     <IconButton aria-label="返回教材" onClick={onBack}>
                         <ChevronLeft size={22} aria-hidden="true" />
@@ -829,7 +857,10 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                             </section>
 
                             <div className="flex flex-col gap-2">
-                                <p className="text-xs text-muted">您實際念的內容：</p>
+                                <p className="flex flex-wrap items-baseline justify-between gap-x-3 text-xs text-muted">
+                                    <span>您實際念的內容：</span>
+                                    {transcriber && <span className="text-[11px] text-muted/80">語音辨識：{transcriber}</span>}
+                                </p>
                                 <p className="text-[15px] leading-relaxed text-ink/80 break-words">
                                     {userText || "(未偵測到語音)"}
                                 </p>
