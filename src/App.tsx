@@ -3,10 +3,11 @@ import {
   Trophy, User, Loader2, AlertCircle, BookOpen, Sparkles
 } from 'lucide-react';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
-import { collection, doc, setDoc, onSnapshot, query, orderBy, deleteDoc, getDoc } from 'firebase/firestore';
+import { collection, doc, setDoc, onSnapshot, query, orderBy, deleteDoc, getDoc, waitForPendingWrites } from 'firebase/firestore';
 import { auth, db, appId } from './firebase';
 import { INITIAL_DATA, INITIAL_COURSES, VocabItem } from './constants';
 import { checkVocabContainment } from './utils';
+import { createConnectionWatcher, resolveSyncStatus, ConnectionState } from './utils/syncStatus';
 import {
   ThemeMode, readThemeMode, writeThemeMode, resolveIsDark, getBrowserStorage, LEGACY_DARK_KEY
 } from './utils/theme';
@@ -26,6 +27,7 @@ const App: React.FC = () => {
   const vocabDataRef = useRef<VocabItem[]>([]); 
   const [voicePrefs, setVoicePrefs] = useState({ zh: '', en: '' });
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [connection, setConnection] = useState<ConnectionState>({ online: true, pending: false });
 
   // 主題：一開始就讀好設定（不先用預設值再改），與 index.html 首屏腳本的結果一致，避免閃爍
   const [themeMode, setThemeModeState] = useState<ThemeMode>(() => readThemeMode(getBrowserStorage()));
@@ -76,6 +78,10 @@ const App: React.FC = () => {
       document.querySelectorAll('meta[name="theme-color"]').forEach((m) => m.setAttribute('content', ground));
     }
   }, [isDark]);
+
+  // 網路狀態：個人頁顯示真實同步狀態（恢復連線後等離線時的寫入上傳完成）
+  useEffect(() => createConnectionWatcher({ win: window, waitForPendingWrites: () => waitForPendingWrites(db), onChange: setConnection }), []);
+  const syncStatus = resolveSyncStatus({ ...connection, error: syncError });
 
   // 2. 監聽登入狀態
   useEffect(() => { 
@@ -385,7 +391,7 @@ const App: React.FC = () => {
               {activeTab === 'material' && <MaterialImportMode />}
               {activeTab === 'languageModel' && <LanguageModelMode />}
               {activeTab === 'badges' && <BadgeMode />}
-              {activeTab === 'personal' && <PersonalMode user={user} voicePrefs={voicePrefs} setVoicePrefs={setVoicePrefs} themeMode={themeMode} setThemeMode={setThemeMode} />}
+              {activeTab === 'personal' && <PersonalMode user={user} syncStatus={syncStatus} voicePrefs={voicePrefs} setVoicePrefs={setVoicePrefs} themeMode={themeMode} setThemeMode={setThemeMode} />}
             </PageEnter>
           </div>
         </main>
