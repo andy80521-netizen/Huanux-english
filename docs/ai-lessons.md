@@ -35,6 +35,8 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 - 跟讀是「邊播原音邊錄音」：手機沒戴耳機時原音進麥克風、回音消除會連人聲一起壓 → 辨識差。語言模型複習錄音時不播聲音，所以辨識好（兩邊用同一套轉錄）
 - 語言模型複習舊版從按下錄音就算 1.5 秒靜音：回想句子或中途停頓會被切斷 → 開口前 5 秒、開口後 2.5 秒（PR #22）；評分時長仍用「最後出聲 + 1.5 秒」，避免同樣的朗讀分數變低
 - 跟讀改成先錄音、錄音真正開始後 300ms 才播原音；原音在 await 之後才播放，iPhone 要在點擊當下先靜音 play/pause 解鎖（PR #22）
+- 語音轉文字主力 2026-10-30 起是 Groq `whisper-large-v3`（`netlify/shared/transcribe.ts`）→ OpenAI `whisper-1` → Gemini（只用 Flash，不用 flash-lite）。Netlify 函式整條鏈 9 秒內完成；空字串是合法結果（沒有人聲），與服務失敗分開（PR #23）
+- Gemini SDK 的 `response.text` 在沒有文字時是 undefined：要看 `finishReason` 分辨「正常的空白」與「被擋下」（PR #23）
 - 驗收測試只比對原始碼字串時，抽掉關鍵的 await 也會通過；時序類需求要抽成函式、用假計時器測行為（PR #22，Codex）
 - 播放「一句」的保險計時不要從 play() 起算就硬停：網路緩衝會截斷句尾；到期時看 currentTime 有沒有前進（PR #20）
 - 讀取狀態的「已有資料」要看實際筆數：空集合的 snapshot 之後監聽失敗，若當成已有資料就會停在空狀態、沒有重試（PR #16）
@@ -103,3 +105,7 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 | 跟讀辨識改善（PR #20，審查） | Codex／Gemini Flash | 2 | 0 | 保險計時在緩衝延後時截斷句尾（兩者都抓到）、自動播放被擋仍顯示播放中（Gemini）；第 2 輪 Codex 卡住 18 分鐘，重新留言後完成 |
 | 辨識快速修正（PR #22，審查） | Codex | 2 | 0 | 時序驗收只檢查原始碼（🔴，改成行為測試）、靜音等待變長會拉低流暢度 |
 | 辨識快速修正（PR #22，審查） | Gemini Flash | 0 | 0 | 兩輪皆無意見，漏掉 Codex 兩項 |
+| Groq Whisper（PR #23，規劃） | Codex | 4 | 0 | 備援鏈總時間預算、OpenAI 也要空白防呆、空字串與失敗分開、複述頁接模型 |
+| Groq Whisper（PR #23，規劃） | Grok／Gemini／Nemotron | 7 | 2 | Gemini 不用 flash-lite、缺欄位不誤刪、太短不送、413 不重試、64 kbps、日誌不記文字；駁回：whisper-1 改名（Grok）、前端限流（Nemotron） |
+| Groq Whisper（PR #23，審查） | Codex | 1 | 0 | Gemini 缺少文字的回應被當成「沒有人聲」 |
+| Groq Whisper（PR #23，審查） | Gemini Flash | 0 | 0 | 兩輪皆無意見 |
