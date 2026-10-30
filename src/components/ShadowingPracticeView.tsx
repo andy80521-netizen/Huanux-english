@@ -3,6 +3,7 @@ import { Material } from '../types';
 import { ChevronLeft, Mic, AlertCircle, RotateCcw, Send, Loader2, Headphones, Check, Play, Pause, Layers, Volume1 } from 'lucide-react';
 import { transcribeRecordingDetailed } from '../services/gemini';
 import { transcriberLabel } from '../utils/transcriber';
+import { playAfterRecordingStarts } from '../utils/recordingTiming';
 import { calculateShadowingScores, isShadowingPass, PracticeScores, SHADOWING_PASS_CONTENT, SHADOWING_PASS_TOTAL } from '../utils/scoring';
 import WordDiffView from './WordDiffView';
 import { getSupportedMimeType } from '../utils/mediaRecorder';
@@ -419,31 +420,28 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
             }
 
             // 先開始錄音；等錄音真正啟動（start 事件）後再等 PLAYBACK_LEAD_MS 才播原音，
-            // 避免錄音還沒開始、原音和使用者開頭的字沒錄到
-            const recordingStarted = new Promise<void>((resolve) => {
-                const fallback = setTimeout(resolve, 800);
-                mediaRecorder.addEventListener('start', () => { clearTimeout(fallback); resolve(); }, { once: true });
-            });
+            // 避免錄音還沒開始、原音和使用者開頭的字沒錄到（等待期間已換句、重錄或離開就不播）
             mediaRecorder.start();
             monitorVolume();
             setPracticeState('recording');
-            await recordingStarted;
-            await new Promise((r) => setTimeout(r, PLAYBACK_LEAD_MS));
-            // 等待期間已換句、重錄或離開：不再播放
-            if (isStale() || mediaRecorderRef.current !== mediaRecorder || mediaRecorder.state !== 'recording') return;
-
-            if (audioRef.current) {
-                // 流暢度的講話時間從原音開始播放算起（不含前面等待的時間）
-                recordingStartTimeRef.current = Date.now();
-                realPlayStarted = true;
-                audioRef.current.muted = false;
-                audioRef.current.play().catch(e => {
-                    console.error("Audio play failed:", e);
-                    abortRecording();
-                    setPracticeState('idle');
-                    setError("無法播放教材音訊，請確認裝置音量設定。");
-                });
-            }
+            const playback = playAfterRecordingStarts(mediaRecorder, {
+                leadMs: PLAYBACK_LEAD_MS,
+                isCancelled: () => isStale() || mediaRecorderRef.current !== mediaRecorder,
+                play: () => {
+                    if (!audioRef.current) return;
+                    // 流暢度的講話時間從原音開始播放算起（不含前面等待的時間）
+                    recordingStartTimeRef.current = Date.now();
+                    realPlayStarted = true;
+                    audioRef.current.muted = false;
+                    audioRef.current.play().catch(e => {
+                        console.error("Audio play failed:", e);
+                        abortRecording();
+                        setPracticeState('idle');
+                        setError("無法播放教材音訊，請確認裝置音量設定。");
+                    });
+                },
+            });
+            await playback;
 
         } catch (err: any) {
             console.error("Mic access error:", err);

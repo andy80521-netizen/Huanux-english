@@ -4,6 +4,7 @@ import { getSupportedMimeType } from '../utils/mediaRecorder';
 import { transcribeRecordingDetailed } from '../services/gemini';
 import { shouldStopForSilence } from '../utils/silenceDetection';
 import { transcriberLabel } from '../utils/transcriber';
+import { practiceDurationSec } from '../utils/recordingTiming';
 import { calculateFinalScores, canAccumulatePattern, PracticeScores } from '../utils/scoring';
 import WordDiffView from './WordDiffView';
 import { generateAndSavePracticePrompts } from '../services/practicePrompts';
@@ -173,6 +174,7 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
     const silenceTimerRef = useRef<number>(0);
     // 是否已經偵測到開口：開口前給較長的等待時間（回想句子），開口後中途停頓也不會太快被切斷
     const heardSpeechRef = useRef(false);
+    const lastSoundAtRef = useRef(0);
     const requestAnimationFrameRef = useRef<number>(0);
     const audioChunksRef = useRef<Blob[]>([]);
     const recordingStartTimeRef = useRef<number>(0);
@@ -406,6 +408,7 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
             }
         } else {
             heardSpeechRef.current = true;
+            lastSoundAtRef.current = Date.now();
             silenceTimerRef.current = 0;
         }
 
@@ -515,6 +518,7 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
             audioChunksRef.current = [];
             silenceTimerRef.current = 0;
             heardSpeechRef.current = false;
+            lastSoundAtRef.current = 0;
 
             const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
             const audioCtx = new AudioContextClass();
@@ -535,7 +539,8 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
 
             mediaRecorder.onstop = () => {
                 cleanupAudio();
-                const durationSec = (Date.now() - recordingStartTimeRef.current) / 1000;
+                // 評分時長＝最後出聲 + 1.5 秒（等同舊版自動停止的長度），不因新的 2.5 秒等待而降低流暢度
+                const durationSec = practiceDurationSec(recordingStartTimeRef.current, lastSoundAtRef.current, Date.now());
                 const blob = new Blob(audioChunksRef.current, { type: mediaRecorder.mimeType || 'audio/webm' });
                 lastRecordingRef.current = { blob, durationSec };
                 runScoring(blob, durationSec);
