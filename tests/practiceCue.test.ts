@@ -113,22 +113,48 @@ describe('產生流程與品質檢查（驗收 3）', () => {
   });
 });
 
-describe('依熟練度顯示（驗收 4，擁有者 10/31 加上 500 以上改英文題目）', () => {
+describe('依熟練度顯示（驗收 4；擁有者 10/31 追加英文題目、核准中文也用對話形式）', () => {
   it.each([
-    [0, { lang: 'zh', situation: true, pattern: true }],
-    [399, { lang: 'zh', situation: true, pattern: true }],
-    [400, { lang: 'zh', situation: false, pattern: true }],
-    [499, { lang: 'zh', situation: false, pattern: true }],
-    [500, { lang: 'en', situation: false, pattern: true }],
-    [699, { lang: 'en', situation: false, pattern: true }],
-    [700, { lang: 'en', situation: false, pattern: false }],
-    [1000, { lang: 'en', situation: false, pattern: false }],
+    [0, { lang: 'zh', pattern: true }],
+    [399, { lang: 'zh', pattern: true }],
+    [400, { lang: 'zh', pattern: false }],
+    [499, { lang: 'zh', pattern: false }],
+    [500, { lang: 'en', pattern: true }],
+    [699, { lang: 'en', pattern: true }],
+    [700, { lang: 'en', pattern: false }],
+    [1000, { lang: 'en', pattern: false }],
   ])('熟練度 %i（有英文題目）', (m, expected) => {
     expect(cueDisplay(m, true)).toEqual(expected);
   });
   it('沒有可用的英文題目時，500 以上仍用中文', () => {
-    expect(cueDisplay(600, false)).toEqual({ lang: 'zh', situation: false, pattern: true });
-    expect(cueDisplay(800, false)).toEqual({ lang: 'zh', situation: false, pattern: false });
+    expect(cueDisplay(600, false)).toEqual({ lang: 'zh', pattern: true });
+    expect(cueDisplay(800, false)).toEqual({ lang: 'zh', pattern: false });
+  });
+});
+
+describe('中文題目也用對話形式（擁有者 10/31 核准）', () => {
+  it('提示詞要求對方那句話的中文版（和英文版同一句）', () => {
+    const p = buildPracticeCuePrompt(OWNER, 'all that ...');
+    expect(p).toContain('"partnerLineZh"');
+  });
+  it('後端整理：有 partnerLineZh 時保留', () => {
+    expect(sanitizePracticeCue({ situationZh: '情境', meaningZh: '意思', partnerLineZh: ' 她的手稿有消息嗎？ ', partnerLineEn: 'Any news?', meaningEn: 'Para.' }))
+      .toEqual({ situationZh: '情境', meaningZh: '意思', partnerLineZh: '她的手稿有消息嗎？', partnerLineEn: 'Any news?', meaningEn: 'Para.' });
+  });
+  it('寫入時保留 partnerLineZh；沒有時移除舊值', () => {
+    const s: PatternExampleSentence = { id: 's1', text: OWNER, checked: true, groupIndex: 0, mastery: 0, attemptCount: 0, partnerLineZh: '舊' };
+    expect(applyCueToSentence(s, { situationZh: '情', meaningZh: '意', partnerLineZh: '有消息嗎？', cueVerified: true }).partnerLineZh).toBe('有消息嗎？');
+    expect('partnerLineZh' in applyCueToSentence(s, { situationZh: '情', meaningZh: '意', cueVerified: true })).toBe(false);
+  });
+  it('品質檢查提示詞帶入對方的話當情境', () => {
+    const c = buildPracticeCueCheckPrompt({ situationZh: '情境', partnerLineZh: '她的手稿有消息嗎？', meaningZh: '她寫的所有東西都將會出版', patternText: 'all that ...' });
+    expect(c).toContain('她的手稿有消息嗎？');
+    expect(c).not.toContain('published');
+  });
+  it('練習畫面：中文題目顯示「對方說」「你想說」', () => {
+    const view = read('src/components/PatternPracticeSessionView.tsx');
+    expect(view).toContain('你想說');
+    expect(view).toMatch(/cue\.partnerLineZh/);
   });
 });
 
