@@ -105,6 +105,8 @@ export default function GroupDetailView({ pattern, groupIndex, onBack, onEnterGr
 
                 {isExpanded && sentence && (
                   <div className="flex flex-col gap-3.5 border-t border-line px-4 pt-3.5 pb-4">
+                    {!needsNewCue(sentence) && sentence.partnerLineZh && promptBlock(<Sparkles size={14} aria-hidden="true" />, '對方說',
+                      <p className="text-sm leading-relaxed text-ink">「{sentence.partnerLineZh}」</p>)}
                     {promptBlock(<Target size={14} aria-hidden="true" />, '中文意思',
                       <p className="text-sm leading-relaxed text-ink">{(!needsNewCue(sentence) && sentence.meaningZh) || '尚未產生（練習時會自動產生）'}</p>)}
                     {promptBlock(<Sparkles size={14} aria-hidden="true" />, '情境',

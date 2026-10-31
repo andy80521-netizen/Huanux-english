@@ -56,26 +56,28 @@ export function buildPracticeCuePrompt(sentenceText: string, patternText: string
    - 語氣（疑問、請求、感嘆）
    讀起來要像自然的中文，但不可省略或改寫任何資訊；不要出現英文
 3) partnerLineEn：在這個情境中，母語者對使用者說的一句自然英文（例如問句），使用者回答這句話時說出原句最自然。不可包含原句的內容或答案
+   partnerLineZh：partnerLineEn 的自然中文翻譯（同一句話，繁體中文）
 4) meaningEn：用英文改寫原句的完整意思，資訊完全相同（主詞、時態、否定、數量都要有），但**不可使用句型 "${patternText}"**，也盡量不用原句的單字，改用其他常見說法；使用者要把它轉成原句
 
 反例（不可以這樣）：原句 "All that she wrote will be published."，寫成「如果一本書的所有內容都將被公開發表」——主詞從「她寫的」換成了「一本書」，使用者無法還原原句。
-正確：meaningZh「她寫的所有東西都將會出版」；partnerLineEn "Any news about her manuscripts?"；meaningEn "Every piece of her writing is going to be released."
+正確：meaningZh「她寫的所有東西都將會出版」；partnerLineEn "Any news about her manuscripts?"；partnerLineZh「她的手稿有什麼消息嗎？」；meaningEn "Every piece of her writing is going to be released."
 
-situationZh、meaningZh 用繁體中文；partnerLineEn、meaningEn 用英文。
+situationZh、meaningZh、partnerLineZh 用繁體中文；partnerLineEn、meaningEn 用英文。
 只回傳 JSON 物件，不要有其他文字：
 {
   "situationZh": "...",
   "meaningZh": "...",
+  "partnerLineZh": "...",
   "partnerLineEn": "...",
   "meaningEn": "..."
 }`;
 }
 
 // 品質檢查：只看提示（不給原句），說出最符合的英文句子
-export function buildPracticeCueCheckPrompt(cue: { situationZh: string; meaningZh: string; patternText: string }): string {
+export function buildPracticeCueCheckPrompt(cue: { situationZh: string; partnerLineZh?: string; meaningZh: string; patternText: string }): string {
     return `你是英文很好的學習者。請根據下面的提示，用指定的句型說出一句英文，完整表達中文意思，不多也不少。
 
-情境：${cue.situationZh || '（無）'}
+情境：${cue.situationZh || '（無）'}${cue.partnerLineZh ? `\n對方說：${cue.partnerLineZh}` : ''}
 要表達的意思：${cue.meaningZh}
 要用的句型：${cue.patternText}
 

@@ -9,6 +9,7 @@ export const CUE_VERSION = 2;
 export interface PracticeCue {
     situationZh: string;
     meaningZh: string;
+    partnerLineZh?: string;   // 對方說的一句話（中文；和 partnerLineEn 是同一句）
     partnerLineEn?: string;   // 熟練度 500 以上：對方用英文說的一句話（你的回答就是原句）
     meaningEn?: string;       // 熟練度 500 以上：英文改寫的意思（不用原句的用字與句型）
 }
@@ -17,13 +18,12 @@ export interface PracticeCue {
 export const needsNewCue = (s: Partial<PatternExampleSentence> | undefined): boolean =>
     !s || (s.cueVersion ?? 0) < CUE_VERSION || !s.meaningZh?.trim();
 
-// 依熟練度決定顯示哪些提示（擁有者 2026-10-31 定案）：
-// < 400 中文情境＋中文意思＋句型；400～499 中文意思＋句型；500～699 英文（對方的話＋英文改寫）＋句型；≥ 700 英文，句型藏在「看提示」
+// 依熟練度決定顯示哪些提示（擁有者 2026-10-31 定案）：每個階段都是「對方說 → 你想說」的對話形式
+// < 400 中文＋句型；400～499 中文，句型收進「看提示」；500～699 英文＋句型；≥ 700 英文，句型收進「看提示」
 // 沒有可用的英文題目時，500 以上仍用中文
-export const cueDisplay = (mastery: number, hasEnglish: boolean): { lang: 'zh' | 'en'; situation: boolean; pattern: boolean } => ({
+export const cueDisplay = (mastery: number, hasEnglish: boolean): { lang: 'zh' | 'en'; pattern: boolean } => ({
     lang: hasEnglish && mastery >= 500 ? 'en' : 'zh',
-    situation: mastery < 400,
-    pattern: mastery < 700,
+    pattern: mastery < 400 || (mastery >= 500 && mastery < 700),
 });
 
 const CJK = /[\u3400-\u9fff\uf900-\ufaff]/;
@@ -138,8 +138,9 @@ export const applyCueToSentence = (
     s: PatternExampleSentence,
     cue: PracticeCue & { cueVerified: boolean }
 ): PatternExampleSentence => {
-    const { qaQuestion: _q, situationalPrompt: _p, partnerLineEn: _pl, meaningEn: _me, ...rest } = s;
+    const { qaQuestion: _q, situationalPrompt: _p, partnerLineZh: _pz, partnerLineEn: _pl, meaningEn: _me, ...rest } = s;
     const next: PatternExampleSentence = { ...rest, situationZh: cue.situationZh, meaningZh: cue.meaningZh, cueVerified: cue.cueVerified, cueVersion: CUE_VERSION };
+    if (cue.partnerLineZh) next.partnerLineZh = cue.partnerLineZh;
     if (cue.partnerLineEn && cue.meaningEn) {
         next.partnerLineEn = cue.partnerLineEn;
         next.meaningEn = cue.meaningEn;

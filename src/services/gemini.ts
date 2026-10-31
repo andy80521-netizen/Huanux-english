@@ -369,12 +369,12 @@ export async function checkSentenceQuality(
 export async function generatePracticeCue(
   sentenceText: string,
   patternText: string
-): Promise<{ situationZh: string; meaningZh: string; partnerLineEn?: string; meaningEn?: string }> {
+): Promise<{ situationZh: string; meaningZh: string; partnerLineZh?: string; partnerLineEn?: string; meaningEn?: string }> {
     return callAiText('practiceCue', { sentenceText, patternText });
 }
 
 export async function checkPracticeCue(
-  cue: { situationZh: string; meaningZh: string },
+  cue: { situationZh: string; partnerLineZh?: string; meaningZh: string },
   patternText: string
 ): Promise<string> {
     const r = await callAiText<{ answer?: string }>('practiceCueCheck', { ...cue, patternText });

@@ -9,17 +9,23 @@ export const validCuePayload = (p: any): boolean =>
 
 export const validCueCheckPayload = (p: any): boolean =>
     !!p && typeof p.situationZh === 'string' && p.situationZh.length <= 1000
+    && (p.partnerLineZh === undefined || (typeof p.partnerLineZh === 'string' && p.partnerLineZh.length <= 1000))
     && okText(p.meaningZh, 1000) && okText(p.patternText);
 
 const CJK = /[\u3400-\u9fff\uf900-\ufaff]/;
 const englishField = (v: unknown) => (typeof v === 'string' && !CJK.test(v) ? v.trim().slice(0, MAX) : '');
 
-export const sanitizePracticeCue = (parsed: any): { situationZh: string; meaningZh: string; partnerLineEn?: string; meaningEn?: string } | null => {
+export const sanitizePracticeCue = (parsed: any): { situationZh: string; meaningZh: string; partnerLineZh?: string; partnerLineEn?: string; meaningEn?: string } | null => {
     const situationZh = typeof parsed?.situationZh === 'string' ? parsed.situationZh.trim().slice(0, MAX) : '';
     const meaningZh = typeof parsed?.meaningZh === 'string' ? parsed.meaningZh.trim().slice(0, MAX) : '';
     if (!situationZh || !meaningZh) return null;
-    if (parsed?.partnerLineEn === undefined && parsed?.meaningEn === undefined) return { situationZh, meaningZh };
-    return { situationZh, meaningZh, partnerLineEn: englishField(parsed?.partnerLineEn), meaningEn: englishField(parsed?.meaningEn) };
+    const out: { situationZh: string; meaningZh: string; partnerLineZh?: string; partnerLineEn?: string; meaningEn?: string } = { situationZh, meaningZh };
+    if (typeof parsed?.partnerLineZh === 'string' && parsed.partnerLineZh.trim()) out.partnerLineZh = parsed.partnerLineZh.trim().slice(0, MAX);
+    if (parsed?.partnerLineEn !== undefined || parsed?.meaningEn !== undefined) {
+        out.partnerLineEn = englishField(parsed?.partnerLineEn);
+        out.meaningEn = englishField(parsed?.meaningEn);
+    }
+    return out;
 };
 
 // 品質檢查的回答：只取第一行、去掉前後引號

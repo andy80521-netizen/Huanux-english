@@ -170,15 +170,15 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
     // 目前的題目（v2）：舊題目不用，等重新產生
     const cue: PracticeCue | null = generatedCue
         || (sentenceObj && !needsNewCue(sentenceObj)
-            ? { situationZh: sentenceObj.situationZh || '', meaningZh: sentenceObj.meaningZh || '', partnerLineEn: sentenceObj.partnerLineEn, meaningEn: sentenceObj.meaningEn }
+            ? { situationZh: sentenceObj.situationZh || '', meaningZh: sentenceObj.meaningZh || '', partnerLineZh: sentenceObj.partnerLineZh, partnerLineEn: sentenceObj.partnerLineEn, meaningEn: sentenceObj.meaningEn }
             : null);
     // 當場產生的題目優先（Firestore 更新可能還沒回來）
     const cueVerified = generatedCue ? generatedCue.cueVerified : sentenceObj?.cueVerified;
     const hasEnglish = !!(cue?.partnerLineEn && cue?.meaningEn);
     const display = cueDisplay(cueMastery, hasEnglish);
     const wordBank = sentenceObj?.text ? buildWordBank(sentenceObj.text) : [];
-    // 要朗讀的題目：中文題目念中文意思；英文題目依序念對方的話與英文改寫
-    const promptTexts: string[] = !cue ? [] : display.lang === 'en' ? [cue.partnerLineEn || '', cue.meaningEn || ''] : [cue.meaningZh];
+    // 要朗讀的題目：依序念「對方的話 → 你想說的意思」（中文題目用中文、英文題目用英文）
+    const promptTexts: string[] = !cue ? [] : display.lang === 'en' ? [cue.partnerLineEn || '', cue.meaningEn || ''] : [cue.partnerLineZh || '', cue.meaningZh];
     const promptKey = promptTexts.join('\n');
 
     const stopSpeech = () => {
@@ -368,7 +368,7 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
         void requestPracticeImages(pattern.id, ids);
         // 同時預先產生這一組其他句子的題目與答案語音（目前這一句由下方當場取得）
         const others = (pattern.exampleSentences || []).filter(s => s.groupIndex === g && s.checked && s.id !== sentenceObj?.id);
-        void prefetchSpeech(others.reduce<string[]>((acc, s) => acc.concat([s.meaningZh || '', s.partnerLineEn || '', s.meaningEn || '', s.text || '']), []));
+        void prefetchSpeech(others.reduce<string[]>((acc, s) => acc.concat([s.partnerLineZh || '', s.meaningZh || '', s.partnerLineEn || '', s.meaningEn || '', s.text || '']), []));
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [pattern.id, groupIndex, sentenceObj?.groupIndex]);
 
@@ -685,12 +685,15 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
                             )}
                             {cue && display.lang === 'zh' && (
                                 <>
-                                    {display.situation && cue.situationZh && (
+                                    {cue.partnerLineZh ? (
+                                        <p className="text-[16px] leading-relaxed text-ink break-words"><span className="mr-2 text-[13px] font-medium text-muted">對方說</span>「{cue.partnerLineZh}」</p>
+                                    ) : cue.situationZh && (
                                         <p className="text-[15px] leading-relaxed text-muted"><span className="mr-2 font-medium text-ink/70">情境</span>{cue.situationZh}</p>
                                     )}
                                     <p className={`break-words ${scored
                                         ? 'text-[15px] leading-relaxed text-muted @[60rem]:text-[22px] @[60rem]:leading-[1.5] @[60rem]:text-ink'
                                         : 'text-[24px] leading-[1.55] text-ink lg:text-[28px]'}`}>
+                                        {cue.partnerLineZh && <span className="mr-2 align-middle text-[13px] font-medium text-muted">你想說</span>}
                                         {cue.meaningZh}
                                     </p>
                                 </>

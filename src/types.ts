@@ -63,6 +63,7 @@ export interface PatternExampleSentence {
   situationZh?: string;         // 中文情境（在哪裡、對誰說）
   meaningZh?: string;           // 原句的完整中文意思（主詞、時態、否定、數量都保留）
   cueVerified?: boolean;        // 品質檢查：另一個 AI 只看題目能否一字不差說出原句
+  partnerLineZh?: string;       // 對方說的一句話（中文，熟練度 500 以下用；和 partnerLineEn 是同一句）
   partnerLineEn?: string;       // 熟練度 500 以上：對方用英文說的一句話
   meaningEn?: string;           // 熟練度 500 以上：英文改寫的意思（不用原句的用字與句型）
   qaQuestion?: string;          // 【舊版，已停用】提示 Q&A 問句；產生新題目時移除

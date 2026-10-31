@@ -185,7 +185,7 @@ export default async (req: Request) => {
             if (!validCueCheckPayload(payload)) {
                 return json(400, { error: '輸入格式不正確' });
             }
-            const prompt = buildPracticeCueCheckPrompt({ situationZh: payload.situationZh, meaningZh: payload.meaningZh, patternText: payload.patternText });
+            const prompt = buildPracticeCueCheckPrompt({ situationZh: payload.situationZh, partnerLineZh: typeof payload.partnerLineZh === 'string' ? payload.partnerLineZh : undefined, meaningZh: payload.meaningZh, patternText: payload.patternText });
             const text = await callQualityText(task, prompt, 0);
             result = { answer: sanitizeCueCheckAnswer(text || '') };
         } else if (task === 'regenerateSeeds') {

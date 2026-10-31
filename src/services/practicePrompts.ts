@@ -25,14 +25,14 @@ export async function generateAndSavePracticeCue(
       if (!c || typeof c.situationZh !== 'string' || typeof c.meaningZh !== 'string' || !c.meaningZh.trim()) {
         throw new Error('產生的題目格式不正確，請再試一次');
       }
-      return { situationZh: c.situationZh, meaningZh: c.meaningZh, partnerLineEn: c.partnerLineEn || '', meaningEn: c.meaningEn || '' };
+      return { situationZh: c.situationZh, meaningZh: c.meaningZh, partnerLineZh: c.partnerLineZh || '', partnerLineEn: c.partnerLineEn || '', meaningEn: c.meaningEn || '' };
     },
-    check: (c) => checkPracticeCue({ situationZh: c.situationZh, meaningZh: c.meaningZh }, patternText),
+    check: (c) => checkPracticeCue({ situationZh: c.situationZh, partnerLineZh: c.partnerLineZh || undefined, meaningZh: c.meaningZh }, patternText),
   });
   // 英文題目（熟練度 500 以上用）太接近原句或用了句型時不存，改用中文題目
   const cue = englishCueUsable(verified, sentenceText, patternText)
     ? verified
-    : { situationZh: verified.situationZh, meaningZh: verified.meaningZh, cueVerified: verified.cueVerified };
+    : { situationZh: verified.situationZh, meaningZh: verified.meaningZh, partnerLineZh: verified.partnerLineZh, cueVerified: verified.cueVerified };
 
   const patternRef = doc(db, `artifacts/${appId}/users/${uid}/languagePatterns/${patternId}`);
 
@@ -58,7 +58,7 @@ export async function generateAndSavePracticeCue(
   });
 
   // 題目存好後，背景預先產生題目與答案原句的語音
-  void prefetchSpeech([cue.meaningZh, cue.partnerLineEn || '', cue.meaningEn || '', sentenceText]);
+  void prefetchSpeech([cue.partnerLineZh || '', cue.meaningZh, cue.partnerLineEn || '', cue.meaningEn || '', sentenceText]);
 
   return cue;
 }
