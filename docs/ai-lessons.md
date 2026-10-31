@@ -125,3 +125,4 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 | 出題方式（PR #29，規劃） | Gemini／Nemotron／Poolside／DeepSeek／Grok | 6 | 3 | 新欄位並存、漸進更新不批次、看圖要附文字、方向 B 延後、單字庫（Grok）；駁回：中文題目不能朗讀（Gemini）、檢查不過就擋練習（Nemotron、Poolside）、允許 1 字差異（DeepSeek） |
 | 出題方式（PR #29，審查） | Codex | 2 | 0 | 當場產生的題目品質檢查結果被清空、句型中間有佔位時檢查失效 |
 | 出題方式（PR #29，審查） | Gemini Flash Lite（3.8 Flash 503／逾時） | 0 | 1 | 把 👀 手動項目判成「達成」（無法從程式判斷） |
+| 出題方式（PR #29，第 3 輪，中文對話形式） | Codex／Gemini Flash | 0 | 0 | 皆無意見 |
