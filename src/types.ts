@@ -57,9 +57,17 @@ export interface PatternExampleSentence {
   attemptCount: number;         // 累計嘗試次數（含未達70分的無效嘗試，用於分配出題難度）
   lastAttemptAt?: number;       // 上次「有效嘗試」(>=70分)的時間戳，用於間隔複習判斷
   nextAvailableAt?: number;     // 下次可以再練這句的時間戳（間隔複習排程）
-  // 三種出題內容都是「生成一次、固定重複使用」，不是每次練習重新生成
-  qaQuestion?: string;          // 固定的提示Q&A問句
-  situationalPrompt?: string;   // 固定的情境任務描述
+  // 出題內容「生成一次、固定重複使用」，不是每次練習重新生成
+  // 【2026-10-31 v2】中文情境＋完整中文意思（docs/plans/practice-prompt-design.md）
+  cueVersion?: number;          // 題目版本；沒有或 < 2 ＝ 舊題目，練習時重新產生並取代
+  situationZh?: string;         // 中文情境（在哪裡、對誰說）
+  meaningZh?: string;           // 原句的完整中文意思（主詞、時態、否定、數量都保留）
+  cueVerified?: boolean;        // 品質檢查：另一個 AI 只看題目能否一字不差說出原句
+  partnerLineZh?: string;       // 對方說的一句話（中文，熟練度 500 以下用；和 partnerLineEn 是同一句）
+  partnerLineEn?: string;       // 熟練度 500 以上：對方用英文說的一句話
+  meaningEn?: string;           // 熟練度 500 以上：英文改寫的意思（不用原句的用字與句型）
+  qaQuestion?: string;          // 【舊版，已停用】提示 Q&A 問句；產生新題目時移除
+  situationalPrompt?: string;   // 【舊版，已停用】情境任務描述；產生新題目時移除
   imageUrl?: string;            // 固定的情境圖片（Firebase Storage 網址）
   imageRequestedAt?: number;    // 上次送出產圖請求的時間（6 小時內不重複請求）
 }

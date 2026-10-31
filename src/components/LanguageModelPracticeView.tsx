@@ -7,7 +7,7 @@ import { ChevronLeft, Loader2, Send, CheckCircle2, XCircle, Sparkles, Check, Edi
 import PatternPracticeSessionView from './PatternPracticeSessionView';
 import { checkSentenceQuality } from '../services/gemini';
 import { updatePatternSentences } from '../services/sentenceWrites';
-import { generateAndSavePracticePrompts } from '../services/practicePrompts';
+import { generateAndSavePracticeCue } from '../services/practicePrompts';
 import { regenerateAndSaveSeedExamples } from '../services/seedExamples';
 import { requestPracticeImages } from '../services/practiceImage';
 import ConfirmDialog from './ConfirmDialog';
@@ -185,7 +185,7 @@ export default function LanguageModelPracticeView({ pattern, groupIndex, onBack 
         void requestPracticeImages(pattern.id, [sentenceId]);
         (async () => {
             try {
-                await generateAndSavePracticePrompts(pattern.id, sentenceId, sentenceText, pattern.text);
+                await generateAndSavePracticeCue(pattern.id, sentenceId, sentenceText, pattern.text);
                 console.log("背景出題內容生成並儲存完成");
             } catch (bgErr) {
                 console.error("背景生成出題內容失敗:", bgErr);

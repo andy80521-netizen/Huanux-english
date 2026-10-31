@@ -366,11 +366,19 @@ export async function checkSentenceQuality(
 }
 
 
-export async function generatePracticePrompts(
+export async function generatePracticeCue(
   sentenceText: string,
   patternText: string
-): Promise<{ qaQuestion: string; situationalPrompt: string }> {
-    return callAiText('practicePrompts', { sentenceText, patternText });
+): Promise<{ situationZh: string; meaningZh: string; partnerLineZh?: string; partnerLineEn?: string; meaningEn?: string }> {
+    return callAiText('practiceCue', { sentenceText, patternText });
+}
+
+export async function checkPracticeCue(
+  cue: { situationZh: string; partnerLineZh?: string; meaningZh: string },
+  patternText: string
+): Promise<string> {
+    const r = await callAiText<{ answer?: string }>('practiceCueCheck', { ...cue, patternText });
+    return typeof r?.answer === 'string' ? r.answer : '';
 }
 
 const IMAGE_MODELS = withTestFallback(['gemini-3.1-flash-image', 'gemini-3.1-flash-lite-image']);
