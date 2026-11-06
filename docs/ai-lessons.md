@@ -56,6 +56,7 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 - iPhone 麥克風開著時播放可能變小聲或改從聽筒出聲（音訊 session 類別改變）；若實測發生，把 `KEEP_MIC_OPEN` 改成 false（擁有者已同意的備案）
 - 錄音轉文字（影子跟讀、語言模型練習）會把原句交給 Whisper（`prompt`），**同時**跑一次不帶原句的；不帶原句那次字數 < 60% 時改用它（防「補了沒念的字」）。Gemini 備援不帶原句（PR #31）
 - 語言模型複習的通過判斷一律用 `canAccumulatePattern({ errors, targetCount })`：錯 1 個字以內算通過、原句 3 字以內要全對；不傳 `targetCount` 會被當成要全對（PR #31）
+- 影子跟讀的原音語速：每次錄音拍下速度快照（`lastRecordingRef` 的 `speed`），評分（`scoreShadowingAttempt`）、重試評分、聽聽看都讀快照，不讀目前設定；放慢時流暢度用放慢後的原音長度（PR #32）
 
 ## 防作弊機制的已知限制（2026-10-25 多輪攻擊測試後）
 - 「把斷言改弱」「mock 掉被測程式」「程式偵測測試環境」只能列為 ⚠️ 注意事項，無法自動判定是否作弊，要靠審查者與完成報告說明
@@ -137,3 +138,6 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 | 參考原句＋錯 1 字（PR #31，規劃） | Codex | 4 | 0 | 評分時長不能防補字、第二次失敗不可直接採信、空白作答在 1 字句會通過、AGENTS.md 要同步（🔴） |
 | 參考原句＋錯 1 字（PR #31，規劃） | Gemini／Nemotron／Poolside／DeepSeek | 4 | 2 | 短句排除、空字串 reference、超長保留尾端；駁回 avg_logprob 判照抄、Gemini 也帶原句 |
 | 參考原句＋錯 1 字（PR #31，審查） | Codex／Gemini Flash Lite | 0 | 0 | 第 1 輪皆無意見 |
+| 跟讀語速（PR #32，規劃） | Codex | 1 | 0 | 速度快照要用行為測試驗證（評分、重試、重疊播放各階段速度一致） |
+| 跟讀語速（PR #32，規劃） | Gemini／Nemotron／Poolside／DeepSeek | 3 | 0 | 解鎖預播放也要套速度、MediaLike 加 playbackRate、停止時速度還原 |
+| 跟讀語速（PR #32，審查） | Codex／Gemini Flash Lite | 0 | 0 | 第 1 輪皆無意見 |
