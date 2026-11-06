@@ -186,8 +186,10 @@ export function chooseReferencedTranscript(withRef: TranscribeResult, plain: Tra
     const a = wordCount(withRef.text);
     const b = wordCount(plain.text);
     const usePlain = (check: 'padded' | 'short' | 'worse') => ({ ok: true as const, text: plain.text, model: plain.model, referenced: false, check });
-    if (a > 0 && b < a * PADDED_WORD_RATIO) return usePlain('padded');
-    if (b > 0 && a < b * SHORT_WORD_RATIO) return usePlain('short');
+    // 帶原句那次判定沒有人聲（空字串）→ 保留，不讓不帶原句那次的幻覺蓋過（Codex 第 1 輪）
+    if (a === 0) return { ok: true, text: withRef.text, model: withRef.model, referenced: true, check: 'ok' };
+    if (b < a * PADDED_WORD_RATIO) return usePlain('padded');
+    if (a < b * SHORT_WORD_RATIO) return usePlain('short');
     if (reference && matchedCount(withRef.text, reference) < matchedCount(plain.text, reference)) return usePlain('worse');
     return { ok: true, text: withRef.text, model: withRef.model, referenced: true, check: 'ok' };
   }

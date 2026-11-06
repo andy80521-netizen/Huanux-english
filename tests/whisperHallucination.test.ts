@@ -81,3 +81,21 @@ describe('runReferencedTranscribe 把原句交給判斷（驗收 4）', () => {
     expect(r).toMatchObject({ ok: true, text: SPOKEN, referenced: false });
   });
 });
+
+describe('審查修正（Codex 第 1 輪）', () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+  it('帶原句那次判定沒有人聲、不帶原句那次吐出幻覺 → 保留空字串', async () => {
+    const GROQ = { name: 'Groq', url: 'https://groq.test/t', model: 'whisper-large-v3', key: 'g' };
+    const silent = [{ no_speech_prob: 0.9, avg_logprob: -1.5 }];
+    const fetchImpl = vi.fn(async (_u: string, init?: RequestInit) => {
+      const f = init?.body as FormData;
+      return new Response(JSON.stringify(f.has('prompt') ? { text: 'Thank you.', segments: silent } : { text: 'Thank you.' }), { status: 200 });
+    });
+    const r = await runReferencedTranscribe({ audio: new Uint8Array(5000), mimeType: 'audio/mp4', providers: [GROQ], fetchImpl, now: () => Date.now(), reference: 'Thank you.' });
+    expect(r).toMatchObject({ ok: true, text: '' });
+  });
+  it('直接呼叫：帶原句空字串、不帶原句有字 → 空字串', () => {
+    expect(chooseReferencedTranscript(ok(''), ok(SPOKEN), REF)).toMatchObject({ ok: true, text: '' });
+  });
+});
