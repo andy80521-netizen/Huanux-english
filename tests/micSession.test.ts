@@ -200,3 +200,27 @@ describe('三個畫面接線（驗收 4、5）', () => {
     expect(timerStart).toBeGreaterThan(wait);
   });
 });
+
+describe('審查修正（Codex 第 1 輪）', () => {
+  it('音訊分析初始化失敗 → 已取得的麥克風停止、AudioContext 關閉', async () => {
+    const s = fakeStream();
+    const ctx = fakeCtx();
+    ctx.createMediaStreamSource = vi.fn(() => { throw new Error('boom'); });
+    const mic = createMicSession({ getUserMedia: async () => s.stream, createAudioContext: () => ctx });
+    await expect(mic.acquire()).rejects.toThrow('boom');
+    expect(s.track.stop).toHaveBeenCalled();
+    expect(ctx.close).toHaveBeenCalled();
+    expect(mic.peek()).toBeNull();
+  });
+  it('建立 AudioContext 本身失敗 → 麥克風停止，下次可重新取得', async () => {
+    const s = fakeStream();
+    const getUserMedia = vi.fn(async () => s.stream);
+    const createAudioContext = vi.fn().mockImplementationOnce(() => { throw new Error('no ctx'); }).mockImplementation(() => fakeCtx());
+    const mic = createMicSession({ getUserMedia, createAudioContext });
+    await expect(mic.acquire()).rejects.toThrow('no ctx');
+    expect(s.track.stop).toHaveBeenCalled();
+    getUserMedia.mockResolvedValueOnce(fakeStream().stream);
+    await expect(mic.acquire()).resolves.toBeTruthy();
+    expect(getUserMedia).toHaveBeenCalledTimes(2);
+  });
+});

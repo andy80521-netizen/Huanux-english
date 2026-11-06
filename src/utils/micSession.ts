@@ -63,13 +63,21 @@ export function createMicSession(deps: MicSessionDeps) {
                     stopStream(stream);
                     throw new MicReleasedError();
                 }
-                const ctx = deps.createAudioContext();
-                const source = ctx.createMediaStreamSource(stream);
-                const analyser = ctx.createAnalyser();
-                analyser.fftSize = 256;
-                source.connect(analyser);   // 只接 Analyser，不接喇叭
-                current = { stream, ctx, analyser };
-                return current;
+                let ctx: AudioContext | null = null;
+                try {
+                    ctx = deps.createAudioContext();
+                    const source = ctx.createMediaStreamSource(stream);
+                    const analyser = ctx.createAnalyser();
+                    analyser.fftSize = 256;
+                    source.connect(analyser);   // 只接 Analyser，不接喇叭
+                    current = { stream, ctx, analyser };
+                    return current;
+                } catch (err) {
+                    // 音訊分析初始化失敗：已取得的麥克風與 AudioContext 要釋放，否則離開頁面後麥克風仍開著（Codex）
+                    stopStream(stream);
+                    ctx?.close().catch(() => { /* 忽略 */ });
+                    throw err;
+                }
             } finally {
                 if (mine === generation) pending = null;
             }
@@ -173,8 +181,7 @@ export function useMicSession(label: string): MicSession {
             if (!(err instanceof MicReleasedError)) console.warn(`[${label}] 預先開啟麥克風失敗，按開始時再試:`, err);
         });
         return () => mic.release();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    }, [label]);
     return ref.current;
 }
 
