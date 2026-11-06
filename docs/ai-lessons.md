@@ -52,6 +52,8 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 - `tests/uiCopyBadgesProfile.test.ts` 規定 `animate-pulse` 一定要加 `motion-safe:`（減少動態時不閃）
 - 語言模型練習的評分是「一字不差」，所以題目必須足以還原原句：開放式「回答問題」「情境任務」「只看圖」會讓使用者照情境回答反被判錯（2026-10-31 擁有者回報 All that she wrote will be published 的題目變成「一本書」）。新題目（`cueVersion` 2）一律含完整意思，見 `src/utils/practiceCue.ts`（PR #29）
 - 檢查「是否直接用了句型」要依序比對句型片段（so ... that ...），不能把佔位拿掉後接成連續字串（PR #29 Codex 抓到）
+- iPhone 的 MediaRecorder `start` 事件不代表麥克風已收音：暖機期間錄到的是數位零（約 -90 dBFS，比房間背景還安靜），使用者開頭的字會被吃掉。錄音一律經 `src/utils/micSession.ts`（整頁共用麥克風、`waitForMicLive` 確認收音）；判定收音要求 AudioContext running 且 `currentTime` 前進，暫停時 Analyser 會一直回傳舊資料（PR #30）
+- iPhone 麥克風開著時播放可能變小聲或改從聽筒出聲（音訊 session 類別改變）；若實測發生，把 `KEEP_MIC_OPEN` 改成 false（擁有者已同意的備案）
 
 ## 防作弊機制的已知限制（2026-10-25 多輪攻擊測試後）
 - 「把斷言改弱」「mock 掉被測程式」「程式偵測測試環境」只能列為 ⚠️ 注意事項，無法自動判定是否作弊，要靠審查者與完成報告說明
@@ -126,3 +128,7 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 | 出題方式（PR #29，審查） | Codex | 2 | 0 | 當場產生的題目品質檢查結果被清空、句型中間有佔位時檢查失效 |
 | 出題方式（PR #29，審查） | Gemini Flash Lite（3.8 Flash 503／逾時） | 0 | 1 | 把 👀 手動項目判成「達成」（無法從程式判斷） |
 | 出題方式（PR #29，第 3 輪，中文對話形式） | Codex／Gemini Flash | 0 | 0 | 皆無意見 |
+| 麥克風暖機（PR #30，規劃） | Codex | 4 | 0 | 逾時行為需擁有者決定（🔴）、暫停時 Analyser 舊資料誤判、取得中途離開的釋放、`track.enabled=false` 備案未經驗證 |
+| 麥克風暖機（PR #30，規劃） | Gemini／Nemotron／Poolside／DeepSeek | 3 | 0 | 點擊當下 resume、準備中狀態與防連按、安靜房間門檻；延後：音量偵測改 dBFS、複述靜音停止 |
+| 麥克風暖機（PR #30，審查） | Codex | 1 | 0 | 音訊分析初始化失敗時麥克風沒釋放 |
+| 麥克風暖機（PR #30，審查） | Gemini Flash Lite（3.8 Flash 503） | 0 | 0 | 兩輪皆無意見 |
