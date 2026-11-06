@@ -54,6 +54,8 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 - 檢查「是否直接用了句型」要依序比對句型片段（so ... that ...），不能把佔位拿掉後接成連續字串（PR #29 Codex 抓到）
 - iPhone 的 MediaRecorder `start` 事件不代表麥克風已收音：暖機期間錄到的是數位零（約 -90 dBFS，比房間背景還安靜），使用者開頭的字會被吃掉。錄音一律經 `src/utils/micSession.ts`（整頁共用麥克風、`waitForMicLive` 確認收音）；判定收音要求 AudioContext running 且 `currentTime` 前進，暫停時 Analyser 會一直回傳舊資料（PR #30）
 - iPhone 麥克風開著時播放可能變小聲或改從聽筒出聲（音訊 session 類別改變）；若實測發生，把 `KEEP_MIC_OPEN` 改成 false（擁有者已同意的備案）
+- 錄音轉文字（影子跟讀、語言模型練習）會把原句交給 Whisper（`prompt`），**同時**跑一次不帶原句的；不帶原句那次字數 < 60% 時改用它（防「補了沒念的字」）。Gemini 備援不帶原句（PR #31）
+- 語言模型複習的通過判斷一律用 `canAccumulatePattern({ errors, targetCount })`：錯 1 個字以內算通過、原句 3 字以內要全對；不傳 `targetCount` 會被當成要全對（PR #31）
 
 ## 防作弊機制的已知限制（2026-10-25 多輪攻擊測試後）
 - 「把斷言改弱」「mock 掉被測程式」「程式偵測測試環境」只能列為 ⚠️ 注意事項，無法自動判定是否作弊，要靠審查者與完成報告說明
@@ -132,3 +134,6 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 | 麥克風暖機（PR #30，規劃） | Gemini／Nemotron／Poolside／DeepSeek | 3 | 0 | 點擊當下 resume、準備中狀態與防連按、安靜房間門檻；延後：音量偵測改 dBFS、複述靜音停止 |
 | 麥克風暖機（PR #30，審查） | Codex | 1 | 0 | 音訊分析初始化失敗時麥克風沒釋放 |
 | 麥克風暖機（PR #30，審查） | Gemini Flash Lite（3.8 Flash 503） | 0 | 0 | 兩輪皆無意見 |
+| 參考原句＋錯 1 字（PR #31，規劃） | Codex | 4 | 0 | 評分時長不能防補字、第二次失敗不可直接採信、空白作答在 1 字句會通過、AGENTS.md 要同步（🔴） |
+| 參考原句＋錯 1 字（PR #31，規劃） | Gemini／Nemotron／Poolside／DeepSeek | 4 | 2 | 短句排除、空字串 reference、超長保留尾端；駁回 avg_logprob 判照抄、Gemini 也帶原句 |
+| 參考原句＋錯 1 字（PR #31，審查） | Codex／Gemini Flash Lite | 0 | 0 | 第 1 輪皆無意見 |

@@ -79,7 +79,7 @@ export const englishCueUsable = (cue: PracticeCue, sentenceText: string, pattern
 };
 
 // 看過單字提示時，這次作答不加熟練度（也不算維持複習背出）
-export const canAccumulateWithHint = (scores: { errors: number }, usedWordHint: boolean) =>
+export const canAccumulateWithHint = (scores: { errors: number; targetCount?: number }, usedWordHint: boolean) =>
     canAccumulatePattern(scores) && !usedWordHint;
 
 // 單字提示：原句的單字（去掉前後標點，保留撇號），以固定方式打亂，確保和原句順序不同

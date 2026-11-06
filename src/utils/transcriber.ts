@@ -1,7 +1,12 @@
 // 結果頁顯示「這次由哪個模型轉錄」（PR A，診斷用）
 
 /** 'gemini-3.6-flash' → 'Gemini 3.6 Flash'；'whisper-1' → 'Whisper'；未知或空白 → '' */
-export function transcriberLabel(model: string | null | undefined): string {
+export function transcriberLabel(model: string | null | undefined, referenced?: boolean): string {
+  const base = modelLabel(model);
+  return base && referenced ? `${base}（參考原句）` : base;
+}
+
+function modelLabel(model: string | null | undefined): string {
   const m = (model || '').trim();
   if (!m) return '';
   if (m === 'whisper-1') return 'Whisper';

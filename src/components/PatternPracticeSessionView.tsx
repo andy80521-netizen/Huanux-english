@@ -5,7 +5,7 @@ import { transcribeRecordingDetailed } from '../services/gemini';
 import { shouldStopForSilence } from '../utils/silenceDetection';
 import { transcriberLabel } from '../utils/transcriber';
 import { practiceDurationSec } from '../utils/recordingTiming';
-import { calculateFinalScores, PracticeScores } from '../utils/scoring';
+import { calculateFinalScores, canAccumulatePattern, compareWords, PATTERN_STRICT_MAX_WORDS, PracticeScores } from '../utils/scoring';
 import { useMicSession, waitForMicLive, micSampler, logMicLive, MicReleasedError, KEEP_MIC_OPEN } from '../utils/micSession';
 import { needsNewCue, cueDisplay, buildWordBank, canAccumulateWithHint, PracticeCue } from '../utils/practiceCue';
 import WordDiffView from './WordDiffView';
@@ -179,6 +179,8 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
     const hasEnglish = !!(cue?.partnerLineEn && cue?.meaningEn);
     const display = cueDisplay(cueMastery, hasEnglish);
     const wordBank = sentenceObj?.text ? buildWordBank(sentenceObj.text) : [];
+    // 原句 3 個字以內要一字不差（docs/plans/whisper-reference.md）
+    const strictSentence = !!sentenceObj?.text && compareWords('', sentenceObj.text).targetCount <= PATTERN_STRICT_MAX_WORDS;
     // 要朗讀的題目：依序念「對方的話 → 你想說的意思」（中文題目用中文、英文題目用英文）
     const promptTexts: string[] = !cue ? [] : display.lang === 'en' ? [cue.partnerLineEn || '', cue.meaningEn || ''] : [cue.partnerLineZh || '', cue.meaningZh];
     const promptKey = promptTexts.join('\n');
@@ -406,12 +408,13 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
         const file = new File([blob], 'record.webm', { type: blob.type });
 
         try {
-            const { text: transcribedText, model } = await transcribeRecordingDetailed(file);
+            // 參考原句轉文字（docs/plans/whisper-reference.md）：伺服器同時跑一次不帶原句的防補字
+            const { text: transcribedText, model, referenced } = await transcribeRecordingDetailed(file, { reference: sentenceObj.text });
             setUserText(transcribedText);
-            setTranscriber(transcriberLabel(model));
+            setTranscriber(transcriberLabel(model, referenced));
             const scores = calculateFinalScores(transcribedText, sentenceObj.text, durationSec);
             setScoreResult(scores);
-            // 【v3.11】精準背出原句：一字不差才累加熟練度；看過單字提示這次不算（維持複習也視為沒有背出）
+            // 【2026-11-07】錯 1 個字以內算通過（原句 3 字以內要全對）；看過單字提示這次不算（維持複習也視為沒有通過）
             const isExact = canAccumulateWithHint(scores, usedWordHintRef.current);
             onScored?.(sentenceObj.id, scores.total, isExact);
             setLastExact(isExact);
@@ -758,7 +761,7 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
                                         </span>
                                     </div>
                                     <ProgressBar value={Math.min(currentMastery, 1000)} max={1000} label="目前熟練度" tone={currentMastery >= 1000 ? 'gold' : 'accent'} />
-                                    <span className="text-[13px] leading-relaxed text-muted">說出你造的那句話，一字不差才算數</span>
+                                    <span className="text-[13px] leading-relaxed text-muted">{strictSentence ? '這句較短，要一字不差' : '說出你造的那句話，錯 1 個字以內算通過'}</span>
                                 </div>
                             )}
 
@@ -787,7 +790,7 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
                                             )}
                                             <span className="font-reading text-[88px] leading-[0.9] tracking-[-0.03em] text-ink tabular-nums lg:text-[96px]" aria-hidden="true">{displayTotal}</span>
                                             <span className="sr-only">總分 {scoreResult.total}</span>
-                                            <span className="mt-2.5 text-[13px] text-muted">{lastExact ? '總分・一字不差' : '總分'}</span>
+                                            <span className="mt-2.5 text-[13px] text-muted">{lastExact && scoreResult.errors === 0 ? '總分・一字不差' : lastExact ? '總分・通過' : '總分'}</span>
                                         </div>
                                         <div className="flex flex-1 flex-col gap-3.5 pb-1.5">
                                             {([['內容', scoreResult.content], ['流暢', scoreResult.fluency]] as const).map(([label, v]) => (
@@ -799,14 +802,20 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
                                         </div>
                                     </div>
 
-                                    {scoreResult.errors === 0 && usedWordHintRef.current && (
+                                    {canAccumulatePattern(scoreResult) && usedWordHintRef.current && (
                                         <p className="flex items-center gap-2 rounded-xl bg-warn/10 px-3.5 py-3 text-sm font-medium text-warn">
                                             <AlertCircle size={16} className="shrink-0" aria-hidden="true" />
                                             看過單字提示，這次熟練度不增加
                                         </p>
                                     )}
 
-                                    {scoreResult.errors > 0 && (
+                                    {scoreResult.errors > 0 && canAccumulatePattern(scoreResult) && !usedWordHintRef.current && (
+                                        <p className="flex items-center gap-2 rounded-xl bg-accent-soft px-3.5 py-3 text-sm font-medium text-accent">
+                                            <Check size={16} className="shrink-0" aria-hidden="true" />
+                                            差 1 個字，算通過
+                                        </p>
+                                    )}
+                                    {scoreResult.errors > 0 && !canAccumulatePattern(scoreResult) && (
                                         <p className="flex items-center gap-2 rounded-xl bg-warn/10 px-3.5 py-3 text-sm font-medium text-warn">
                                             <AlertCircle size={16} className="shrink-0" aria-hidden="true" />
                                             有 {scoreResult.errors} 個字不一致，熟練度未增加

@@ -41,7 +41,8 @@ describe('擁有者同意的文案變更', () => {
     expect(src.today).not.toContain('平均熟練度：');
   });
   it('念出來練習：新提示與一字不差標示', () => {
-    expect(src.session).toContain('說出你造的那句話，一字不差才算數');
+    // 2026-11-07 擁有者同意：規則改為錯 1 個字以內算通過（docs/plans/whisper-reference.md）
+    expect(src.session).toContain('說出你造的那句話，錯 1 個字以內算通過');
     expect(src.session).toContain('總分・一字不差');
   });
   it('題型小標去掉冒號', () => {
