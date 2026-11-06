@@ -6,6 +6,7 @@ import { shouldStopForSilence } from '../utils/silenceDetection';
 import { transcriberLabel } from '../utils/transcriber';
 import { practiceDurationSec } from '../utils/recordingTiming';
 import { calculateFinalScores, PracticeScores } from '../utils/scoring';
+import { useMicSession, waitForMicLive, micSampler, logMicLive, MicReleasedError, KEEP_MIC_OPEN } from '../utils/micSession';
 import { needsNewCue, cueDisplay, buildWordBank, canAccumulateWithHint, PracticeCue } from '../utils/practiceCue';
 import WordDiffView from './WordDiffView';
 import { generateAndSavePracticeCue } from '../services/practicePrompts';
@@ -117,6 +118,10 @@ function calculateMasteryAfterAttempt(
 
 export default function PatternPracticeSessionView({ pattern, sentenceIndex, groupIndex, onBack, onNext, isLastSentence, progressLabel, onScored, progress, onMasteryUpdated }: Props) {
     const [sessionState, setSessionState] = useState<SessionState>('idle');
+    // 共用麥克風：進練習就暖機，離開練習才關（docs/plans/mic-warmup.md）
+    const mic = useMicSession('語言模型練習');
+    const [micPreparing, setMicPreparing] = useState(false);   // 按下錄音 → 麥克風確認收音之間
+    const startingRef = useRef(false);                         // 防連按
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
     const [scoreResult, setScoreResult] = useState<PracticeScores | null>(null);
     const [userText, setUserText] = useState<string>('');
@@ -149,10 +154,7 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
     const [showGain, setShowGain] = useState(false);
 
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-    const streamRef = useRef<MediaStream | null>(null);
-    const audioContextRef = useRef<AudioContext | null>(null);
     const analyserRef = useRef<AnalyserNode | null>(null);
-    const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
     const silenceTimerRef = useRef<number>(0);
     // 是否已經偵測到開口：開口前給較長的等待時間（回想句子），開口後中途停頓也不會太快被切斷
     const heardSpeechRef = useRef(false);
@@ -268,22 +270,9 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
             cancelAnimationFrame(requestAnimationFrameRef.current);
             requestAnimationFrameRef.current = 0;
         }
-        if (sourceRef.current) {
-            sourceRef.current.disconnect();
-            sourceRef.current = null;
-        }
-        if (analyserRef.current) {
-            analyserRef.current.disconnect();
-            analyserRef.current = null;
-        }
-        if (audioContextRef.current) {
-            audioContextRef.current.close().catch(console.error);
-            audioContextRef.current = null;
-        }
-        if (streamRef.current) {
-            streamRef.current.getTracks().forEach(track => track.stop());
-            streamRef.current = null;
-        }
+        // 共用麥克風（docs/plans/mic-warmup.md）：只拆掉這次錄音的音量偵測，麥克風留到離開練習
+        analyserRef.current = null;
+        if (!KEEP_MIC_OPEN) mic.release();
     };
 
     useEffect(() => {
@@ -503,28 +492,23 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
             speechEl.play().then(() => speechEl.pause()).catch(() => {});
         }
         setErrorMsg(null);
+        mic.resume();   // iPhone：喚醒 AudioContext 要在點擊當下、任何 await 之前
+        if (startingRef.current) return;
+        startingRef.current = true;
+        setMicPreparing(true);
+        const pressedAt = performance.now();
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-            streamRef.current = stream;
+            const h = await mic.acquire();
+            mic.resume();
             
             const mimeType = getSupportedMimeType();
-            const mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+            const mediaRecorder = new MediaRecorder(h.stream, mimeType ? { mimeType } : undefined);
             mediaRecorderRef.current = mediaRecorder;
             audioChunksRef.current = [];
             silenceTimerRef.current = 0;
             heardSpeechRef.current = false;
             lastSoundAtRef.current = 0;
-
-            const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-            const audioCtx = new AudioContextClass();
-            audioContextRef.current = audioCtx;
-
-            const source = audioCtx.createMediaStreamSource(stream);
-            sourceRef.current = source;
-            const analyser = audioCtx.createAnalyser();
-            analyser.fftSize = 256;
-            analyserRef.current = analyser;
-            source.connect(analyser);
+            analyserRef.current = h.analyser;
 
             mediaRecorder.ondataavailable = (e) => {
                 if (e.data.size > 0) {
@@ -542,11 +526,20 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
             };
 
             mediaRecorder.start();
+            // 麥克風真的收音後才開始計時與靜音偵測（iPhone 暖機期間錄到的是零，馬上開口的第一個字會被吃掉）
+            const live = await waitForMicLive({ sample: micSampler(h), isCancelled: () => mediaRecorderRef.current !== mediaRecorder || mediaRecorder.state !== 'recording' });
+            logMicLive('語言模型練習', live, pressedAt);
+            startingRef.current = false;
+            setMicPreparing(false);
+            if (live === 'cancelled') return;
             recordingStartTimeRef.current = Date.now();
             setSessionState('recording');
             monitorVolume();
 
         } catch (err: any) {
+            startingRef.current = false;
+            setMicPreparing(false);
+            if (err instanceof MicReleasedError) return;
             console.error("Recording error:", err);
             setErrorMsg("無法取得麥克風權限");
             setSessionState('idle');
@@ -902,11 +895,13 @@ export default function PatternPracticeSessionView({ pattern, sentenceIndex, gro
                                 <button
                                     type="button"
                                     onClick={startRecording}
-                                    aria-label="開始錄音"
-                                    className="flex size-20 items-center justify-center rounded-full bg-accent text-on-accent shadow-[0_12px_28px_-10px_rgb(31_122_92/0.6)] transition-[filter,transform] hover:brightness-110 active:scale-95 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent dark:shadow-none"
+                                    disabled={micPreparing}
+                                    aria-label={micPreparing ? '準備中…' : '開始錄音'}
+                                    className="flex size-20 items-center justify-center rounded-full bg-accent text-on-accent shadow-[0_12px_28px_-10px_rgb(31_122_92/0.6)] transition-[filter,transform] hover:brightness-110 active:scale-95 disabled:opacity-70 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent dark:shadow-none"
                                 >
-                                    <Mic size={30} aria-hidden="true" />
+                                    {micPreparing ? <Loader2 size={28} className="animate-spin" aria-hidden="true" /> : <Mic size={30} aria-hidden="true" />}
                                 </button>
+                                {micPreparing && <p className="text-[13px] text-muted" aria-live="polite">準備中…</p>}
                                 <button
                                     type="button"
                                     onClick={generatePrompts}

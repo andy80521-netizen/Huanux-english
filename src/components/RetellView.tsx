@@ -5,6 +5,7 @@ import { transcribeRecordingDetailed, RetellFeedback } from '../services/gemini'
 import { transcriberLabel } from '../utils/transcriber';
 import { RetellSegment, RetellTargetPattern, RetellRecord, reviewRetell, saveRetell, listRetells } from '../services/retell';
 import { getSpeechUrl } from '../services/speech';
+import { useMicSession, waitForMicLive, micSampler, logMicLive, MicReleasedError, KEEP_MIC_OPEN } from '../utils/micSession';
 import { getSupportedMimeType } from '../utils/mediaRecorder';
 import { SILENT_AUDIO } from '../utils';
 import RetellFeedbackPanel from './RetellFeedbackPanel';
@@ -25,6 +26,10 @@ interface Props {
 
 export default function RetellView({ material, segment, segmentIndex, targetPatterns, onBack }: Props) {
   const [phase, setPhase] = useState<Phase>('idle');
+  // 共用麥克風：進入這一段就暖機，離開才關（docs/plans/mic-warmup.md）
+  const mic = useMicSession('複述');
+  const [micPreparing, setMicPreparing] = useState(false);
+  const startingRef = useRef(false);
   const [seconds, setSeconds] = useState(0);
   const [processingText, setProcessingText] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -38,7 +43,6 @@ export default function RetellView({ material, segment, segmentIndex, targetPatt
   const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<number | null>(null);
   const blobRef = useRef<Blob | null>(null);
@@ -70,7 +74,6 @@ export default function RetellView({ material, segment, segmentIndex, targetPatt
         mediaRecorderRef.current.onstop = null;
         mediaRecorderRef.current.stop();
       }
-      streamRef.current?.getTracks().forEach(t => t.stop());
       segmentAudioRef.current?.pause();
       speechAudioRef.current?.pause();
       recordedAudioRef.current?.pause();
@@ -161,20 +164,24 @@ export default function RetellView({ material, segment, segmentIndex, targetPatt
     setTranscript('');
     transcriptRef.current = '';
     blobRef.current = null;
+    mic.resume();   // iPhone：喚醒 AudioContext 要在點擊當下、任何 await 之前
+    if (startingRef.current) return;
+    startingRef.current = true;
+    setMicPreparing(true);
+    const pressedAt = performance.now();
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-      streamRef.current = stream;
+      const h = await mic.acquire();
+      mic.resume();
       const mimeType = getSupportedMimeType();
       // 限制 64 kbps：3 分鐘約 1.5 MB，不會超過上傳上限；語音已足夠清楚
-      const recorder = new MediaRecorder(stream, { ...(mimeType ? { mimeType } : {}), audioBitsPerSecond: 64000 });
+      const recorder = new MediaRecorder(h.stream, { ...(mimeType ? { mimeType } : {}), audioBitsPerSecond: 64000 });
       mediaRecorderRef.current = recorder;
       chunksRef.current = [];
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) chunksRef.current.push(e.data);
       };
       recorder.onstop = () => {
-        streamRef.current?.getTracks().forEach(t => t.stop());
-        streamRef.current = null;
+        if (!KEEP_MIC_OPEN) mic.release();   // 共用麥克風：留到離開這一段複述
         const blob = new Blob(chunksRef.current, { type: recorder.mimeType || 'audio/webm' });
         blobRef.current = blob;
         if (playbackUrlRef.current) URL.revokeObjectURL(playbackUrlRef.current);
@@ -183,6 +190,12 @@ export default function RetellView({ material, segment, segmentIndex, targetPatt
         runAnalysis();
       };
       recorder.start();
+      // 麥克風真的收音後才開始計時（iPhone 暖機期間錄到的是零，馬上開口的第一個字會被吃掉）
+      const live = await waitForMicLive({ sample: micSampler(h), isCancelled: () => mediaRecorderRef.current !== recorder || recorder.state !== 'recording' });
+      logMicLive('複述', live, pressedAt);
+      startingRef.current = false;
+      setMicPreparing(false);
+      if (live === 'cancelled') return;
       setSeconds(0);
       setPhase('recording');
       const startedAt = Date.now();
@@ -192,6 +205,9 @@ export default function RetellView({ material, segment, segmentIndex, targetPatt
         if (elapsed >= MAX_SECONDS) stopRecording();
       }, 500);
     } catch (err) {
+      startingRef.current = false;
+      setMicPreparing(false);
+      if (err instanceof MicReleasedError) return;
       console.error('[複述] 無法開始錄音:', err);
       setErrorMsg('無法取得麥克風權限');
       setPhase('idle');
@@ -329,12 +345,13 @@ export default function RetellView({ material, segment, segmentIndex, targetPatt
                 <button
                   type="button"
                   onClick={startRecording}
-                  aria-label="開始錄音"
-                  className="flex size-20 items-center justify-center rounded-full bg-accent text-on-accent shadow-[0_12px_28px_-10px_rgb(31_122_92/0.6)] transition-[filter,transform] hover:brightness-110 active:scale-95 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent dark:shadow-none"
+                  disabled={micPreparing}
+                  aria-label={micPreparing ? '準備中…' : '開始錄音'}
+                  className="flex size-20 items-center justify-center rounded-full bg-accent text-on-accent shadow-[0_12px_28px_-10px_rgb(31_122_92/0.6)] transition-[filter,transform] hover:brightness-110 active:scale-95 disabled:opacity-70 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent dark:shadow-none"
                 >
-                  <Mic size={30} aria-hidden="true" />
+                  {micPreparing ? <Loader2 size={28} className="animate-spin" aria-hidden="true" /> : <Mic size={30} aria-hidden="true" />}
                 </button>
-                <p className="text-sm text-muted">按下開始錄音，最長 3 分鐘</p>
+                <p className="text-sm text-muted">{micPreparing ? '準備中…' : '按下開始錄音，最長 3 分鐘'}</p>
               </div>
             )}
 
