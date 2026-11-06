@@ -397,7 +397,7 @@ export default function TodayReviewView({ tabs }: { tabs?: React.ReactNode }) {
                         <div className="flex flex-col gap-1.5 border-y border-line py-5 text-[15px] leading-relaxed text-ink">
                             {r.kind === 'result' && (
                                 <>
-                                    <p>{MAINTENANCE_SIZE} 句中 {r.outcome.passCount} 句全對</p>
+                                    <p>{MAINTENANCE_SIZE} 句中 {r.outcome.passCount} 句通過</p>
                                     {r.outcome.passed ? (
                                         <p>已連續通過 {r.outcome.level} 次</p>
                                     ) : (
@@ -585,7 +585,7 @@ export default function TodayReviewView({ tabs }: { tabs?: React.ReactNode }) {
                         <span className="text-[13px] leading-relaxed text-muted">
                             維持題 {item.sentences.length} 句・{(item.pattern.maintenance?.level || 0) > 0
                                 ? `已連續通過 ${item.pattern.maintenance?.level} 次`
-                                : item.pattern.maintenance?.lastReviewedAt ? '上次沒有通過' : '第一次維持複習'}・{MAINTENANCE_SIZE} 句中 {MAINTENANCE_PASS_COUNT} 句全對即通過
+                                : item.pattern.maintenance?.lastReviewedAt ? '上次沒有通過' : '第一次維持複習'}・{MAINTENANCE_SIZE} 句中 {MAINTENANCE_PASS_COUNT} 句通過即可
                         </span>
                     </span>
                     <ChevronRight size={18} className="shrink-0 text-muted" aria-hidden="true" />
