@@ -4,6 +4,7 @@ import { ChevronLeft, Mic, AlertCircle, RotateCcw, Send, Loader2, Headphones, Ch
 import { transcribeRecordingDetailed } from '../services/gemini';
 import { transcriberLabel } from '../utils/transcriber';
 import { playAfterRecordingStarts } from '../utils/recordingTiming';
+import { useMicSession, waitForMicLive, micSampler, logMicLive, MicReleasedError, KEEP_MIC_OPEN } from '../utils/micSession';
 import { calculateShadowingScores, isShadowingPass, PracticeScores, SHADOWING_PASS_CONTENT, SHADOWING_PASS_TOTAL } from '../utils/scoring';
 import WordDiffView from './WordDiffView';
 import { getSupportedMimeType } from '../utils/mediaRecorder';
@@ -108,6 +109,10 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
     const displayPosition = activeIndices.indexOf(sentenceIndex) + 1;
     
     const [practiceState, setPracticeState] = useState<PracticeState>('idle');
+    // 共用麥克風：進頁面就暖機，離開頁面才關（docs/plans/mic-warmup.md）
+    const mic = useMicSession('影子跟讀');
+    const [micPreparing, setMicPreparing] = useState(false);   // 按下開始 → 原音開始播之間
+    const startingRef = useRef(false);                         // 防連按
     const [error, setError] = useState<string | null>(null);
     const [bufferCount, setBufferCount] = useState(6);
     const [recordedBlobUrl, setRecordedBlobUrl] = useState<string | null>(null);
@@ -145,10 +150,7 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
     const playbackUrlRef = useRef<string | null>(null);
     const lastRecordingRef = useRef<{ blob: Blob; speechSec: number } | null>(null);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-    const streamRef = useRef<MediaStream | null>(null);
-    const audioContextRef = useRef<AudioContext | null>(null);
     const analyserRef = useRef<AnalyserNode | null>(null);
-    const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
     const requestAnimationFrameRef = useRef<number>(0);
     const audioChunksRef = useRef<Blob[]>([]);
     const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -166,22 +168,9 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
             cancelAnimationFrame(requestAnimationFrameRef.current);
             requestAnimationFrameRef.current = 0;
         }
-        if (sourceRef.current) {
-            sourceRef.current.disconnect();
-            sourceRef.current = null;
-        }
-        if (analyserRef.current) {
-            analyserRef.current.disconnect();
-            analyserRef.current = null;
-        }
-        if (audioContextRef.current) {
-            audioContextRef.current.close().catch(console.error);
-            audioContextRef.current = null;
-        }
-        if (streamRef.current) {
-            streamRef.current.getTracks().forEach(track => track.stop());
-            streamRef.current = null;
-        }
+        // 共用麥克風（docs/plans/mic-warmup.md）：只拆掉這次錄音的音量偵測，麥克風留到離開頁面
+        analyserRef.current = null;
+        if (!KEEP_MIC_OPEN) mic.release();
     };
 
     const stopRecordingSafely = () => {
@@ -323,6 +312,7 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
     };
 
     const handleStart = async () => {
+        if (startingRef.current) return;   // 正在準備麥克風時連按：不開第二次
         // 要看的句子在畫面上半部：開始跟讀時捲回最上方
         mainScrollRef.current?.scrollTo({ top: 0, behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
         // iPhone 只允許「使用者點擊當下」啟動播放，所以必須在任何 await 之前先解鎖錄音播放器
@@ -343,38 +333,27 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
 
         setError(null);
         cleanupAudio();
-        // 等待麥克風權限期間可能已換句或離開（桌機可點右側句子）：每個 await 之後都檢查，過期就釋放資源並結束，不啟動舊句子的錄音
+        mic.resume();   // iPhone：喚醒 AudioContext 要在點擊當下、任何 await 之前
+        startingRef.current = true;
+        setMicPreparing(true);
+        // 等待麥克風權限期間可能已換句或離開（桌機可點右側句子）：每個 await 之後都檢查，過期就結束，不啟動舊句子的錄音
         const startToken = scoringTokenRef.current;
         const isStale = () => startToken !== scoringTokenRef.current;
+        const pressedAt = performance.now();
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+            const h = await mic.acquire();
             if (isStale()) {
-                stream.getTracks().forEach(track => track.stop());
+                startingRef.current = false;
+                setMicPreparing(false);
                 return;
             }
-            streamRef.current = stream;
+            mic.resume();
             
             const mimeType = getSupportedMimeType();
-            const mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+            const mediaRecorder = new MediaRecorder(h.stream, mimeType ? { mimeType } : undefined);
             mediaRecorderRef.current = mediaRecorder;
             audioChunksRef.current = [];
-
-            // Setup Web Audio API
-            const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-            const audioCtx = new AudioContextClass();
-            audioContextRef.current = audioCtx;
-            await audioCtx.resume().catch(console.warn);
-            if (isStale()) {
-                cleanupAudio();
-                return;
-            }
-
-            const source = audioCtx.createMediaStreamSource(stream);
-            sourceRef.current = source;
-            const analyser = audioCtx.createAnalyser();
-            analyser.fftSize = 256;
-            analyserRef.current = analyser;
-            source.connect(analyser);
+            analyserRef.current = h.analyser;
 
             lastSoundTimeRef.current = 0;
             silenceTimerRef.current = 0;
@@ -422,12 +401,17 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
             // 先開始錄音；等錄音真正啟動（start 事件）後再等 PLAYBACK_LEAD_MS 才播原音，
             // 避免錄音還沒開始、原音和使用者開頭的字沒錄到（等待期間已換句、重錄或離開就不播）
             mediaRecorder.start();
+            startingRef.current = false;
             monitorVolume();
             setPracticeState('recording');
+            const isCancelled = () => isStale() || mediaRecorderRef.current !== mediaRecorder;
             const playback = playAfterRecordingStarts(mediaRecorder, {
                 leadMs: PLAYBACK_LEAD_MS,
-                isCancelled: () => isStale() || mediaRecorderRef.current !== mediaRecorder,
+                isCancelled,
+                // 麥克風真的收音後才播原音（iPhone 暖機期間錄到的是零，跟著原音開口的第一個字會被吃掉）
+                waitLive: async () => logMicLive('影子跟讀', await waitForMicLive({ sample: micSampler(h), isCancelled }), pressedAt),
                 play: () => {
+                    setMicPreparing(false);
                     if (!audioRef.current) return;
                     // 流暢度的講話時間從原音開始播放算起（不含前面等待的時間）
                     recordingStartTimeRef.current = Date.now();
@@ -442,8 +426,12 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                 },
             });
             await playback;
+            setMicPreparing(false);
 
         } catch (err: any) {
+            startingRef.current = false;
+            setMicPreparing(false);
+            if (err instanceof MicReleasedError) return;
             console.error("Mic access error:", err);
             if (isStale()) return;
             cleanupAudio();
@@ -714,7 +702,7 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                         {practiceState === 'recording' && (
                             <div className="mt-10 flex items-center gap-3">
                                 <span className="size-2.5 rounded-full bg-danger animate-breathe" aria-hidden="true" />
-                                <p className="text-[15px] font-medium text-ink">正在播放並同步錄音中...</p>
+                                <p className="text-[15px] font-medium text-ink">{micPreparing ? '準備麥克風…' : '正在播放並同步錄音中...'}</p>
                             </div>
                         )}
                         {(practiceState === 'recording' || practiceState === 'buffer') && (
@@ -876,8 +864,8 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                                     <Headphones size={17} className="mt-0.5 shrink-0" aria-hidden="true" />
                                     <span>請戴上耳機練習。跟讀時會同時播放原音和錄音，沒戴耳機時麥克風會錄到原音，導致評分失準。</span>
                                 </p>
-                                <Button size="lg" onClick={handleStartClick} icon={<Mic size={22} aria-hidden="true" />} className="w-full lg:w-auto lg:shrink-0">
-                                    開始跟讀
+                                <Button size="lg" onClick={handleStartClick} disabled={micPreparing} icon={<Mic size={22} aria-hidden="true" />} className="w-full lg:w-auto lg:shrink-0">
+                                    {micPreparing ? '準備麥克風…' : '開始跟讀'}
                                 </Button>
                             </div>
                         )}

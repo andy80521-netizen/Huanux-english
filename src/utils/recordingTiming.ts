@@ -6,19 +6,22 @@ export interface RecorderLike {
 }
 
 /**
- * 影子跟讀：等錄音真正啟動（start 事件，或保險時間到）後再等 leadMs，才呼叫 play。
+ * 影子跟讀：等錄音真正啟動（start 事件，或保險時間到）、且麥克風確認收音（waitLive，選填）後再等 leadMs，才呼叫 play。
  * start 事件是非同步發出的，在呼叫 recorder.start() 之後立刻呼叫本函式也收得到；收不到時有保險時間。
  * 等待期間被取消（換句、重錄、離開）或錄音已停止 → 不播放，回傳 false。
  */
 export async function playAfterRecordingStarts(
   recorder: RecorderLike,
-  opts: { leadMs: number; fallbackMs?: number; isCancelled: () => boolean; play: () => void },
+  opts: { leadMs: number; fallbackMs?: number; isCancelled: () => boolean; play: () => void; waitLive?: () => Promise<unknown> },
 ): Promise<boolean> {
-  const { leadMs, fallbackMs = 800, isCancelled, play } = opts;
-  await new Promise<void>((resolve) => {
+  const { leadMs, fallbackMs = 800, isCancelled, play, waitLive } = opts;
+  const started = new Promise<void>((resolve) => {
     const fallback = setTimeout(resolve, fallbackMs);
     recorder.addEventListener('start', () => { clearTimeout(fallback); resolve(); }, { once: true });
   });
+  // 麥克風暖機（docs/plans/mic-warmup.md）：start 事件不代表已收到聲音，同時等麥克風真的收音
+  await Promise.all([started, waitLive ? waitLive() : Promise.resolve()]);
+  if (isCancelled()) return false;
   await new Promise((r) => setTimeout(r, leadMs));
   if (isCancelled() || recorder.state !== 'recording') return false;
   play();
