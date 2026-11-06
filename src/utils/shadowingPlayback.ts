@@ -4,6 +4,8 @@ import { OVERLAY_ORIGINAL_VOLUME } from './shadowingAudio';
 
 export interface MediaLike {
   currentTime: number;
+  /** 播放速度（原音放慢用；docs/plans/shadowing-speed.md） */
+  playbackRate?: number;
   play(): Promise<void> | void;
   pause(): void;
   addEventListener(type: string, fn: () => void): void;
@@ -24,6 +26,8 @@ export interface ListenPlayerOptions {
   /** 重疊播放時原音要延後幾毫秒 */
   offsetMs: () => number;
   onChange?: (mode: ListenMode | null) => void;
+  /** 原音播放速度（這次錄音當下的速度）；不傳＝1 倍。使用者錄音一律 1 倍 */
+  rate?: () => number;
 }
 
 export interface ListenPlayer {
@@ -45,7 +49,13 @@ const safePlay = (m: MediaLike) => {
 };
 
 export function createListenPlayer(opts: ListenPlayerOptions): ListenPlayer {
-  const { recording, original, setOriginalVolume, segment, offsetMs, onChange } = opts;
+  const { recording, original, setOriginalVolume, segment, offsetMs, onChange, rate } = opts;
+  const setOriginalRate = (r: number) => {
+    original.playbackRate = r;
+    const a = original as { preservesPitch?: boolean; webkitPreservesPitch?: boolean };
+    a.preservesPitch = true;
+    a.webkitPreservesPitch = true;
+  };
   let mode: ListenMode | null = null;
   let generation = 0;
   let disposed = false;
@@ -77,6 +87,7 @@ export function createListenPlayer(opts: ListenPlayerOptions): ListenPlayer {
     try { recording.pause(); } catch { /* 忽略 */ }
     try { original.pause(); } catch { /* 忽略 */ }
     setOriginalVolume(1);
+    if (rate) setOriginalRate(1);
     originalDone = true;
     setMode(null);
   };
@@ -84,6 +95,8 @@ export function createListenPlayer(opts: ListenPlayerOptions): ListenPlayer {
   /** 播原音這一句；播到句尾（或保險計時到）就停，回呼 onDone */
   const playOriginal = (gen: number, volume: number, onDone: () => void) => {
     const { start, end } = segment();
+    const r = rate ? rate() : 1;
+    if (rate) setOriginalRate(r);
     setOriginalVolume(volume);
     original.currentTime = start;
     originalDone = false;
@@ -111,7 +124,7 @@ export function createListenPlayer(opts: ListenPlayerOptions): ListenPlayer {
       extraChecks += 1;
       later(500, check);
     };
-    later((end - start) * 1000 + 500, check);
+    later(((end - start) / (r > 0 ? r : 1)) * 1000 + 500, check);
     safePlay(original);
   };
 

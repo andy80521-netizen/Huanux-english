@@ -20,6 +20,8 @@ import IconButton from './ui/IconButton';
 import ProgressBar from './ui/ProgressBar';
 import { PLAYBACK_LEAD_MS, RECORDING_ORIGINAL_VOLUME, canSetElementVolume, overlayOffsetMs, sentenceSegment, shouldShowHeadphoneTip, dismissHeadphoneTip } from '../utils/shadowingAudio';
 import { createListenPlayer, ListenMode, ListenPlayer } from '../utils/shadowingPlayback';
+import { SHADOWING_SPEEDS, ShadowingSpeed, ShadowingAttempt, loadSpeed, saveSpeed, applyPlaybackSpeed, effectiveOriginalSec, scoreShadowingAttempt } from '../utils/shadowingSpeed';
+import SegmentedControl from './ui/SegmentedControl';
 
 /** 系統是否開啟「減少動態效果」（分數跑動是 JS，全域 CSS 規則管不到，要自己判斷） */
 const prefersReducedMotion = () => {
@@ -148,7 +150,11 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
     const audioRef = useRef<HTMLAudioElement>(null);
     const recordedAudioRef = useRef<HTMLAudioElement>(null);
     const playbackUrlRef = useRef<string | null>(null);
-    const lastRecordingRef = useRef<{ blob: Blob; speechSec: number } | null>(null);
+    // 一次錄音的快照（含錄音當下的原音速度）：評分、重試評分、聽聽看都讀它（docs/plans/shadowing-speed.md）
+    const lastRecordingRef = useRef<({ blob: Blob } & ShadowingAttempt) | null>(null);
+    // 原音語速：記住設定；每次按開始跟讀時拍下快照
+    const [speed, setSpeed] = useState<ShadowingSpeed>(() => loadSpeed(getStorage));
+    const recordSpeedRef = useRef<number>(1);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const analyserRef = useRef<AnalyserNode | null>(null);
     const requestAnimationFrameRef = useRef<number>(0);
@@ -210,6 +216,7 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
             },
             offsetMs: () => overlayOffsetMs(recordStartAtRef.current, originalPlayingAtRef.current),
             onChange: setListenMode,
+            rate: () => lastRecordingRef.current?.speed ?? 1,
         });
         playerRef.current = player;
         return () => {
@@ -322,8 +329,10 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
         }
         // 原音會在錄音開始後才播放（不是在點擊當下）：先在點擊當下靜音解鎖一次，iPhone 之後才允許播放
         let realPlayStarted = false;
+        recordSpeedRef.current = speed;   // 這次錄音的原音速度快照
         if (audioRef.current) {
             const org = audioRef.current;
+            applyPlaybackSpeed(org, speed);
             org.muted = true;
             org.play()
                 .then(() => { if (!realPlayStarted) org.pause(); })
@@ -382,8 +391,9 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                 const url = URL.createObjectURL(blob);
                 setRecordedBlobUrl(url);
 
-                lastRecordingRef.current = { blob, speechSec };
-                runScoring(blob, speechSec);
+                const attempt: ShadowingAttempt = { speechSec, speed: recordSpeedRef.current };
+                lastRecordingRef.current = { blob, ...attempt };
+                runScoring(blob, attempt);
             };
 
             // Set up audio to play exactly at startTime
@@ -416,6 +426,7 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                     // 流暢度的講話時間從原音開始播放算起（不含前面等待的時間）
                     recordingStartTimeRef.current = Date.now();
                     realPlayStarted = true;
+                    applyPlaybackSpeed(audioRef.current, recordSpeedRef.current);
                     audioRef.current.muted = false;
                     audioRef.current.play().catch(e => {
                         console.error("Audio play failed:", e);
@@ -498,7 +509,7 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
         setError(null);
     };
 
-    const runScoring = async (blob: Blob, speechSec: number) => {
+    const runScoring = async (blob: Blob, attempt: ShadowingAttempt) => {
         setPracticeState('scoring');
         setError(null);
         const token = scoringTokenRef.current;
@@ -516,8 +527,8 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                 setTranscriber(transcriberLabel(model, referenced));
             }
             
-            const originalSec = Math.max(0, sentence.endTime - sentence.startTime);
-            const scores = calculateShadowingScores(transcribedText, sentence.text, speechSec, originalSec);
+            // 流暢度以錄音當下的速度換算原音長度（放慢時用放慢後的長度）
+            const scores = scoreShadowingAttempt(transcribedText, sentence, attempt);
             if (!isStale()) setScoreResult(scores);
             
             // Save to Firestore
@@ -689,8 +700,17 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                                         </span>
                                     </div>
                                     <ProgressBar value={Math.min(mastery, MASTERY_MAX)} max={MASTERY_MAX} label="熟練度" tone={mastery >= MASTERY_MAX ? 'gold' : 'accent'} />
+                                    <div className="mt-2 flex items-center justify-between gap-3">
+                                        <span className="text-[13px] text-muted">原音速度</span>
+                                        <SegmentedControl
+                                            label="原音速度"
+                                            options={SHADOWING_SPEEDS.map(v => ({ value: String(v), label: `${v}×` }))}
+                                            value={String(speed)}
+                                            onChange={(v) => { const n = Number(v) as ShadowingSpeed; setSpeed(n); saveSpeed(getStorage, n); }}
+                                        />
+                                    </div>
                                     <div className="flex gap-5 text-[13px] text-muted">
-                                        {originalSec > 0 && <span>原音 {originalSec.toFixed(1)} 秒</span>}
+                                        {originalSec > 0 && <span>原音 {effectiveOriginalSec(originalSec, speed).toFixed(1)} 秒</span>}
                                         {typeof lastTotal === 'number' && <span>上次 {lastTotal} 分</span>}
                                     </div>
                                 </div>
@@ -880,7 +900,7 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                                     size="lg"
                                     onClick={() => {
                                         if (lastRecordingRef.current) {
-                                            runScoring(lastRecordingRef.current.blob, lastRecordingRef.current.speechSec);
+                                            runScoring(lastRecordingRef.current.blob, lastRecordingRef.current);
                                         }
                                     }}
                                     icon={<Send size={18} aria-hidden="true" />}
