@@ -2,7 +2,7 @@
 import { LanguagePattern, PatternExampleSentence } from '../types';
 import { addSydneyCalendarDays, isSydneyDateReached } from './sydneyTime';
 
-export const MAINTENANCE_PASS_COUNT = 2; // 3 句中至少 2 句全對才算通過（v3.11 起以一字不差判斷）
+export const MAINTENANCE_PASS_COUNT = 2; // 3 句中至少 2 句通過才算通過（v3.11 起以一字不差判斷；2026-11-07 起錯 1 個字以內算通過）
 export const FAILED_MASTERY = 750;       // 沒全對的句子降到這個熟練度，回到一般複習
 
 // 通過後的新 level 對應下次間隔：0 → 30 天、1 → 90 天、2 以上 → 180 天
@@ -22,7 +22,7 @@ export interface MaintenanceComputation {
   exampleSentences: PatternExampleSentence[];
 }
 
-// results：每句（最後一次錄音）是否一字不差。沒有維持排程或還沒到期時回傳 null（不重複套用）。
+// results：每句（最後一次錄音）是否通過（canAccumulatePattern）。沒有維持排程或還沒到期時回傳 null（不重複套用）。
 export function computeMaintenanceOutcome(
   data: LanguagePattern,
   results: Record<string, boolean>,

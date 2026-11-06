@@ -57,14 +57,15 @@ export type TranscribeResult =
 
 type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 
-async function callProvider(p: TranscribeProvider, audio: Uint8Array, mimeType: string, fetchImpl: FetchLike, timeoutMs: number) {
+async function callProvider(p: TranscribeProvider, audio: Uint8Array, mimeType: string, fetchImpl: FetchLike, timeoutMs: number, prompt?: string) {
   const form = new FormData();
   form.append('file', new Blob([audio], { type: (mimeType || 'audio/webm').split(';')[0] }), `recording.${extensionFor(mimeType)}`);
   form.append('model', p.model);
   form.append('language', 'en');
   form.append('temperature', '0');
   form.append('response_format', 'verbose_json');
-  // 刻意不傳 prompt：不把原句交給轉錄模型，避免分數灌水
+  // 參考原句（docs/plans/whisper-reference.md）：只有呼叫端明確傳入才帶；另一條不帶原句的轉錄用來防「補了沒念的字」
+  if (prompt) form.append('prompt', prompt);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), Math.max(0, timeoutMs));
   try {
@@ -94,8 +95,10 @@ export async function runTranscribeChain(opts: {
   fetchImpl: FetchLike;
   now: () => number;
   startedAt?: number;
+  /** 參考原句（Whisper prompt）；不傳＝不帶 */
+  prompt?: string;
 }): Promise<TranscribeResult> {
-  const { audio, mimeType, providers, fetchImpl, now } = opts;
+  const { audio, mimeType, providers, fetchImpl, now, prompt } = opts;
   if (audio.length < MIN_AUDIO_BYTES) return { ok: true, text: '', model: '' };
   const deadline = (opts.startedAt ?? now()) + TOTAL_BUDGET_MS;
 
@@ -107,8 +110,8 @@ export async function runTranscribeChain(opts: {
     const timeout = i === 0 ? Math.min(GROQ_TIMEOUT_MS, remaining) : remaining;
     const t0 = now();
     try {
-      const text = await callProvider(p, audio, mimeType, fetchImpl, timeout);
-      console.log(`[transcribe] 成功：${p.model} ${now() - t0}ms`);
+      const text = await callProvider(p, audio, mimeType, fetchImpl, timeout, prompt);
+      console.log(`[transcribe] 成功：${p.model}${prompt ? '（參考原句）' : ''} ${now() - t0}ms`);
       return { ok: true, text, model: p.model };
     } catch (err: any) {
       // 只記錯誤摘要，不記轉錄文字或音檔
@@ -116,6 +119,65 @@ export async function runTranscribeChain(opts: {
     }
   }
   return { ok: false, status: 502, error: '語音轉文字暫時失敗' };
+}
+
+// ── 參考原句（docs/plans/whisper-reference.md，擁有者 2026-11-07 核准）──
+
+/** 原句長度上限（字元）：Whisper 的 prompt 約 224 token，超過時保留尾端 */
+export const REFERENCE_MAX_CHARS = 600;
+/** 不帶原句那次的字數低於帶原句那次的這個比例 → 判定帶原句那次「補了沒念的字」 */
+export const PADDED_WORD_RATIO = 0.6;
+
+export function normalizeReference(ref: unknown): string {
+  if (typeof ref !== 'string') return '';
+  const t = ref.trim();
+  if (!t) return '';
+  if (t.length <= REFERENCE_MAX_CHARS) return t;
+  const tail = t.slice(-REFERENCE_MAX_CHARS);
+  const sp = tail.indexOf(' ');
+  return (sp > 0 && sp < 40 ? tail.slice(sp + 1) : tail).trim();
+}
+
+const wordCount = (t: string) => t.split(/\s+/).filter(Boolean).length;
+
+export type ReferencedResult =
+  | { ok: true; text: string; model: string; referenced: boolean; check: 'ok' | 'padded' | 'unchecked' | 'plain' }
+  | { ok: false; status: number; error: string };
+
+/** 兩條轉錄的結果 → 要用哪一個評分 */
+export function chooseReferencedTranscript(withRef: TranscribeResult, plain: TranscribeResult): ReferencedResult {
+  if (withRef.ok && plain.ok) {
+    const a = wordCount(withRef.text);
+    const b = wordCount(plain.text);
+    if (a > 0 && b < a * PADDED_WORD_RATIO) {
+      return { ok: true, text: plain.text, model: plain.model, referenced: false, check: 'padded' };
+    }
+    return { ok: true, text: withRef.text, model: withRef.model, referenced: true, check: 'ok' };
+  }
+  if (withRef.ok) return { ok: true, text: withRef.text, model: withRef.model, referenced: true, check: 'unchecked' };
+  if (plain.ok) return { ok: true, text: plain.text, model: plain.model, referenced: false, check: 'plain' };
+  return withRef.ok === false ? { ok: false, status: withRef.status, error: withRef.error } : { ok: false, status: 502, error: '語音轉文字暫時失敗' };
+}
+
+/** 同一段錄音同時跑兩條轉錄鏈（帶原句／不帶），共用時間預算，再依 chooseReferencedTranscript 決定結果 */
+export async function runReferencedTranscribe(opts: {
+  audio: Uint8Array;
+  mimeType: string;
+  providers: TranscribeProvider[];
+  fetchImpl: FetchLike;
+  now: () => number;
+  startedAt?: number;
+  reference: string;
+}): Promise<ReferencedResult> {
+  const { reference, ...base } = opts;
+  const startedAt = opts.startedAt ?? opts.now();
+  const [withRef, plain] = await Promise.all([
+    runTranscribeChain({ ...base, startedAt, prompt: reference }),
+    runTranscribeChain({ ...base, startedAt }),
+  ]);
+  const r = chooseReferencedTranscript(withRef, plain);
+  if (r.ok && r.check !== 'ok') console.warn(`[transcribe] 參考原句檢查：${r.check}`);
+  return r;
 }
 
 /**

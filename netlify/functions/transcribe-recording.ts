@@ -1,6 +1,6 @@
 // 錄音轉文字（PR B，2026-10-30 起為主力）：Groq Whisper large-v3 → OpenAI whisper-1；都失敗回 502，前端再改用 Gemini
 // 必須驗證 Firebase 登入權杖，避免金鑰被任何人拿來使用
-import { runTranscribeChain, GROQ_TRANSCRIBE_MODEL, GROQ_TRANSCRIBE_URL, OPENAI_TRANSCRIBE_URL } from '../shared/transcribe';
+import { runTranscribeChain, runReferencedTranscribe, normalizeReference, GROQ_TRANSCRIBE_MODEL, GROQ_TRANSCRIBE_URL, OPENAI_TRANSCRIBE_URL } from '../shared/transcribe';
 
 const MAX_BASE64_LENGTH = 4_000_000; // 約 3MB 音檔，跟讀錄音通常遠小於此
 
@@ -52,17 +52,25 @@ export default async (req: Request) => {
 
     try {
         const audio = new Uint8Array(Buffer.from(audioBase64, 'base64'));
-        const result = await runTranscribeChain({
+        const common = {
             audio,
             mimeType,
             providers: [
                 { name: 'Groq', url: GROQ_TRANSCRIBE_URL, model: GROQ_TRANSCRIBE_MODEL, key: process.env.GROQ_API_KEY },
                 { name: 'OpenAI', url: OPENAI_TRANSCRIBE_URL, model: 'whisper-1', key: process.env.OPENAI_API_KEY },
             ],
-            fetchImpl: (url, init) => fetch(url, init),
+            fetchImpl: (url: string, init?: RequestInit) => fetch(url, init),
             now: () => Date.now(),
             startedAt,
-        });
+        };
+        // 參考原句（影子跟讀、語言模型練習）：帶原句與不帶原句同時轉錄，防「補了沒念的字」
+        const reference = normalizeReference(body?.reference);
+        if (reference) {
+            const r = await runReferencedTranscribe({ ...common, reference });
+            if (r.ok === false) return json(r.status, { error: r.error });
+            return json(200, { text: r.text, model: r.model, referenced: r.referenced, check: r.check });
+        }
+        const result = await runTranscribeChain(common);
         if (result.ok === false) return json(result.status, { error: result.error });
         // 空字串是合法結果（沒有人聲）
         return json(200, { text: result.text, model: result.model });

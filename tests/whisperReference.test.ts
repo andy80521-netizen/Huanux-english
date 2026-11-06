@@ -83,7 +83,7 @@ describe('runReferencedTranscribe（驗收 3）', () => {
     expect(r).toMatchObject({ ok: true, referenced: true, check: 'ok' });
   });
   it('沒有原句時的轉錄鏈照舊不帶 prompt', async () => {
-    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ text: 'hi there' }), { status: 200 }));
+    const fetchImpl = vi.fn(async (_u: string, _init?: RequestInit) => new Response(JSON.stringify({ text: 'hi there' }), { status: 200 }));
     await runTranscribeChain({ audio, mimeType: 'audio/webm', providers: [GROQ], fetchImpl, now: () => Date.now() });
     expect((fetchImpl.mock.calls[0][1]?.body as FormData).has('prompt')).toBe(false);
   });

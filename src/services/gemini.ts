@@ -239,14 +239,14 @@ const fileToBase64 = (file: File): Promise<string> =>
     });
 
 // 主力：透過後端 Function 呼叫 Whisper（伺服器端依序 Groq whisper-large-v3 → OpenAI whisper-1；需登入）
-async function transcribeWithWhisper(audioFile: File): Promise<{ text: string; model: string }> {
+async function transcribeWithWhisper(audioFile: File, reference?: string): Promise<{ text: string; model: string; referenced?: boolean }> {
     const idToken = await auth.currentUser?.getIdToken();
     if (!idToken) throw new Error('請先登入');
     const audioBase64 = await fileToBase64(audioFile);
     const response = await fetch('/.netlify/functions/transcribe-recording', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
-        body: JSON.stringify({ audioBase64, mimeType: audioFile.type || 'audio/webm' })
+        body: JSON.stringify({ audioBase64, mimeType: audioFile.type || 'audio/webm', ...(reference ? { reference } : {}) })
     });
     if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
@@ -257,7 +257,9 @@ async function transcribeWithWhisper(audioFile: File): Promise<{ text: string; m
     const data = await response.json();
     if (typeof data?.text !== 'string') throw new Error('Whisper 回傳格式錯誤');
     // 空字串是合法結果（沒有人聲）
-    return { text: data.text.trim(), model: typeof data?.model === 'string' ? data.model : 'whisper-1' };
+    const model = typeof data?.model === 'string' ? data.model : 'whisper-1';
+    // 參考原句：伺服器有回報才帶（舊回應不含這個欄位）
+    return typeof data?.referenced === 'boolean' ? { text: data.text.trim(), model, referenced: data.referenced } : { text: data.text.trim(), model };
 }
 
 export async function transcribeRecording(audioFile: File): Promise<string> {
@@ -269,15 +271,19 @@ export async function transcribeRecording(audioFile: File): Promise<string> {
  * 順序（PR B，2026-10-30）：Whisper（Groq large-v3 → OpenAI whisper-1，伺服器端）→ 失敗才用 Gemini 最後備援。
  * 測試用開關：localStorage 設定 huanux_force_gemini = '1' 時直接使用 Gemini（比較用）。
  */
-export async function transcribeRecordingDetailed(audioFile: File): Promise<{ text: string; model: string }> {
+export async function transcribeRecordingDetailed(audioFile: File, opts?: { reference?: string }): Promise<{ text: string; model: string; referenced?: boolean }> {
     let forceGemini = false;
     try { forceGemini = localStorage.getItem('huanux_force_gemini') === '1'; } catch {}
+    // 參考原句（docs/plans/whisper-reference.md）：只給 Whisper；Gemini 備援不帶。測試開關 huanux_no_reference='1' 可關閉
+    let noReference = false;
+    try { noReference = localStorage.getItem('huanux_no_reference') === '1'; } catch {}
+    const reference = noReference ? undefined : opts?.reference?.trim() || undefined;
 
     let whisperError = '';
     if (!forceGemini) {
         const t0 = performance.now();
         try {
-            const r = await transcribeWithWhisper(audioFile);
+            const r = await transcribeWithWhisper(audioFile, reference);
             console.log(`[計時] 語音轉文字完成：${Math.round(performance.now() - t0)} ms（${r.model || '太短未送出'}）`);
             return r;
         } catch (e: any) {

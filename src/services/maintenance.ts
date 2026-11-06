@@ -66,7 +66,7 @@ export function pickMaintenanceSentences(p: LanguagePattern, now: number = Date.
     .map(x => x.s);
 }
 
-// 套用維持題結果：results 為每句（最後一次錄音）是否一字不差。
+// 套用維持題結果：results 為每句（最後一次錄音）是否通過（2026-11-07 起錯 1 個字以內算通過，見 canAccumulatePattern）。
 // 已經不是到期狀態（做過了或被延後）時不重複套用，回傳 null。
 export async function applyMaintenanceResult(patternId: string, results: Record<string, boolean>): Promise<MaintenanceOutcome | null> {
   const uid = auth.currentUser?.uid;

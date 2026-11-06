@@ -509,10 +509,11 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
             const mimeType = blob.type || 'audio/webm';
             const file = new File([blob], 'recording', { type: mimeType });
             
-            const { text: transcribedText, model } = await transcribeRecordingDetailed(file);
+            // 參考原句轉文字（docs/plans/whisper-reference.md）：伺服器同時跑一次不帶原句的防補字
+            const { text: transcribedText, model, referenced } = await transcribeRecordingDetailed(file, { reference: sentence.text });
             if (!isStale()) {
                 setUserText(transcribedText);
-                setTranscriber(transcriberLabel(model));
+                setTranscriber(transcriberLabel(model, referenced));
             }
             
             const originalSec = Math.max(0, sentence.endTime - sentence.startTime);

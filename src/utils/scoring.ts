@@ -326,8 +326,15 @@ export const compareWords = (userText: string, targetText: string): WordComparis
     return { targetCount: counted, errors, contentScore, diff };
 };
 
-// 句型練習（精準背出原句）：一字不差才累加熟練度
-export const canAccumulatePattern = (scores: { errors: number }) => scores.errors === 0;
+// 句型練習的通過門檻（擁有者 2026-11-07 決定，docs/plans/whisper-reference.md）：
+// 錯 1 個字以內算通過；原句 3 個字以內要全對；沒有 targetCount 時視為要全對（相容舊呼叫）
+export const PATTERN_PASS_MAX_ERRORS = 1;
+export const PATTERN_STRICT_MAX_WORDS = 3;
+export const canAccumulatePattern = (scores: { errors: number; targetCount?: number }) => {
+    if (scores.errors === 0) return true;
+    if (typeof scores.targetCount !== 'number' || scores.targetCount <= PATTERN_STRICT_MAX_WORDS) return false;
+    return scores.errors <= PATTERN_PASS_MAX_ERRORS;
+};
 
 const combineTotal = (content: number, fluency: number) => Math.round(content * 0.7 + fluency * 0.3);
 
