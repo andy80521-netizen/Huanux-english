@@ -140,21 +140,63 @@ export function normalizeReference(ref: unknown): string {
 
 const wordCount = (t: string) => t.split(/\s+/).filter(Boolean).length;
 
+/** 帶原句那次的字數低於不帶原句那次的這個比例 → 判定帶原句那次漏字或亂寫（Bug 2026-11-07） */
+export const SHORT_WORD_RATIO = 0.6;
+/** 轉錄文字中出現在原句的比例低於這個 → 疑似幻覺（例：「In the following video…」約 0.13） */
+export const SUSPECT_OVERLAP_RATIO = 0.3;
+/** 少於這個字數的轉錄不判定幻覺（短回答本來就可能跟原句不同） */
+const SUSPECT_MIN_WORDS = 3;
+
+const tokens = (t: string) => t.toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/[^a-z0-9']+/g, ' ').split(' ').filter(Boolean);
+
+/** 轉錄文字有幾個字出現在原句（每個原句字只能配對一次） */
+function matchedCount(text: string, reference: string): number {
+  const bag = new Map<string, number>();
+  for (const w of tokens(reference)) bag.set(w, (bag.get(w) || 0) + 1);
+  let n = 0;
+  for (const w of tokens(text)) {
+    const c = bag.get(w) || 0;
+    if (c > 0) { n++; bag.set(w, c - 1); }
+  }
+  return n;
+}
+
+/** 轉錄文字中出現在原句的比例（0～1） */
+export function referenceOverlap(text: string, reference: string): number {
+  const total = tokens(text).length;
+  return total === 0 ? 0 : matchedCount(text, reference) / total;
+}
+
+const looksHallucinated = (text: string, reference: string) =>
+  !!reference && tokens(text).length >= SUSPECT_MIN_WORDS && referenceOverlap(text, reference) < SUSPECT_OVERLAP_RATIO;
+
 export type ReferencedResult =
-  | { ok: true; text: string; model: string; referenced: boolean; check: 'ok' | 'padded' | 'unchecked' | 'plain' }
+  | { ok: true; text: string; model: string; referenced: boolean; check: 'ok' | 'padded' | 'short' | 'worse' | 'unchecked' | 'plain' }
   | { ok: false; status: number; error: string };
 
-/** 兩條轉錄的結果 → 要用哪一個評分 */
-export function chooseReferencedTranscript(withRef: TranscribeResult, plain: TranscribeResult): ReferencedResult {
+/**
+ * 兩條轉錄的結果 → 要用哪一個評分。帶原句只是幫 Whisper 認字，任何跡象顯示它反而出錯就改用不帶原句的結果：
+ * - padded：不帶原句的字數 < 帶原句的 60%（帶原句補了沒念的字）
+ * - short：帶原句的字數 < 不帶原句的 60%（帶原句漏字或吐出無關的句子）
+ * - worse：帶原句的結果跟原句對上的字比不帶原句還少（原句沒幫上忙，反而帶偏）
+ * - 只有帶原句成功且疑似幻覺 → 失敗，前端改用 Gemini（不帶原句）
+ */
+export function chooseReferencedTranscript(withRef: TranscribeResult, plain: TranscribeResult, reference = ''): ReferencedResult {
   if (withRef.ok && plain.ok) {
     const a = wordCount(withRef.text);
     const b = wordCount(plain.text);
-    if (a > 0 && b < a * PADDED_WORD_RATIO) {
-      return { ok: true, text: plain.text, model: plain.model, referenced: false, check: 'padded' };
-    }
+    const usePlain = (check: 'padded' | 'short' | 'worse') => ({ ok: true as const, text: plain.text, model: plain.model, referenced: false, check });
+    // 帶原句那次判定沒有人聲（空字串）→ 保留，不讓不帶原句那次的幻覺蓋過（Codex 第 1 輪）
+    if (a === 0) return { ok: true, text: withRef.text, model: withRef.model, referenced: true, check: 'ok' };
+    if (b < a * PADDED_WORD_RATIO) return usePlain('padded');
+    if (a < b * SHORT_WORD_RATIO) return usePlain('short');
+    if (reference && matchedCount(withRef.text, reference) < matchedCount(plain.text, reference)) return usePlain('worse');
     return { ok: true, text: withRef.text, model: withRef.model, referenced: true, check: 'ok' };
   }
-  if (withRef.ok) return { ok: true, text: withRef.text, model: withRef.model, referenced: true, check: 'unchecked' };
+  if (withRef.ok) {
+    if (looksHallucinated(withRef.text, reference)) return { ok: false, status: 502, error: '語音轉文字結果異常' };
+    return { ok: true, text: withRef.text, model: withRef.model, referenced: true, check: 'unchecked' };
+  }
   if (plain.ok) return { ok: true, text: plain.text, model: plain.model, referenced: false, check: 'plain' };
   return withRef.ok === false ? { ok: false, status: withRef.status, error: withRef.error } : { ok: false, status: 502, error: '語音轉文字暫時失敗' };
 }
@@ -175,8 +217,8 @@ export async function runReferencedTranscribe(opts: {
     runTranscribeChain({ ...base, startedAt, prompt: reference }),
     runTranscribeChain({ ...base, startedAt }),
   ]);
-  const r = chooseReferencedTranscript(withRef, plain);
-  if (r.ok && r.check !== 'ok') console.warn(`[transcribe] 參考原句檢查：${r.check}`);
+  const r = chooseReferencedTranscript(withRef, plain, reference);
+  if (!r.ok || r.check !== 'ok') console.warn(`[transcribe] 參考原句檢查：${r.ok ? r.check : '疑似幻覺或失敗'}`);
   return r;
 }
 
