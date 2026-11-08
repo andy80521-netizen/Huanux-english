@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { db, auth, appId } from '../firebase';
 import { Play, Pause } from 'lucide-react';
+import { watchSegmentEnd } from '../utils/segmentEnd';
 
 interface Sighting {
   id: string;
@@ -38,13 +39,18 @@ export default function PatternSightingsSection({ patternId }: { patternId: stri
     return () => unsubscribe();
   }, [patternId]);
 
+  // 準時停在句尾（docs/plans/import-timestamp-accuracy.md PR-A）
+  const segWatchRef = useRef<(() => void) | null>(null);
+  const stopSegWatch = () => { segWatchRef.current?.(); segWatchRef.current = null; };
+
   useEffect(() => {
-    return () => { audioRef.current?.pause(); };
+    return () => { stopSegWatch(); audioRef.current?.pause(); };
   }, []);
 
   const handlePlay = (s: Sighting) => {
     const el = audioRef.current;
     if (!el || !s.audioUrl) return;
+    stopSegWatch();
     if (playingId === s.id) {
       el.pause();
       setPlayingId(null);
@@ -55,6 +61,12 @@ export default function PatternSightingsSection({ patternId }: { patternId: stri
     endTimeRef.current = end;
     el.src = `${s.audioUrl}#t=${start}${end > start ? `,${end}` : ''}`;
     el.play().then(() => setPlayingId(s.id)).catch(() => setPlayingId(null));
+    if (end > start) {
+      segWatchRef.current = watchSegmentEnd(el, end, () => {
+        segWatchRef.current = null;
+        setPlayingId(null);
+      });
+    }
   };
 
   const handleTimeUpdate = () => {
