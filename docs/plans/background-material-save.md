@@ -97,8 +97,64 @@ Gemini、Nemotron 建議直接 import 封面與重逢的程式在 `save-material
 - `src/App.tsx`
 - `src/types.ts`
 
+## 委員會審查整合（2026-11-09，第一輪＋質詢；待擁有者核准）
+
+成員：Codex（兩輪）、Gemini 3.8 Flash、Nemotron、DeepSeek、Grok。Poolside 失敗（模型已下架）。
+
+### 草案的主要漏洞（皆已對照程式碼確認，修正後的設計見下）
+1. **交接不可靠**（Codex 🔴、Grok）：寫入 `saving` 與呼叫背景函式是兩件事，中間關 App 會永遠卡在 `saving`
+2. **舊執行沒有失效機制**（Codex 🔴）：重試、回到校對、放棄之後，舊的執行仍可能晚一步建立教材；「放棄」可能刪掉已建立教材正在用的音檔
+3. **教材已建立後仍可能被標成失敗**（Codex 🔴、Grok）：封面／重逢或刪任務失敗不能推翻已存好的教材
+4. **任務文件太大**（Codex）：`whisper-transcribe` 已把整份轉錄 `results` 存在同一份文件，再加 `reviewed` 會兩份全文
+5. **轉錄函式會蓋回狀態**（Grok）：`whisper-transcribe` 的寫入只檢查文件存在，遲到的寫入會把 `saving` 改回 `completed`
+6. **ID Token 效期**（Codex、Gemini）：要在交接與重試時強制取得新 Token
+7. **安全**（DeepSeek、Grok）：任務文件由前端寫入，後端必須驗證 `audioUrl` 是這個使用者、這份教材的音檔、句數與字數上限、封面選項；路徑用 Token 的 uid 組，不信任前端傳的路徑
+8. 自我呼叫網址：`process.env.URL` 在預覽網站仍指向正式站（Codex、Gemini、Grok）
+
+### 修正後的設計（建議採用）
+**交接（前端）**
+- 用交易把任務 `completed`（或重試時的 `saveError`／中斷）改成 `saving`、`saveAttempt + 1`、刪掉 `results`、寫入 `reviewed`、`title`、`audioUrl`、`coverChoice`、`progress`
+- `getIdToken(true)` → 呼叫背景函式（body 帶 `saveAttempt`），**等最多 10 秒的 202**（不等翻譯）
+- 收到 202 才回到教材庫；網路失敗或逾時 → 立刻寫 `saveError`「沒有叫到背景存檔」並可重試，不用等 3 分鐘
+- 送出前估算大小，超過 900KB 提示分段（不設句數上限）
+
+**背景執行（後端 `save-material`）**
+- 只用使用者 ID Token＋REST；路徑用 Token 的 uid 組
+- 認領：REST 交易內確認 `status == 'saving'`、`saveAttempt` 等於 body、沒有未過期租約 → 寫入自己的 `leaseId`
+- 之後每次寫入（檢查點、心跳、收尾）都在交易內重新確認 `leaseId` 與 `saveAttempt`，不符就安靜結束（不寫 `saveError`）；衝突（`ABORTED`／`FAILED_PRECONDITION`）重跑交易
+- **心跳不用平行計時器**：每批寫檢查點時一起寫，所有寫入串行（Codex、Gemini、Grok）
+- 翻譯共用 `netlify/shared/translate.ts`（提示詞一字不改，加測試鎖住）；每批 60 秒逾時、最多重試 2 次；每批完成把翻譯存成檢查點，重試從檢查點繼續
+- 驗證任務內容後才呼叫 AI（`audioUrl` 路徑、句數、字數、時間、封面選項）
+- **一次 `commit` 原子完成**：`materials/{id}` 以不存在為前置條件建立＋任務改 `saved`
+- 之後才 HTTP 呼叫既有的 `generate-cover`、`detect-sightings`，只等 202（重逢先寫 `materialSightings` 為 `processing`）；失敗只記在教材的封面／重逢狀態，**不推翻教材**；最後刪任務文件（刪除失敗仍算成功）
+- 自我呼叫網址：用請求網址的 origin，但**必須符合允許清單**（正式站與本專案的預覽網址），不符就不送 Token
+- 軟期限 12 分鐘：保存檢查點、標成「需要續存」，使用者按「繼續」從檢查點接續（不自動接續）
+
+**其他程式**
+- `whisper-transcribe` 只在讀到 `status == 'processing'` 時才寫入結果
+- 全域提示放在 `App.tsx`（不隨分頁卸載）：頂部一行、多筆都列、不蓋底部錄音列；「可能中斷了」以心跳判斷
+- 「回到校對」：從任務還原、校對畫面支援 Storage 網址播放；這個模式的「取消」只回列表、不刪檔；先讓舊執行失效
+- 「放棄」：先讓舊執行失效 → 確認教材不存在才刪音檔與任務；教材已存在就只刪任務並提示已儲存
+- 路徑二（TTS）與所有存檔中狀態：按鈕顯示「翻譯中 12/35…」與轉圈
+
+### 分歧與我的建議
+| 議題 | 各方說法 | 我的建議 |
+|---|---|---|
+| 封面／重逢怎麼觸發 | Gemini、Nemotron：在存檔函式內直接 import 執行；DeepSeek、Grok、Codex：HTTP 呼叫既有背景函式只等 202 | **HTTP 只等 202**：封面產圖、重逢比對各自要數分鐘，放進同一個 15 分鐘會和翻譯搶時間，失敗也會連坐 |
+| 要不要等 202 再離開 | Nemotron：不等；其他：等 | **等最多 10 秒**：只有這樣才能分辨「沒叫到」，不必等 3 分鐘才發現 |
+| 超過 15 分鐘 | Grok、Codex、Gemini：不要自動接續；Gemini 另建議 500 句上限 | **不自動接續、不設句數上限**：正常音檔 1～3 分鐘就完成（24MB 約 260～520 句）；真的超時就停在檢查點、按「繼續」接續 |
+| 所有權 | 草案：讀 `updateTime` 再寫；Grok：交易＋`leaseId`；Codex：寫入串行＋執行代號 | **交易＋`leaseId`＋串行寫入**（兩者合併） |
+
+### 駁回的意見
+- 每文件每秒 1 次寫入會被觸發（Nemotron）：每批 5 秒以上才寫一次，不會
+- 用 `-background` 檔名（Gemini）：本專案既有背景函式都用 `config.background`，維持一致
+
+### 建議拆成兩個 PR
+1. **先做小修（小級）**：所有存檔中狀態的按鈕顯示「翻譯中 12/35…」與轉圈。立刻解決「看起來沒反應」
+2. **背景存檔（大級，本 PR）**：上面的完整設計
+
 ## 做法
-（委員會評估、擁有者核准後填寫）
+（擁有者核准後填寫）
 
 ## 驗收條件
 （待定案）
@@ -125,3 +181,4 @@ Gemini、Nemotron 建議直接 import 封面與重逢的程式在 `save-material
 
 ## 進度紀錄
 - 2026-11-09：讀碼、寫規劃草案；開草稿 PR，送委員會＋Codex
+- 2026-11-09：委員會第一輪＋質詢完成（Poolside 失敗）；整合報告給擁有者。**下一步：等擁有者核准**
