@@ -71,6 +71,19 @@
 7. 全域提示的介面：放在哪裡、會不會干擾跟讀錄音？
 8. 驗收測試怎麼設計（純函式＋假 fetch）？
 
+## 第二輪質詢（請針對以下 Q1～Q3 逐題回答）
+第一輪共識（我會採用）：交接時用交易把 `completed → saving`、`saveAttempt + 1`、刪掉 `results`；`getIdToken(true)` 後呼叫背景函式並等最多 10 秒的 202，失敗立刻 `saveError`；任務文件存翻譯檢查點、每批 60 秒逾時；心跳判斷卡住；教材建立後不可再進入 `saveError`；封面／重逢失敗不推翻教材；`whisper-transcribe` 只在 `status == 'processing'` 時寫入；放棄前先確認教材不存在才刪音檔。
+
+**Q1：所有權保護用 Firestore REST `documents:commit` 是否可靠？**
+草案：後端每次寫任務文件都「讀 → 確認 `status == 'saving'` 且 `saveAttempt` 是自己的 → 以讀到的 `updateTime` 當前置條件寫入」（409/412 就重讀一次）。建立教材時用**一次 `commit`** 同時做兩件事：`materials/{id}` 以 `currentDocument.exists=false` 建立＋任務文件以 `updateTime` 前置條件改成 `status: 'saved'`；兩者原子成功或一起失敗。前端「重試／回到校對／放棄」都先用交易把 `saveAttempt + 1`（或改 `status`）讓舊執行失效。
+請找漏洞：前置條件是否足以擋住被接管的舊執行？心跳寫入會改 `updateTime`，是否會讓自己的下一次寫入一直 412？有沒有更簡單但一樣安全的做法？
+
+**Q2：超過 15 分鐘的長教材怎麼處理？**
+選項：(a) 接近 12 分鐘時保存檢查點、用同一個 `saveAttempt` 以 HTTP 呼叫自己接續；(b) 不自動接續，停在「可能中斷了」，使用者按重試從檢查點繼續；(c) 送出前依句數估算時間，超過就拒絕。以每批 30 句、每批 5～20 秒估算，多少句才會碰到上限？自我接續在 deploy preview 與正式站如何取得正確網址（`process.env.URL` 在 preview 是否指向正式站？用請求本身的 origin 是否可靠）？
+
+**Q3：封面與重逢的觸發**
+Gemini、Nemotron 建議直接 import 封面與重逢的程式在 `save-material` 裡跑；DeepSeek、Grok 建議 HTTP 呼叫既有背景函式、只等 202。`generate-cover` 本身要產場景描述＋產圖，可能數分鐘。請評估兩者對 15 分鐘預算、失敗隔離與 ID Token 效期的影響。
+
 ## 相關檔案
 - `src/components/MaterialImportMode.tsx`
 - `src/components/MaterialReviewPanel.tsx`
