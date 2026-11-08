@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useId } from 'react';
+import { watchSegmentEnd, seekSegmentStart } from '../utils/segmentEnd';
 import { Play, Pause, Check, AlertCircle, Trash2, RotateCcw, ChevronDown } from 'lucide-react';
 import SegmentedControl from './ui/SegmentedControl';
 import Button from './ui/Button';
@@ -94,12 +95,25 @@ export default function MaterialReviewPanel({
         }
     }, [audioFile, audioBlob]);
 
+    // 準時停在句尾（docs/plans/import-timestamp-accuracy.md PR-A）：校對時聽到的句尾要和練習時一致
+    const segWatchRef = useRef<(() => void) | null>(null);
+    const stopSegWatch = () => { segWatchRef.current?.(); segWatchRef.current = null; };
+    useEffect(() => stopSegWatch, []);
+
     const handlePlaySegment = (id: string) => {
         const sentence = sentences.find(s => s.internalId === id);
-        if (sentence && audioRef.current) {
-            audioRef.current.currentTime = sentence.startTime;
-            audioRef.current.play();
+        const el = audioRef.current;
+        if (sentence && el) {
+            stopSegWatch();
+            seekSegmentStart(el, sentence.startTime);
+            el.play()?.catch?.(() => setPlayingId(null));
             setPlayingId(id);
+            if (sentence.endTime > 0) {
+                segWatchRef.current = watchSegmentEnd(el, sentence.endTime, () => {
+                    segWatchRef.current = null;
+                    setPlayingId(null);
+                });
+            }
         }
     };
 
@@ -114,6 +128,7 @@ export default function MaterialReviewPanel({
     };
 
     const handlePause = () => {
+        stopSegWatch();
         if (audioRef.current) {
             audioRef.current.pause();
             setPlayingId(null);

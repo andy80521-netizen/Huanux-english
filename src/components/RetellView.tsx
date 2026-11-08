@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { watchSegmentEnd } from '../utils/segmentEnd';
 import { Material } from '../types';
 import { ChevronLeft, Mic, Square, Loader2, Play, RotateCcw, Headphones, ChevronDown, AlertCircle } from 'lucide-react';
 import { transcribeRecordingDetailed, RetellFeedback } from '../services/gemini';
@@ -82,9 +83,15 @@ export default function RetellView({ material, segment, segmentIndex, targetPatt
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 準時停在段尾（docs/plans/import-timestamp-accuracy.md PR-A）
+  const segWatchRef = useRef<(() => void) | null>(null);
+  const stopSegWatch = () => { segWatchRef.current?.(); segWatchRef.current = null; };
+  useEffect(() => stopSegWatch, []);
+
   const toggleSegmentAudio = () => {
     const el = segmentAudioRef.current;
     if (!el || !material.audioUrl) return;
+    stopSegWatch();
     if (segmentPlaying) {
       el.pause();
       setSegmentPlaying(false);
@@ -92,6 +99,12 @@ export default function RetellView({ material, segment, segmentIndex, targetPatt
     }
     el.src = `${material.audioUrl}#t=${Math.max(0, segStart)}${segEnd > segStart ? `,${segEnd}` : ''}`;
     el.play().then(() => setSegmentPlaying(true)).catch(() => setSegmentPlaying(false));
+    if (segEnd > segStart) {
+      segWatchRef.current = watchSegmentEnd(el, segEnd, () => {
+        segWatchRef.current = null;
+        setSegmentPlaying(false);
+      });
+    }
   };
 
   const handleSegmentTimeUpdate = () => {
@@ -157,6 +170,7 @@ export default function RetellView({ material, segment, segmentIndex, targetPatt
         el.play().then(() => el.pause()).catch(() => {});
       }
     }
+    stopSegWatch();
     segmentAudioRef.current?.pause();
     setSegmentPlaying(false);
     setErrorMsg(null);

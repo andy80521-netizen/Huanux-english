@@ -1,4 +1,5 @@
 import { OVERLAY_ORIGINAL_VOLUME } from './shadowingAudio';
+import { watchSegmentEnd } from './segmentEnd';
 
 // 跟讀結果頁「聽聽看」的播放控制器（PR #20）：注入播放元素與音量設定，不直接碰 DOM，方便用替身測試
 
@@ -106,9 +107,6 @@ export function createListenPlayer(opts: ListenPlayerOptions): ListenPlayer {
       try { original.pause(); } catch { /* 忽略 */ }
       onDone();
     };
-    listen(original, 'timeupdate', () => {
-      if (gen === generation && original.currentTime >= end) finish();
-    });
     listen(original, 'ended', finish);
     // 保險計時：timeupdate 沒來時也要停。到期時若原音「有在前進」但還沒到句尾（例如等緩衝延後才開始），
     // 繼續每 500ms 檢查，不提早截斷；完全沒前進（卡住、播放失敗）就停止。最多再等 30 秒
@@ -126,6 +124,12 @@ export function createListenPlayer(opts: ListenPlayerOptions): ListenPlayer {
     };
     later(((end - start) / (r > 0 ? r : 1)) * 1000 + 500, check);
     safePlay(original);
+    // 準時停在句尾（docs/plans/import-timestamp-accuracy.md PR-A）；頁面隱藏時整個停止（擁有者決定）
+    cleanups.push(watchSegmentEnd(original, end, (reason) => {
+      if (gen !== generation) return;
+      if (reason === 'hidden') { stop(); return; }
+      finish();
+    }));
   };
 
   const start = (m: ListenMode) => {

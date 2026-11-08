@@ -22,6 +22,7 @@ import { PLAYBACK_LEAD_MS, RECORDING_ORIGINAL_VOLUME, canSetElementVolume, overl
 import { createListenPlayer, ListenMode, ListenPlayer } from '../utils/shadowingPlayback';
 import { SHADOWING_SPEEDS, ShadowingSpeed, ShadowingAttempt, loadSpeed, saveSpeed, applyPlaybackSpeed, effectiveOriginalSec, scoreShadowingAttempt } from '../utils/shadowingSpeed';
 import SegmentedControl from './ui/SegmentedControl';
+import { watchSegmentEnd } from '../utils/segmentEnd';
 
 /** 系統是否開啟「減少動態效果」（分數跑動是 JS，全域 CSS 規則管不到，要自己判斷） */
 const prefersReducedMotion = () => {
@@ -146,6 +147,8 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
     const lastSoundTimeRef = useRef<number>(0);
     const silenceTimerRef = useRef<number>(0);
     const isBufferPhaseRef = useRef<boolean>(false);
+    /** 原音準時停在句尾的監看（docs/plans/import-timestamp-accuracy.md PR-A）；回傳值是取消函式 */
+    const endWatchRef = useRef<(() => void) | null>(null);
     
     const audioRef = useRef<HTMLAudioElement>(null);
     const recordedAudioRef = useRef<HTMLAudioElement>(null);
@@ -170,6 +173,8 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
 
     const cleanupAudio = () => {
         isBufferPhaseRef.current = false;
+        endWatchRef.current?.();
+        endWatchRef.current = null;
         if (requestAnimationFrameRef.current) {
             cancelAnimationFrame(requestAnimationFrameRef.current);
             requestAnimationFrameRef.current = 0;
@@ -434,6 +439,15 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                         setPracticeState('idle');
                         setError("無法播放教材音訊，請確認裝置音量設定。");
                     });
+                    // 準時停在句尾；鎖屏或切 App 時直接暫停原音，一樣進入緩衝倒數（擁有者決定）
+                    endWatchRef.current?.();
+                    endWatchRef.current = sentence.endTime > 0
+                        ? watchSegmentEnd(audioRef.current, sentence.endTime, () => {
+                            endWatchRef.current = null;
+                            if (isCancelled()) return;
+                            enterBufferPhase();
+                        })
+                        : null;
                 },
             });
             await playback;
@@ -450,34 +464,36 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
         }
     };
 
+    /** 原音播到句尾：暫停原音、錄音繼續，進入 6 秒緩衝倒數 */
+    const enterBufferPhase = () => {
+        // 防止重複進入：監看與 timeupdate 都可能呼叫；pause() 後瀏覽器也可能再觸發一次 timeupdate，
+        // 若不擋下會建立第二個倒數計時器，且先建立的那個永遠不會被清除
+        if (isBufferPhaseRef.current) return;
+        if (!mediaRecorderRef.current || mediaRecorderRef.current.state !== 'recording') return;
+        audioRef.current?.pause();
+
+        // Switch to buffer state but keep recording
+        isBufferPhaseRef.current = true;
+        silenceTimerRef.current = 0;
+        setPracticeState('buffer');
+        setBufferCount(6);
+
+        if (timerRef.current) clearInterval(timerRef.current);
+        timerRef.current = setInterval(() => {
+            setBufferCount((prev) => {
+                if (prev <= 1) {
+                    stopRecordingSafely();
+                    return 0;
+                }
+                return prev - 1;
+            });
+        }, 1000);
+    };
+
+    // 保險：主要由 watchSegmentEnd 準時停止，timeupdate 只在監看沒觸發時補上
     const handleTimeUpdate = () => {
         if (practiceState !== 'recording' || !audioRef.current) return;
-        
-        // Stop audio when it reaches the sentence endTime
-        if (audioRef.current.currentTime >= sentence.endTime && sentence.endTime > 0) {
-            // 防止重複進入：pause() 後瀏覽器可能再觸發一次 timeupdate，此時畫面狀態尚未更新，
-            // 若不擋下會建立第二個倒數計時器，且先建立的那個永遠不會被清除
-            if (isBufferPhaseRef.current) return;
-
-            audioRef.current.pause();
-            
-            // Switch to buffer state but keep recording
-            isBufferPhaseRef.current = true;
-            silenceTimerRef.current = 0;
-            setPracticeState('buffer');
-            setBufferCount(6);
-            
-            if (timerRef.current) clearInterval(timerRef.current);
-            timerRef.current = setInterval(() => {
-                setBufferCount((prev) => {
-                    if (prev <= 1) {
-                        stopRecordingSafely();
-                        return 0;
-                    }
-                    return prev - 1;
-                });
-            }, 1000);
-        }
+        if (audioRef.current.currentTime >= sentence.endTime && sentence.endTime > 0) enterBufferPhase();
     };
 
     const handleRetry = () => {

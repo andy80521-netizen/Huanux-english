@@ -1,4 +1,5 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { watchSegmentEnd, seekSegmentStart } from '../utils/segmentEnd';
 import { Material, CoverStyle } from '../types';
 import { ChevronLeft, Play, Pause, Mic, Loader2, Sparkles, Trash2, RotateCcw, BookOpen, X, Search, RefreshCw } from 'lucide-react';
 import { auth, db, appId } from '../firebase';
@@ -150,12 +151,25 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
         );
     }
 
+    // 準時停在句尾（docs/plans/import-timestamp-accuracy.md PR-A）
+    const segWatchRef = useRef<(() => void) | null>(null);
+    const stopSegWatch = () => { segWatchRef.current?.(); segWatchRef.current = null; };
+    useEffect(() => stopSegWatch, []);
+
     const handlePlaySegment = (index: number) => {
         const sentence = material.sentences[index];
-        if (audioRef.current) {
-            audioRef.current.currentTime = sentence.startTime;
-            audioRef.current.play();
+        const el = audioRef.current;
+        if (el) {
+            stopSegWatch();
+            seekSegmentStart(el, sentence.startTime);
+            el.play()?.catch?.(() => setPlayingIndex(null));
             setPlayingIndex(index);
+            if (sentence.endTime > 0) {
+                segWatchRef.current = watchSegmentEnd(el, sentence.endTime, () => {
+                    segWatchRef.current = null;
+                    setPlayingIndex(null);
+                });
+            }
         }
     };
 
@@ -170,6 +184,7 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
     };
 
     const handlePause = () => {
+        stopSegWatch();
         if (audioRef.current) {
             audioRef.current.pause();
             setPlayingIndex(null);
