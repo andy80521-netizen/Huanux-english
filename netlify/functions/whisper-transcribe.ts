@@ -248,6 +248,7 @@ export default async (req: Request, context: Context) => {
     openAiFormData.append("model", "whisper-1");
     openAiFormData.append("response_format", "verbose_json");
     openAiFormData.append("timestamp_granularities[]", "segment");
+    openAiFormData.append("language", "en");   // 匯入只收英文 mp3（擁有者 2026-11-08 決定）
 
     // 呼叫 OpenAI Whisper API
     const openAiResponse = await fetch("https://api.openai.com/v1/audio/transcriptions", {
@@ -278,6 +279,21 @@ export default async (req: Request, context: Context) => {
 
     // 將 Whisper 回傳的 segments 轉換為需求格式
     const results = mergeSegmentsIntoSentences(data.segments || []);
+
+    // 沒有任何句子：寫入錯誤，讓使用者可以重試或取消，不要進入無法存檔的校對畫面
+    if (results.length === 0) {
+      await writeToFirestore(
+        resultDocPath,
+        idToken,
+        {
+          status: { stringValue: "error" },
+          errorMessage: { stringValue: "沒有辨識到英文句子，請確認音檔內容是英文語音後重試" },
+          completedAt: { stringValue: new Date().toISOString() }
+        },
+        ["status", "errorMessage", "completedAt"]
+      );
+      return new Response(null, { status: 200 });
+    }
 
     // 轉換成 Firestore REST API arrayValue 格式
     const firestoreResultsValues = results.map(item => {

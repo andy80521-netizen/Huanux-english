@@ -12,6 +12,9 @@ export interface MaterialSentence {
   lastScores?: { content?: number; fluency: number; total: number; pronunciation?: number; stress?: number };
   extracted?: boolean;  // 是否已萃取過語言模型句型
   deleted?: boolean;         // 已存檔教材的句子標記刪除（可復原），練習、進度、列表皆略過
+  // 【PR-G】已存教材第一次修改時間時另存的原始時間，供「還原原始時間」；沒改過或改回原值時不存在
+  originalStartTime?: number;
+  originalEndTime?: number;
 }
 
 export type CoverStyle = 'photo' | 'anime';

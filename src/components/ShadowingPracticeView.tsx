@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Material } from '../types';
+import { Material, MaterialSentence } from '../types';
 import { ChevronLeft, Mic, AlertCircle, RotateCcw, Send, Loader2, Headphones, Check, Play, Pause, Layers, Volume1 } from 'lucide-react';
 import { transcribeRecordingDetailed } from '../services/gemini';
 import { transcriberLabel } from '../utils/transcriber';
@@ -9,7 +9,7 @@ import { calculateShadowingScores, isShadowingPass, PracticeScores, SHADOWING_PA
 import WordDiffView from './WordDiffView';
 import { getSupportedMimeType } from '../utils/mediaRecorder';
 import { auth, db, appId } from '../firebase';
-import { doc, updateDoc } from 'firebase/firestore';
+import { doc, runTransaction } from 'firebase/firestore';
 import { SILENT_AUDIO } from '../utils';
 import { recordActiveSighting } from '../services/sightings';
 import { nextShadowingMastery } from '../utils/shadowingMastery';
@@ -559,14 +559,16 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
             const { mastery: newMastery, gain } = nextShadowingMastery(before, scores);
             if (!isStale()) setMasteryResult({ before, after: newMastery, gain });
             
-            const updatedSentences = material.sentences.map((s, i) =>
-                i === sentenceIndex
-                    ? { ...s, mastery: newMastery, lastScores: { content: scores.content, fluency: scores.fluency, total: scores.total } }
-                    : s
-            );
-            
-            await updateDoc(doc(db, `artifacts/${appId}/users/${uid}/materials`, material.id), {
-                sentences: updatedSentences
+            // 交易內讀最新的句子陣列、只改這一句的熟練度與分數：
+            // 不可用畫面上的舊陣列整個寫回，否則會蓋掉同時在別處修改的時間、原始時間或刪除（Codex，PR-G）
+            const lastScores = { content: scores.content, fluency: scores.fluency, total: scores.total };
+            await runTransaction(db, async (tx) => {
+                const ref = doc(db, `artifacts/${appId}/users/${uid}/materials`, material.id);
+                const snap = await tx.get(ref);
+                if (!snap.exists()) throw new Error('找不到這份教材');
+                const latest: MaterialSentence[] = snap.data().sentences || [];
+                if (!latest.some(s => s.id === sentence.id)) return;
+                tx.update(ref, { sentences: latest.map(s => (s.id === sentence.id ? { ...s, mastery: newMastery, lastScores } : s)) });
             });
 
             // 這句含有已學句型且達到累加熟練度的條件：記錄一次「親口念過」（不影響任何熟練度）
