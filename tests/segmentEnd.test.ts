@@ -296,3 +296,26 @@ describe('審查修正（Codex 第 1 輪）', () => {
     expect(src).toMatch(/useEffect\(\(\) => \{ segWatchRef\.current\?\.refresh\(\); \}, \[sentences\]\)/);
   });
 });
+
+describe('審查修正（Codex 第 3 輪：排程不可累積）', () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+  it('重複 refresh、seeked、ratechange 後只留一組排程；取消後沒有剩餘排程', () => {
+    const m = new ClockMedia();
+    m.currentTime = 7;
+    m.play();
+    const base = vi.getTimerCount();   // 假播放元素自己的 timeupdate 計時
+    const w = watchSegmentEnd(m, 10, () => {}, deps());
+    expect(vi.getTimerCount()).toBe(base + 1);
+    for (let i = 0; i < 5; i++) w.refresh();
+    m.emit('seeked');
+    m.emit('ratechange');
+    m.emit('playing');
+    expect(vi.getTimerCount()).toBe(base + 1);
+    w();
+    expect(vi.getTimerCount()).toBe(base);
+  });
+  it('跟讀用 seekSegmentStart 設定起點', () => {
+    expect(read('src/components/ShadowingPracticeView.tsx')).toMatch(/seekSegmentStart\(audioRef\.current, sentence\.startTime\)/);
+  });
+});

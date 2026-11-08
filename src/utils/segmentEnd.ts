@@ -82,8 +82,8 @@ export function watchSegmentEnd(
     };
 
     const check = () => {
-        timer = null;
-        frame = null;
+        // 先清掉既有排程：check 也會由事件與 refresh 呼叫，不清會留下重複的計時（Codex 第 3 輪）
+        clearScheduled();
         if (done) return;
         if (media.currentTime >= endOf()) { finish('end'); return; }
         schedule();

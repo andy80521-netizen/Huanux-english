@@ -22,7 +22,7 @@ import { PLAYBACK_LEAD_MS, RECORDING_ORIGINAL_VOLUME, canSetElementVolume, overl
 import { createListenPlayer, ListenMode, ListenPlayer } from '../utils/shadowingPlayback';
 import { SHADOWING_SPEEDS, ShadowingSpeed, ShadowingAttempt, loadSpeed, saveSpeed, applyPlaybackSpeed, effectiveOriginalSec, scoreShadowingAttempt } from '../utils/shadowingSpeed';
 import SegmentedControl from './ui/SegmentedControl';
-import { watchSegmentEnd } from '../utils/segmentEnd';
+import { watchSegmentEnd, seekSegmentStart } from '../utils/segmentEnd';
 
 /** 系統是否開啟「減少動態效果」（分數跑動是 JS，全域 CSS 規則管不到，要自己判斷） */
 const prefersReducedMotion = () => {
@@ -405,7 +405,7 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
             recordStartAtRef.current = null;
             originalPlayingAtRef.current = null;
             if (audioRef.current) {
-                audioRef.current.currentTime = sentence.startTime;
+                seekSegmentStart(audioRef.current, sentence.startTime);   // 還沒載入時間資訊時等 loadedmetadata（Gemini）
                 // 錄音時原音調小聲，讓使用者的聲音蓋過原音（不能調的裝置不變）
                 setOriginalVolume(RECORDING_ORIGINAL_VOLUME);
                 audioRef.current.addEventListener('playing', () => {
