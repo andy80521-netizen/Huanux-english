@@ -357,3 +357,13 @@ describe('接線（驗收 10）', () => {
     expect(read('src/components/MaterialReviewPanel.tsx')).toMatch(/remoteAudioUrl\?: string/);
   });
 });
+
+describe('審查修正（Codex 第 1 輪）', () => {
+  const m = () => read('src/components/MaterialImportMode.tsx');
+  it('切換校對任務時以 materialId 重建校對畫面（不沿用上一份的句子）', () => {
+    expect(m()).toMatch(/<React\.Fragment key=\{pendingMaterial\.materialId[^>]*>\s*<MaterialReviewPanel/);
+  });
+  it('交接中（processing）校對畫面鎖定', () => {
+    expect(m()).toMatch(/isSaving=\{loadingState === 'translating' \|\| loadingState === 'processing'\}/);
+  });
+});

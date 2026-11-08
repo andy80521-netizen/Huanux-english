@@ -982,6 +982,8 @@ export default function MaterialImportMode({ resumeReviewId = null, onResumeHand
             {translationError && !reviewing && alertBox(translationError, 'translation')}
 
             {pendingMaterial && !saveSuccess && (
+                // 以教材編號當 key：切換到另一份「回到校對」時整個校對畫面重建，不沿用上一份的句子（Codex）
+                <React.Fragment key={pendingMaterial.materialId || pendingMaterial.fileName}>
                 <MaterialReviewPanel
                     source={pendingMaterial.source}
                     audioFile={pendingMaterial.audioFile}
@@ -990,13 +992,14 @@ export default function MaterialImportMode({ resumeReviewId = null, onResumeHand
                     initialCoverChoice={pendingMaterial.coverChoice}
                     fileName={pendingMaterial.fileName}
                     initialSentences={pendingMaterial.sentences}
-                    isSaving={loadingState === 'translating'}
+                    isSaving={loadingState === 'translating' || loadingState === 'processing'}
                     onSave={confirmAndSaveMaterial}
                     onCancel={handleCancelReview}
                     headerStart={backButton}
                     status={progressBlock || null}
                     notice={translationError}
                 />
+                </React.Fragment>
             )}
 
             {loadingState === 'idle' && results.length > 0 && !saveSuccess && !pendingMaterial && (
