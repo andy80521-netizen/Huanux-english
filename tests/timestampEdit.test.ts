@@ -158,3 +158,18 @@ describe('審查修正（第 1 輪）', () => {
     expect(read('src/components/MaterialReviewPanel.tsx')).toMatch(/playRange\(`\$\{id\}:tail`, r\.start, tailEndNow\)/);
   });
 });
+
+describe('審查修正（第 2 輪）', () => {
+  const p = () => read('src/components/MaterialReviewPanel.tsx');
+  it('合併時任一片段還沒補翻譯 → 合併後翻譯清空、仍需補齊（Codex）', () => {
+    expect(p()).toMatch(/pending\(prev\[p\]\) \|\| pending\(prev\[idx\]\)\s*\?\s*\{ \.\.\.base, translation: '', needsTranslation: true \}/);
+  });
+  it('確認存檔的最後一關也檢查（Codex）', () => {
+    expect(p()).toMatch(/const executeSave = \(\) => \{\s*setShowDiscardConfirm\(false\);[\s\S]{0,120}if \(activeSentences\.length === 0 \|\| hasInvalidTime \|\| hasMissingTranslation\) return;/);
+  });
+  it('教材詳情頁編輯器：播放中改時間，停止點跟著改（Gemini）', () => {
+    const e = read('src/components/SentenceTimeEditor.tsx');
+    expect(e).toMatch(/onPlayRange\(playKey, round2\(startTime\), \(\) => round2\(endRef\.current\)\)/);
+    expect(read('src/components/MaterialDetailView.tsx')).toMatch(/onTimesChanged=\{\(\) => segWatchRef\.current\?\.refresh\(\)\}/);
+  });
+});

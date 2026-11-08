@@ -220,7 +220,12 @@ export default function MaterialReviewPanel({
             let p = idx - 1;
             while (p >= 0 && prev[p].deleted) p--;
             if (idx < 0 || p < 0) return prev;
-            const merged = { ...mergeWithPrevious(prev[p], prev[idx]), needsTranslation: prev[p].needsTranslation || prev[idx].needsTranslation };
+            // 任一片段是拆句後還沒補翻譯的 → 合併後翻譯清空、仍需補齊（避免只剩一半的中文被存下，Codex）
+            const pending = (x: InternalReviewSentence) => !!x.needsTranslation && !(x.translation || '').trim();
+            const base = mergeWithPrevious(prev[p], prev[idx]);
+            const merged = pending(prev[p]) || pending(prev[idx])
+                ? { ...base, translation: '', needsTranslation: true }
+                : { ...base, needsTranslation: undefined };
             return prev.filter((_, i) => i !== idx).map(s => (s.internalId === prev[p].internalId ? merged : s));
         });
         clearWarning(id);
@@ -271,6 +276,8 @@ export default function MaterialReviewPanel({
 
     const executeSave = () => {
         setShowDiscardConfirm(false);
+        // 確認區開著時仍可編輯（例如拆句），最後一關再檢查一次（Codex）
+        if (activeSentences.length === 0 || hasInvalidTime || hasMissingTranslation) return;
         const cleanSentences: ReviewSentence[] = activeSentences.map(s => ({
             text: s.text,
             translation: s.translation,

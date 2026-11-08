@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { watchSegmentEnd, seekSegmentStart } from '../utils/segmentEnd';
+import { watchSegmentEnd, seekSegmentStart, SegmentEndWatch } from '../utils/segmentEnd';
 import { Material, CoverStyle } from '../types';
 import { ChevronLeft, Play, Pause, Mic, Loader2, Sparkles, Trash2, RotateCcw, BookOpen, X, Search, RefreshCw, Clock3 } from 'lucide-react';
 import SentenceTimeEditor from './SentenceTimeEditor';
@@ -109,7 +109,7 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
     }, [sightings?.bySentence]);
 
     // 準時停在句尾（docs/plans/import-timestamp-accuracy.md PR-A）；Hooks 必須在所有提早 return 之前（Codex）
-    const segWatchRef = useRef<(() => void) | null>(null);
+    const segWatchRef = useRef<SegmentEndWatch | null>(null);
     // 修正時間（docs/plans/import-timestamp-accuracy.md PR-G）：正在編輯的句子、編輯器裡正在播放的範圍
     const [editingTimeId, setEditingTimeId] = useState<string | null>(null);
     const [playingKey, setPlayingKey] = useState<string | null>(null);
@@ -198,7 +198,8 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
     };
 
     /** 修正時間時試聽（用編輯中的時間，還沒存檔） */
-    const handlePlayRange = (key: string, start: number, end: number) => {
+    /** end 可傳函式：編輯器播放中微調時間，停止點跟著改（呼叫 refreshPlayback 立刻重排） */
+    const handlePlayRange = (key: string, start: number, end: number | (() => number)) => {
         const el = audioRef.current;
         if (!el) return;
         stopSegWatch();
@@ -614,6 +615,7 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
                                             sentence={s}
                                             playingKey={playingKey}
                                             onPlayRange={handlePlayRange}
+                                            onTimesChanged={() => segWatchRef.current?.refresh()}
                                             onStop={handlePause}
                                             onClose={() => setEditingTimeId(null)}
                                         />

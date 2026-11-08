@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Play, Pause, Ear, RotateCcw, AlertCircle, Loader2, Check } from 'lucide-react';
 import Button from './ui/Button';
 import TimeStepperField from './ui/TimeStepperField';
@@ -14,12 +14,14 @@ interface SentenceTimeEditorProps {
     sentence: MaterialSentence;
     /** 目前正在播放的 key（`${id}:edit`＝播放片段、`${id}:tail`＝聽句尾） */
     playingKey: string | null;
-    onPlayRange: (key: string, start: number, end: number) => void;
+    onPlayRange: (key: string, start: number, end: number | (() => number)) => void;
+    /** 編輯中的時間改了：讓播放中的停止點立刻依新時間重排（Gemini） */
+    onTimesChanged?: () => void;
     onStop: () => void;
     onClose: () => void;
 }
 
-const SentenceTimeEditor: React.FC<SentenceTimeEditorProps> = ({ materialId, sentence, playingKey, onPlayRange, onStop, onClose }) => {
+const SentenceTimeEditor: React.FC<SentenceTimeEditorProps> = ({ materialId, sentence, playingKey, onPlayRange, onStop, onClose, onTimesChanged }) => {
     const [startTime, setStartTime] = useState(sentence.startTime);
     const [endTime, setEndTime] = useState(sentence.endTime);
     const [warning, setWarning] = useState<string | null>(null);
@@ -32,6 +34,11 @@ const SentenceTimeEditor: React.FC<SentenceTimeEditorProps> = ({ materialId, sen
         setStartTime(sentence.startTime);
         setEndTime(sentence.endTime);
     }, [sentence.startTime, sentence.endTime]);
+
+    // 播放中讀最新的編輯值
+    const endRef = useRef(endTime);
+    endRef.current = endTime;
+    useEffect(() => { onTimesChanged?.(); }, [startTime, endTime]);   // eslint-disable-line react-hooks/exhaustive-deps
 
     const fieldId = `time-${sentence.id}`;
     const invalid = !isValidRange(startTime, endTime);
@@ -86,14 +93,14 @@ const SentenceTimeEditor: React.FC<SentenceTimeEditorProps> = ({ materialId, sen
 
             <div className="grid grid-cols-2 gap-2.5">
                 <Button variant="secondary" size="sm" fullWidth aria-pressed={playingKey === playKey} disabled={invalid}
-                    onClick={() => playingKey === playKey ? onStop() : onPlayRange(playKey, round2(startTime), round2(endTime))}
+                    onClick={() => playingKey === playKey ? onStop() : onPlayRange(playKey, round2(startTime), () => round2(endRef.current))}
                     className={playingKey === playKey ? 'border-accent bg-accent-soft' : ''}
                     icon={playingKey === playKey ? <Pause size={14} aria-hidden="true" /> : <Play size={14} className="fill-current" aria-hidden="true" />}>
                     {playingKey === playKey ? '暫停播放' : '播放片段'}
                 </Button>
                 <Button variant="secondary" size="sm" fullWidth aria-pressed={playingKey === tailKey} disabled={!(endTime > 0)}
                     title="從句尾前 1.5 秒播到句尾後 0.5 秒"
-                    onClick={() => { if (playingKey === tailKey) { onStop(); return; } const r = tailRange(round2(endTime)); onPlayRange(tailKey, r.start, r.end); }}
+                    onClick={() => { if (playingKey === tailKey) { onStop(); return; } const r = tailRange(round2(endTime)); onPlayRange(tailKey, r.start, () => tailRange(round2(endRef.current)).end); }}
                     className={playingKey === tailKey ? 'border-accent bg-accent-soft' : ''}
                     icon={playingKey === tailKey ? <Pause size={14} aria-hidden="true" /> : <Ear size={14} aria-hidden="true" />}>
                     {playingKey === tailKey ? '暫停播放' : '聽句尾'}
