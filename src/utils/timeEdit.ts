@@ -57,16 +57,18 @@ export function mergeWithPrevious<T extends EditableSentence>(prev: T, cur: T): 
 
 /**
  * 以游標位置把一句拆成兩句。時間無法從文字推得，先放在中點、兩句都標低信心，由使用者聽過後調整
- * （委員會：不用字元比例假裝準）。游標在開頭、結尾或任一邊沒有文字 → null
+ * （委員會：不用字元比例假裝準）；有翻譯時兩句的翻譯都清空。游標在開頭、結尾或任一邊沒有文字 → null
  */
 export function splitSentenceAt<T extends EditableSentence>(s: T, caret: number): [T, T] | null {
     const before = s.text.slice(0, caret).trim();
     const after = s.text.slice(caret).trim();
     if (!before || !after) return null;
     const mid = round2((s.startTime + s.endTime) / 2);
+    // 原本的翻譯是整句的，不可複製給拆開的兩句（Codex）；清空後由使用者補上
+    const tr = s.translation === undefined ? {} : { translation: '' };
     return [
-        { ...s, text: before, endTime: mid, lowConfidence: true },
-        { ...s, text: after, startTime: mid, lowConfidence: true },
+        { ...s, ...tr, text: before, endTime: mid, lowConfidence: true },
+        { ...s, ...tr, text: after, startTime: mid, lowConfidence: true },
     ];
 }
 

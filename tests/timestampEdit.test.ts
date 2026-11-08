@@ -136,3 +136,25 @@ describe('接線（驗收 5～7）', () => {
     expect(w).toContain('沒有辨識到英文句子');
   });
 });
+
+describe('審查修正（第 1 輪）', () => {
+  it('拆句：原本的翻譯不複製給兩句（Codex）', () => {
+    const r = splitSentenceAt({ text: 'Hello there. How are you?', translation: '你好。你好嗎？', startTime: 1, endTime: 4 }, 12)!;
+    expect(r[0].translation).toBe('');
+    expect(r[1].translation).toBe('');
+  });
+  it('校對：拆開的句子沒補翻譯不能存檔（文字轉語音教材）', () => {
+    const p = read('src/components/MaterialReviewPanel.tsx');
+    expect(p).toContain('拆開後要補上翻譯');
+    expect(p).toMatch(/saveDisabled = [^;]*hasMissingTranslation/);
+  });
+  it('跟讀寫入熟練度：交易內讀最新陣列、只改那一句（Codex）', () => {
+    const v = read('src/components/ShadowingPracticeView.tsx');
+    expect(v).toMatch(/runTransaction\(db/);
+    expect(v).not.toMatch(/sentences: updatedSentences/);
+    expect(v).toMatch(/latest\.map\(s => \(s\.id === sentence\.id/);
+  });
+  it('聽句尾的停止點讀最新的句尾（Gemini）', () => {
+    expect(read('src/components/MaterialReviewPanel.tsx')).toMatch(/playRange\(`\$\{id\}:tail`, r\.start, tailEndNow\)/);
+  });
+});

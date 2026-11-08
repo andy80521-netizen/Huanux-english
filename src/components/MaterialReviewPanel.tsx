@@ -38,6 +38,8 @@ const FIELD = 'border border-muted/35 bg-surface-2 text-ink transition-colors fo
 type InternalReviewSentence = ReviewSentence & {
     internalId: string;
     deleted: boolean;
+    /** 拆句後翻譯已清空，文字轉語音教材要補上翻譯才能存檔（Codex） */
+    needsTranslation?: boolean;
 };
 
 export default function MaterialReviewPanel({
@@ -106,8 +108,8 @@ export default function MaterialReviewPanel({
     const stopSegWatch = () => { segWatchRef.current?.(); segWatchRef.current = null; };
     useEffect(() => stopSegWatch, []);
 
-    /** 播放一段範圍（聽句尾用，key＝`${id}:tail`） */
-    const playRange = (key: string, start: number, end: number) => {
+    /** 播放一段範圍（聽句尾用，key＝`${id}:tail`）；終點可傳函式讀最新值 */
+    const playRange = (key: string, start: number, end: number | (() => number)) => {
         const el = audioRef.current;
         if (!el) return;
         stopSegWatch();
@@ -143,7 +145,9 @@ export default function MaterialReviewPanel({
         const sentence = sentences.find(s => s.internalId === id);
         if (!sentence || !(sentence.endTime > 0)) return;
         const r = tailRange(sentence.endTime);
-        playRange(`${id}:tail`, r.start, r.end);
+        // 播放中微調結束時間 → 停止點跟著新的句尾（Gemini）
+        const tailEndNow = () => tailRange(sentencesRef.current.find(x => x.internalId === id)?.endTime ?? sentence.endTime).end;
+        playRange(`${id}:tail`, r.start, tailEndNow);
     };
 
     // 保險：主要由 watchSegmentEnd 準時停止（聽句尾只靠監看，句子 id 對不上這裡不處理）
@@ -216,7 +220,7 @@ export default function MaterialReviewPanel({
             let p = idx - 1;
             while (p >= 0 && prev[p].deleted) p--;
             if (idx < 0 || p < 0) return prev;
-            const merged = mergeWithPrevious(prev[p], prev[idx]);
+            const merged = { ...mergeWithPrevious(prev[p], prev[idx]), needsTranslation: prev[p].needsTranslation || prev[idx].needsTranslation };
             return prev.filter((_, i) => i !== idx).map(s => (s.internalId === prev[p].internalId ? merged : s));
         });
         clearWarning(id);
@@ -236,8 +240,9 @@ export default function MaterialReviewPanel({
         if (playingId) handlePause();
         clearWarning(id);
         const newId = `rev_split_${++splitCounter.current}`;
+        const needsTranslation = source === 'tts' || undefined;
         setSentences(prev => prev.flatMap(s => s.internalId === id
-            ? [{ ...parts[0], internalId: id }, { ...parts[1], internalId: newId, deleted: false }]
+            ? [{ ...parts[0], internalId: id, needsTranslation }, { ...parts[1], internalId: newId, deleted: false, needsTranslation }]
             : [s]));
     };
 
@@ -248,9 +253,14 @@ export default function MaterialReviewPanel({
         .map((s, idx) => (s.startTime >= s.endTime ? idx + 1 : null))
         .filter((idx): idx is number => idx !== null);
     const hasInvalidTime = invalidSentenceIndices.length > 0;
+    // 拆句後還沒補翻譯的句子（只有文字轉語音教材在校對畫面輸入翻譯）
+    const missingTranslationIndices = source === 'tts'
+        ? activeSentences.map((s, idx) => (s.needsTranslation && !(s.translation || '').trim() ? idx + 1 : null)).filter((i): i is number => i !== null)
+        : [];
+    const hasMissingTranslation = missingTranslationIndices.length > 0;
 
     const handleSaveClick = () => {
-        if (activeSentences.length === 0 || hasInvalidTime || isSaving) return;
+        if (activeSentences.length === 0 || hasInvalidTime || hasMissingTranslation || isSaving) return;
 
         if (deletedSentences.length > 0) {
             setShowDiscardConfirm(true);
@@ -272,7 +282,7 @@ export default function MaterialReviewPanel({
         onSave(cleanSentences, coverChoice);
     };
 
-    const saveDisabled = isSaving || activeSentences.length === 0 || hasInvalidTime;
+    const saveDisabled = isSaving || activeSentences.length === 0 || hasInvalidTime || hasMissingTranslation;
 
     const messages = (
         <>
@@ -287,6 +297,11 @@ export default function MaterialReviewPanel({
             {hasInvalidTime && (
                 <p className="text-[13px] font-medium text-danger">
                     第 {invalidSentenceIndices.join('、')} 句的時間需要修正
+                </p>
+            )}
+            {hasMissingTranslation && (
+                <p className="text-[13px] font-medium text-danger">
+                    第 {missingTranslationIndices.join('、')} 句拆開後要補上翻譯
                 </p>
             )}
         </>
