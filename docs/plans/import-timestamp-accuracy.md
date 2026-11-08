@@ -111,6 +111,22 @@
 6. E 的序列比對：Whisper 漏字、多字、數字寫法不同時的處理
 7. 不能自動驗證「時間準不準」：怎麼設計可重複的驗收（例如人工標註幾段音檔的真實邊界，做成測試資料）
 
+## 第二輪質詢（請針對以下 Q1～Q4 逐題回答）
+**Q1：A 上線後句尾「變短」怎麼處理？**
+Grok 指出：現在 `timeupdate` 晚停，等於替所有既有教材多播了約 0.1～0.25 秒；A 修好後，`endTime` 本身偏早的句子會聽起來句尾被切。Grok 建議播放器在 `min(endTime + 0.12, 下一句 startTime)` 停（不寫回資料）。規格附錄 B 曾放棄「緩衝 1／0.5／0.2 秒」（原因未記錄，可能指起始緩衝）。
+請評估：(a) 播放端寬限 vs. 不加寬限 vs. 匯入時加句尾緩衝（會寫進新教材）各自的風險；(b) 跟讀流暢度用 `endTime − startTime` 當原音長度，寬限要不要計入。
+
+**Q2：D（`word` 顆粒度）的實際可靠度與 Groq 支援**
+Groq 文件互相矛盾：API Reference 寫 `timestamp_granularities[]` 支援 `word`／`segment`；Speech-to-Text 頁另有版本寫不支援；2026-09 有使用者回報 `whisper-large-v3-turbo` 回 400 `unknown param timestamp_granularities`。
+請評估：(a) 若擁有者同意重新評估 D，「只在 segment 內有句末標點時，用 word 時間定切點；word 缺漏、時間異常（單字 > 1.5 秒、時間倒退）就保留原 segment 邊界並標 `lowConfidence`」這個保守用法，還有哪些失敗情況；(b) 是否應該先做 D 的離線對照再決定 H（換 Groq），還是兩者可以一起對照。
+
+**Q3：在這個專案的限制下，「基準」要怎麼建立才可行？**
+限制：Claude 的工作環境連不到 OpenAI／Groq；預覽網站的 Netlify Functions 用正式金鑰；擁有者可以把 mp3 檔案傳給 Claude；不新增 npm 套件（除非核准）。Codex 與 Grok 都建議先建立人工標註基準。
+請提出具體、可執行的做法，例如：(a) 匯入時把 Whisper 原始回應（segment／word）存成可下載的 JSON 讓擁有者交給 Claude，Claude 在本機用固定回應跑 `mergeSegmentsIntoSentences` 的回歸測試；(b) 人工標註由誰做、標幾段、容差多少；(c) 有沒有不需要新增 npm 套件、在 Claude 工作環境（Python／pip 可用）就能做的參考對齊方式。
+
+**Q4：語速異常併句的時間（Grok 提議改用碎片起點）**
+目前程式刻意「時間只沿用異常句」：註解說明 Whisper 遇到片頭音樂時會把後面才講的短句文字提早標到音樂區段，碎片的時間落在音樂上。Grok 建議改用碎片的 `startTime`。請評估這個修改是否會讓片頭音樂重新被涵蓋進句子；有沒有兩全的判斷方式。
+
 ## 相關檔案
 - `netlify/functions/whisper-transcribe.ts`
 - `src/components/MaterialImportMode.tsx`
