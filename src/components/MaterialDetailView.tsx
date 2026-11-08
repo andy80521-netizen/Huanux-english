@@ -107,6 +107,11 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [sightings?.bySentence]);
 
+    // 準時停在句尾（docs/plans/import-timestamp-accuracy.md PR-A）；Hooks 必須在所有提早 return 之前（Codex）
+    const segWatchRef = useRef<(() => void) | null>(null);
+    const stopSegWatch = () => { segWatchRef.current?.(); segWatchRef.current = null; };
+    useEffect(() => stopSegWatch, []);
+
     if (!material) {
         return (
             <div className="flex flex-col h-full p-6 items-center justify-center" role="status">
@@ -150,11 +155,6 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
             />
         );
     }
-
-    // 準時停在句尾（docs/plans/import-timestamp-accuracy.md PR-A）
-    const segWatchRef = useRef<(() => void) | null>(null);
-    const stopSegWatch = () => { segWatchRef.current?.(); segWatchRef.current = null; };
-    useEffect(() => stopSegWatch, []);
 
     const handlePlaySegment = (index: number) => {
         const sentence = material.sentences[index];

@@ -97,6 +97,8 @@ export default function MaterialReviewPanel({
 
     // 準時停在句尾（docs/plans/import-timestamp-accuracy.md PR-A）：校對時聽到的句尾要和練習時一致
     const segWatchRef = useRef<(() => void) | null>(null);
+    const sentencesRef = useRef(sentences);
+    sentencesRef.current = sentences;
     const stopSegWatch = () => { segWatchRef.current?.(); segWatchRef.current = null; };
     useEffect(() => stopSegWatch, []);
 
@@ -109,7 +111,9 @@ export default function MaterialReviewPanel({
             el.play()?.catch?.(() => setPlayingId(null));
             setPlayingId(id);
             if (sentence.endTime > 0) {
-                segWatchRef.current = watchSegmentEnd(el, sentence.endTime, () => {
+                // 讀最新的句尾：播放中修改結束時間，這次試聽就照新的句尾停（Codex）
+                const endNow = () => sentencesRef.current.find(x => x.internalId === id)?.endTime ?? sentence.endTime;
+                segWatchRef.current = watchSegmentEnd(el, endNow, () => {
                     segWatchRef.current = null;
                     setPlayingId(null);
                 });

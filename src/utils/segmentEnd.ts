@@ -51,10 +51,12 @@ const browserDeps = (): SegmentEndDeps => {
  */
 export function watchSegmentEnd(
     media: SegmentMedia,
-    endTime: number,
+    /** 句尾（秒）；傳函式時每次檢查都讀最新值（校對畫面播放中可能修改句尾） */
+    endTimeOrGetter: number | (() => number),
     onEnd: (reason: SegmentEndReason) => void,
     deps: SegmentEndDeps = browserDeps(),
 ): () => void {
+    const endOf = typeof endTimeOrGetter === 'function' ? endTimeOrGetter : () => endTimeOrGetter;
     let done = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let frame: unknown = null;
@@ -83,7 +85,7 @@ export function watchSegmentEnd(
         timer = null;
         frame = null;
         if (done) return;
-        if (media.currentTime >= endTime) { finish('end'); return; }
+        if (media.currentTime >= endOf()) { finish('end'); return; }
         schedule();
     };
 
@@ -91,7 +93,7 @@ export function watchSegmentEnd(
         clearScheduled();
         if (done || media.paused) return;   // 暫停中：等 playing 再排
         const rate = media.playbackRate && media.playbackRate > 0 ? media.playbackRate : 1;
-        const remainMs = ((endTime - media.currentTime) / rate) * 1000;
+        const remainMs = ((endOf() - media.currentTime) / rate) * 1000;
         if (remainMs > FRAME_WINDOW_MS) {
             timer = setTimeout(check, remainMs - FRAME_WINDOW_MS / 2);
         } else if (deps.requestFrame) {
@@ -106,7 +108,7 @@ export function watchSegmentEnd(
         unlisten.push(() => media.removeEventListener(type, fn));
     };
 
-    listen('timeupdate', () => { if (!done && media.currentTime >= endTime) finish('end'); });
+    listen('timeupdate', () => { if (!done && media.currentTime >= endOf()) finish('end'); });
     listen('playing', check);
     listen('seeked', check);
     listen('ratechange', check);

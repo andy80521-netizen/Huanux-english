@@ -240,3 +240,43 @@ describe('六個播放入口接線（驗收 8）', () => {
     expect(read('src/components/MaterialReviewPanel.tsx')).toMatch(/seekSegmentStart\(/);
   });
 });
+
+describe('審查修正（Codex 第 1 輪）', () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+  it('句尾用函式傳入：播放中延長 → 照新的句尾停', () => {
+    const m = new ClockMedia();
+    m.currentTime = 7;
+    let end = 10;
+    const onEnd = vi.fn();
+    m.play();
+    watchSegmentEnd(m, () => end, onEnd, deps());
+    vi.advanceTimersByTime(1500);
+    end = 11;
+    vi.advanceTimersByTime(4000);
+    expect(onEnd).toHaveBeenCalledTimes(1);
+    expect(m.pausedAt!).toBeGreaterThanOrEqual(11);
+    expect(m.pausedAt!).toBeLessThanOrEqual(11.05);
+  });
+  it('句尾用函式傳入：播放中縮短 → 最晚在下一次 timeupdate 停', () => {
+    const m = new ClockMedia();
+    m.currentTime = 7;
+    let end = 12;
+    const onEnd = vi.fn();
+    m.play();
+    watchSegmentEnd(m, () => end, onEnd, deps());
+    vi.advanceTimersByTime(1500);   // 8.5
+    end = 9;
+    vi.advanceTimersByTime(1000);
+    expect(onEnd).toHaveBeenCalledTimes(1);
+    expect(m.pausedAt!).toBeLessThanOrEqual(9.3);
+  });
+  it('教材詳情頁：新增的 Hooks 在提早 return 之前', () => {
+    const src = read('src/components/MaterialDetailView.tsx');
+    expect(src.indexOf('const segWatchRef = useRef')).toBeGreaterThan(-1);
+    expect(src.indexOf('const segWatchRef = useRef')).toBeLessThan(src.indexOf('    if (!material) {'));
+  });
+  it('校對畫面：監看讀最新的句尾', () => {
+    expect(read('src/components/MaterialReviewPanel.tsx')).toMatch(/watchSegmentEnd\(el, endNow,/);
+  });
+});
