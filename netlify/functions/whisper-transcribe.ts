@@ -148,8 +148,24 @@ async function writeToFirestore(
       .map(path => `updateMask.fieldPaths=${encodeURIComponent(path)}`)
       .join("&");
 
-    // currentDocument.exists=true：任務文件已被使用者取消刪除時，寫入會失敗，不會把文件重新建立回來
-    const firestoreUrl = `https://firestore.googleapis.com/v1/${documentResourcePath}?${updateMaskParams}&currentDocument.exists=true`;
+    // 只在任務仍是「轉錄中」時寫入：任務已被取消刪除、或已進入背景存檔（saving 等）時，
+    // 遲到的轉錄結果不可把狀態蓋回 completed（規劃 docs/plans/background-material-save.md）
+    const current = await fetch(`https://firestore.googleapis.com/v1/${documentResourcePath}`, {
+      headers: { "Authorization": `Bearer ${idToken}` }
+    });
+    if (!current.ok) {
+      console.warn(`任務文件不存在或無法讀取 (HTTP ${current.status})，不寫入轉錄結果`);
+      return;
+    }
+    const currentDoc = await current.json() as { updateTime?: string; fields?: { status?: { stringValue?: string } } };
+    const status = currentDoc.fields?.status?.stringValue;
+    if (status !== "processing") {
+      console.warn("任務已不在轉錄中，不寫入轉錄結果");
+      return;
+    }
+
+    // currentDocument.updateTime：讀取之後任務若被改動（取消、送出存檔），寫入會失敗，不會蓋掉新狀態
+    const firestoreUrl = `https://firestore.googleapis.com/v1/${documentResourcePath}?${updateMaskParams}&currentDocument.updateTime=${encodeURIComponent(currentDoc.updateTime || "")}`;
 
     const response = await fetch(firestoreUrl, {
       method: "PATCH",

@@ -15,11 +15,14 @@ import {
 import BadgeMode from './components/BadgeMode';
 import PersonalMode from './components/PersonalMode';
 import MaterialImportMode from './components/MaterialImportMode';
+import SaveStatusBanner from './components/SaveStatusBanner';
 import LanguageModelMode from './components/LanguageModelMode';
 import PageEnter from './components/ui/PageEnter';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState('material'); 
+  // 背景存檔提示的「回到校對」：切到啟蒙的開始並打開這份教材的校對畫面
+  const [resumeReviewId, setResumeReviewId] = useState<string | null>(null);
   const [vocabData, setVocabData] = useState<VocabItem[]>([]);
   const [courses, setCourses] = useState<string[]>(INITIAL_COURSES);
   const [user, setUser] = useState<FirebaseUser | null>(null);
@@ -384,11 +387,12 @@ const App: React.FC = () => {
             </div>
           </div>
         )}
+        <SaveStatusBanner uid={user?.uid} onResumeReview={(id) => { setResumeReviewId(id); setActiveTab('material'); }} />
         <main className="relative flex-1 min-h-0 overflow-hidden">
           {/* 四個分頁都已改版成寬版（UI 改版 ④ 起），內容區最大 1200px */}
           <div className="mx-auto h-full w-full lg:max-w-[1200px]">
             <PageEnter key={activeTab}>
-              {activeTab === 'material' && <MaterialImportMode />}
+              {activeTab === 'material' && <MaterialImportMode resumeReviewId={resumeReviewId} onResumeHandled={() => setResumeReviewId(null)} />}
               {activeTab === 'languageModel' && <LanguageModelMode />}
               {activeTab === 'badges' && <BadgeMode />}
               {activeTab === 'personal' && <PersonalMode user={user} syncStatus={syncStatus} voicePrefs={voicePrefs} setVoicePrefs={setVoicePrefs} themeMode={themeMode} setThemeMode={setThemeMode} />}

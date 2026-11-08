@@ -62,7 +62,7 @@ describe('REST 交易（驗收 2）', () => {
     expect(commitBody.writes[0].currentDocument).toEqual({ exists: true });
   });
   it('建立用 exists=false；文件不存在時 get 回 null', async () => {
-    const fetchImpl = vi.fn(async (url: string) => {
+    const fetchImpl = vi.fn(async (url: string, _init?: RequestInit) => {
       if (url.endsWith(':beginTransaction')) return okJson({ transaction: 'TX' });
       if (url.endsWith(':commit')) return okJson({});
       return okJson({ error: { status: 'NOT_FOUND' } }, 404);

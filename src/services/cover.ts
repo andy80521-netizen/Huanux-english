@@ -2,22 +2,8 @@ import { auth, db, appId } from '../firebase';
 import { doc, updateDoc } from 'firebase/firestore';
 import { CoverStyle } from '../types';
 
-export function buildCoverExcerpt(sentences: { text: string }[]): string {
-    let result = '';
-    for (const s of sentences) {
-        if (!s.text) continue;
-        const piece = (result ? ' ' : '') + s.text.trim();
-        if (result.length + piece.length > 800) {
-            const remaining = 800 - result.length;
-            if (remaining > 0) {
-                result += piece.slice(0, remaining);
-            }
-            break;
-        }
-        result += piece;
-    }
-    return result;
-}
+// 封面摘要：純函式在 utils（背景存檔的後端也用同一份規則）
+export { buildCoverExcerpt } from '../utils/coverExcerpt';
 
 export async function startCoverGeneration(
     materialId: string,

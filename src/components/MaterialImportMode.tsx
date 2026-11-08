@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { startBackgroundSave, reopenReview } from '../services/backgroundSave';
 import { FileText, Headphones, AlertCircle, Loader2, Upload, CheckCircle, Volume2, Sparkles, FolderOpen, Check } from 'lucide-react';
-import { splitTextToSentences, generateSpeechForSentences, extractPatternsFromText, translateSentences } from '../services/gemini';
+import { splitTextToSentences, generateSpeechForSentences, extractPatternsFromText } from '../services/gemini';
 import { extractTextFromPdf } from '../utils/pdfExtract';
 import { auth, db, storage, appId } from '../firebase';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -29,11 +30,18 @@ export type PendingMaterial = {
     sentences: ReviewSentence[];
     materialId?: string;
     audioUrl?: string;
+    /** 從背景存檔提示「回到校對」打開的：取消時只回列表，不刪音檔與任務 */
+    resumed?: boolean;
+    coverChoice?: CoverStyle | 'none';
 };
 
 
 
-export default function MaterialImportMode() {
+export default function MaterialImportMode({ resumeReviewId = null, onResumeHandled }: {
+    /** 背景存檔提示按「回到校對」時傳入的教材編號 */
+    resumeReviewId?: string | null;
+    onResumeHandled?: () => void;
+} = {}) {
     const [currentView, setCurrentView] = useState<'list' | 'import' | 'detail'>('list');
     const [selectedMaterial, setSelectedMaterial] = useState<string | null>(null);
     // 分頁第一次出現時由 App 的轉場負責；之後在分頁內換畫面才播自己的轉場
@@ -150,6 +158,32 @@ export default function MaterialImportMode() {
     }, []);
 
     const [results, setResults] = useState<{ text: string; translation: string; lowConfidence?: boolean }[]>([]);
+
+    // 背景存檔提示按「回到校對」：讓舊的背景執行失效、取回校對內容，打開校對畫面（音檔改播 Storage 上的檔案）
+    useEffect(() => {
+        if (!resumeReviewId) return;
+        let cancelled = false;
+        (async () => {
+            try {
+                const r = await reopenReview(resumeReviewId);
+                if (cancelled) return;
+                setResults([]);
+                setSaveSuccess(false);
+                setTranslationError(null);
+                setPendingMaterial({
+                    source: 'upload', fileName: r.title, sentences: r.reviewed, materialId: resumeReviewId,
+                    audioUrl: r.audioUrl, resumed: true, coverChoice: r.coverChoice,
+                });
+                setCurrentView('import');
+            } catch (e: any) {
+                if (!cancelled) setError(e?.message || '無法回到校對');
+            } finally {
+                onResumeHandled?.();
+            }
+        })();
+        return () => { cancelled = true; };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [resumeReviewId]);
 
     const fileInputRef = useRef<HTMLInputElement>(null);
     const audioInputRef = useRef<HTMLInputElement>(null);
@@ -528,82 +562,27 @@ export default function MaterialImportMode() {
         }
 
         if (pendingMaterial.source === 'upload' && pendingMaterial.materialId && pendingMaterial.audioUrl) {
+            // 交給伺服器背景存檔（翻譯、建立教材、封面、重逢都在背景完成；離開畫面、鎖屏、關 App 都不影響）
+            // 規劃：docs/plans/background-material-save.md
             if (isSavingRef.current) return;
             isSavingRef.current = true;
             setTranslationError(null);
-            setLoadingState('translating');
-
+            setLoadingState('processing');
             try {
-                let translations: string[];
-                try {
-                    translations = await translateSentences(
-                        finalSentences.map(s => s.text),
-                        (done, total) => setTranslateProgress({ done, total })
-                    );
-                } catch (transErr: any) {
-                    setTranslationError(`翻譯失敗：${transErr.message || transErr}。請再按一次「確認儲存」重試，校對內容已保留。`);
-                    return;
-                }
-
-                try {
-                    const materialRef = doc(db, 'artifacts', appId, 'users', uid, 'materials', pendingMaterial.materialId);
-                    const materialDoc: Material = {
-                        id: pendingMaterial.materialId,
-                        title: pendingMaterial.fileName,
-                        course: "未分類",
-                        sourceText: finalSentences.map(r => r.text).join(' '),
-                        audioUrl: pendingMaterial.audioUrl,
-                        audioSource: 'upload',
-                        sentences: finalSentences.map((r, i) => ({
-                            id: `s_${i}`,
-                            text: r.text,
-                            translation: translations[i] || '',
-                            startTime: r.startTime,
-                            endTime: r.endTime,
-                            lowConfidence: r.lowConfidence,
-                            needsReview: r.needsReview,
-                            mastery: 0
-                        })),
-                        createdAt: Date.now(),
-                        graduated: false,
-                        ...(coverChoice !== 'none' ? {
-                            coverStyle: coverChoice,
-                            coverStatus: 'generating' as const,
-                            coverRequestedAt: Date.now()
-                        } : {})
-                    };
-
-                    await setDoc(materialRef, materialDoc);
-
-                    if (coverChoice !== 'none') {
-                        startCoverGeneration(
-                            pendingMaterial.materialId,
-                            coverChoice,
-                            pendingMaterial.fileName,
-                            buildCoverExcerpt(finalSentences)
-                        );
-                    }
-
-                    void requestSightingDetection(pendingMaterial.materialId);
-
-                    try {
-                        const taskDocRef = doc(db, 'artifacts', appId, 'users', uid, 'transcriptionJobs', pendingMaterial.materialId);
-                        await deleteDoc(taskDocRef);
-                    } catch (delErr) {
-                        console.warn('刪除轉錄任務文件失敗:', delErr);
-                    }
-
-                    setTranslationError(null);
-                    setSaveSuccess(true);
-                    setPendingMaterial(null);
-                    setResults([]);
-                    setCurrentView('list');
-                } catch (saveErr: any) {
-                    setTranslationError(`儲存失敗：${saveErr.message || saveErr}。請再按一次「確認儲存」重試，校對內容已保留。`);
-                }
+                await startBackgroundSave({
+                    materialId: pendingMaterial.materialId,
+                    title: pendingMaterial.fileName,
+                    audioUrl: pendingMaterial.audioUrl,
+                    coverChoice,
+                    reviewed: finalSentences,
+                });
+                setPendingMaterial(null);
+                setResults([]);
+                setCurrentView('list');
+            } catch (err: any) {
+                setTranslationError(err?.message || '交給伺服器儲存失敗，請再按一次「確認儲存」');
             } finally {
                 isSavingRef.current = false;
-                setTranslateProgress(null);
                 setLoadingState('idle');
             }
             return;
@@ -697,7 +676,8 @@ export default function MaterialImportMode() {
             return;
         }
 
-        if (pendingMaterial?.source === 'upload' && pendingMaterial.materialId) {
+        // 回到校對的教材：取消只回列表（任務保留在「待校對」，上方提示可再回來或放棄）
+        if (pendingMaterial?.source === 'upload' && pendingMaterial.materialId && !pendingMaterial.resumed) {
             await cleanupPathOneUpload(pendingMaterial.materialId);
         }
 
@@ -1006,6 +986,8 @@ export default function MaterialImportMode() {
                     source={pendingMaterial.source}
                     audioFile={pendingMaterial.audioFile}
                     audioBlob={pendingMaterial.audioBlob}
+                    remoteAudioUrl={pendingMaterial.audioFile ? undefined : pendingMaterial.audioUrl}
+                    initialCoverChoice={pendingMaterial.coverChoice}
                     fileName={pendingMaterial.fileName}
                     initialSentences={pendingMaterial.sentences}
                     isSaving={loadingState === 'translating'}

@@ -14,6 +14,10 @@ export interface MaterialReviewPanelProps {
     source: 'upload' | 'tts';
     audioFile?: File;
     audioBlob?: Blob;
+    /** 沒有本機檔案時（從背景存檔「回到校對」）改播 Storage 上的音檔 */
+    remoteAudioUrl?: string;
+    /** 回到校對時沿用上次選的封面風格 */
+    initialCoverChoice?: CoverStyle | 'none';
     fileName: string;
     initialSentences: ReviewSentence[];
     isSaving?: boolean;
@@ -46,6 +50,8 @@ export default function MaterialReviewPanel({
     source,
     audioFile,
     audioBlob,
+    remoteAudioUrl,
+    initialCoverChoice,
     fileName,
     initialSentences,
     isSaving = false,
@@ -70,6 +76,7 @@ export default function MaterialReviewPanel({
     const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
     const [timeAdjustWarnings, setTimeAdjustWarnings] = useState<Record<string, string>>({});
     const [coverChoice, setCoverChoice] = useState<CoverStyle | 'none'>(() => {
+        if (initialCoverChoice) return initialCoverChoice;
         try {
             const saved = localStorage.getItem('huanux_cover_style');
             if (saved === 'photo' || saved === 'anime' || saved === 'none') {
@@ -97,7 +104,8 @@ export default function MaterialReviewPanel({
             setAudioUrl(url);
             return () => URL.revokeObjectURL(url);
         }
-    }, [audioFile, audioBlob]);
+        if (remoteAudioUrl) setAudioUrl(remoteAudioUrl);
+    }, [audioFile, audioBlob, remoteAudioUrl]);
 
     // 準時停在句尾（docs/plans/import-timestamp-accuracy.md PR-A）：校對時聽到的句尾要和練習時一致
     const segWatchRef = useRef<SegmentEndWatch | null>(null);
