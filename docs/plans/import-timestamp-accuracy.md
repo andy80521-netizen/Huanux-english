@@ -139,8 +139,55 @@ Groq 文件互相矛盾：API Reference 寫 `timestamp_granularities[]` 支援 `
 - `netlify/shared/transcribe.ts`
 - `src/types.ts`
 
+## 委員會審查整合（2026-11-08，第一輪＋質詢；待擁有者核准）
+
+成員：Codex（兩輪）、Gemini 3.8 Flash、Nemotron、DeepSeek、Grok。Poolside 呼叫失敗（模型已下架）。
+
+### 第一輪補上的精確度來源（已對照程式碼確認）
+- **校對畫面自己的播放也晚停**（Codex、DeepSeek、Grok）：`MaterialReviewPanel` 一樣只靠 `timeupdate`；擁有者在這裡決定要不要改時間，播放誤差會被寫進教材
+- **`timeupdate` 不是 iOS 專屬**，所有瀏覽器大約都是每 250ms 觸發一次；多播的量（以音檔時間計）約是 0.25 × 播放速度（Grok）
+- **設定 `currentTime` 後沒等 `seeked` 就 `play()`**：手機上 seek 可能還沒完成，句首被切或從錯的位置開始，容易被誤判成 Whisper 誤差（Grok）
+- **縮寫判斷只認整段完全等於 Dr／Mr…**：`U.S.`、`a.m.`、`No.`、小數、省略號都會判錯；「4 段強制切」只看段數不看時長（Grok）
+- **空結果**：Whisper 沒有 segment 時寫入 `completed` 且沒有句子，使用者卡在無法存檔的校對畫面（Nemotron、DeepSeek、Grok）
+- P5（VBR seek）本次無人實測，不可當已確認原因
+
+### 共識
+1. **A 播放停止精準化最優先**，範圍要完整：跟讀、教材詳情、**校對畫面**、複述、句型「在教材中出現」、結果頁「聽聽看」（`createListenPlayer` 目前保險計時多加 500ms）
+   - 每次回呼都以實際 `currentTime` 判斷；`setTimeout`（剩餘時間 ÷ 播放速度）＋接近時 `requestAnimationFrame`＋`timeupdate` 保險；緩衝、seek、暫停、變速時重新排程；換句／離開時清掉舊回呼（Codex）
+   - 設定起點後等 `seeked`（逾時仍播放）再播；跟讀仍須保留「點擊當下解鎖、錄音真的開始才播」的順序
+2. **G 校對工具（不含波形）**：`−0.1`／`+0.1`、「聽句尾」（`endTime − 1.5` 播到 `endTime + 0.5`）、「合併到上一句」（文字以空白接、時間取聯集、`lowConfidence` 取或）、「拆成兩句」（以游標拆文字；時間先放中點、兩句都標 `lowConfidence`，由人調整，不用字元比例假裝準）
+3. **加 `language=en`**（匯入只收英文 mp3）
+4. **I 不做**；不在詳情頁改既有教材時間
+5. **先建立基準再動轉錄策略**：只有人耳標註的邊界能證明「準」，固定的 Whisper 回應只能做回歸測試
+6. **流暢度的原音長度維持 `endTime − startTime`**，任何播放寬限都不計入
+
+### 分歧與我的建議
+| 議題 | 各方說法 | 我的建議與理由 |
+|---|---|---|
+| A 之後句尾「變短」要不要加播放寬限 | Grok 第一輪：`min(endTime+0.12, 下一句 startTime)`；Nemotron 贊成；Gemini：`min(endTime+0.10, 下一句 startTime−0.03)`；Codex、DeepSeek、Grok 第二輪：先不加 | **先不加，停在 `endTime`**。已對照程式碼驗證 Codex／Grok 的計算：Whisper 的 segment 通常首尾相接，下一句存的起點＝本句終點 − 0.1，套這兩個公式反而會比 `endTime` **早 0.1～0.13 秒停**，正好切掉句尾。偏早的句子用 G 修；有基準後若句尾系統性偏早，再請你決定是否加可關閉的寬限 |
+| D（`word` 顆粒度） | Gemini、DeepSeek：允許重新評估；Nemotron：暫不；Codex、Grok：只准離線對照，贏過現況才進產品 | **只做離線對照**。保守用法仍會失敗：整段平移、靜音被算進字長、音樂上的幻覺字、縮寫／小數的句點、word 與 segment 文字對不齊；而且 P1 最常見的「沒有句點的段」它修不到 |
+| Groq 是否支援 word | 第一輪多數引用規劃中「不支援」；Codex：官方 API Reference 列出支援 | **不確定**。API Reference 列出支援，另一頁寫不支援，2026-09 有 `whisper-large-v3-turbo` 回 400 的回報。要用小檔實際探測，不能憑文件 |
+| D 與 H 一起對照還是分開 | Nemotron、DeepSeek：分開；Gemini、Grok、Codex：同一批音檔一起收集，分開分析 | **一起收集、分開分析**（Codex）：同一批音檔同時收 OpenAI 與 Groq 的原始回應，比「segment vs. word 切句」和「供應商差異」兩件事 |
+| 語速異常併句的時間 | Grok 第一輪：改用碎片起點；Gemini：間隔 ≤ 0.8 秒才用碎片起點；其他人：不改 | **不改**。碎片時間落在片頭音樂上時，改了會把最多 10 秒音樂收回句子；間隔門檻分不出「音樂上的錯置文字」和「真的說出的短句」（Codex）。可在校對畫面顯示被捨棄的碎片起點，讓你一鍵採用（Grok） |
+| 縮寫表擴充、4 段強制切改成「時長或段數」 | Grok 提議；其他人未反對 | **有基準後再做**，屬於轉錄 PR；規格寫明「後處理規則順序固定」，改規則需要你同意 |
+
+### 駁回的意見
+- **在 Whisper prompt 寫「Please transcribe accurately with standard punctuation」**（Gemini）：Whisper 的 prompt 會被當成「前文」而不是指令；PR #33 剛遇過長 prompt 引起幻覺
+- **伺服器端用 ffmpeg.wasm 或裝 torch／torchaudio 做強制對齊**（Nemotron）：需要新增套件或下載模型；本專案不新增套件，而且自動對齊結果不能當真值
+- **教材詳情頁「單筆重新轉錄」覆寫 `sentences[]`**（Nemotron）：會改寫既有資料，目前沒有備份工具
+- **起點緩衝改成「間隔的一半」**（Gemini）：屬於附錄 B 已放棄的「緩衝」類，且沒有實測依據
+- **成本試算（每月 $50～200）、具體毫秒門檻當成既定事實**（Nemotron 等）：沒有根據；門檻要你聽過例子後才定案
+- **用 `mp3-frame-parser` 套件**（Nemotron）：新增套件；要做 F 也只需自己解析標頭
+
+### 建議的 PR 順序
+1. **PR-A 播放停止精準化**（不改資料，所有教材立刻受益）
+2. **PR-G 校對工具**（±0.1、聽句尾、合併、拆句）＋ `language=en`＋空結果的明確錯誤訊息
+3. **基準建立**：匯入流程加「下載原始轉錄資料」診斷功能（預設隱藏，不含金鑰、token）；你挑 2～3 個真實音檔標 30～40 個邊界；我在工作環境用 ffmpeg 解碼、算音量幫你定位，並把資料做成回歸測試（短片段，完整逐字稿不進公開 repo）
+4. **D／H 對照**（需你同意重新評估附錄 B 的 word 顆粒度，只做離線）→ 依結果決定要不要改轉錄
+5. 之後再評估：E 附原稿（必須是逐字稿；對上率低於門檻就整段退回）、F VBR 偵測（先量測前中後段 seek 誤差，超過 0.3 秒才做）、B 音量吸附（目前不准）
+
 ## 做法
-（委員會評估後整合，擁有者核准後填寫）
+（擁有者核准後填寫）
 
 ## 驗收條件
 （待定案）
@@ -167,3 +214,4 @@ Groq 文件互相矛盾：API Reference 寫 `timestamp_granularities[]` 支援 `
 
 ## 進度紀錄
 - 2026-11-08：讀碼整理現況、列出可能來源與候選做法；開草稿 PR，送委員會＋Codex 第一輪
+- 2026-11-08：第一輪完成（Poolside 失敗）；針對性質詢 Q1～Q4 完成（Codex 第一次回覆「需要建立環境」，改用審查形式後回覆）；整合報告給擁有者。**下一步：等擁有者決定「需要你決定的問題」，核准後從 PR-A 開始**
