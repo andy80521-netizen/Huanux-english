@@ -258,25 +258,41 @@ describe('審查修正（Codex 第 1 輪）', () => {
     expect(m.pausedAt!).toBeGreaterThanOrEqual(11);
     expect(m.pausedAt!).toBeLessThanOrEqual(11.05);
   });
-  it('句尾用函式傳入：播放中縮短 → 最晚在下一次 timeupdate 停', () => {
+  it('句尾用函式傳入：播放中縮短並呼叫 refresh → 照新的句尾準時停（Codex 第 2 輪）', () => {
     const m = new ClockMedia();
     m.currentTime = 7;
     let end = 12;
     const onEnd = vi.fn();
     m.play();
-    watchSegmentEnd(m, () => end, onEnd, deps());
+    const w = watchSegmentEnd(m, () => end, onEnd, deps());
     vi.advanceTimersByTime(1500);   // 8.5
-    end = 9;
+    end = 9.1;
+    w.refresh();
     vi.advanceTimersByTime(1000);
     expect(onEnd).toHaveBeenCalledTimes(1);
-    expect(m.pausedAt!).toBeLessThanOrEqual(9.3);
+    expect(m.pausedAt!).toBeGreaterThanOrEqual(9.1);
+    expect(m.pausedAt!).toBeLessThanOrEqual(9.15);
+  });
+  it('縮短到目前位置之前 → refresh 立刻停', () => {
+    const m = new ClockMedia();
+    m.currentTime = 7;
+    let end = 12;
+    const onEnd = vi.fn();
+    m.play();
+    const w = watchSegmentEnd(m, () => end, onEnd, deps());
+    vi.advanceTimersByTime(1500);   // 8.5
+    end = 8;
+    w.refresh();
+    expect(onEnd).toHaveBeenCalledTimes(1);
   });
   it('教材詳情頁：新增的 Hooks 在提早 return 之前', () => {
     const src = read('src/components/MaterialDetailView.tsx');
     expect(src.indexOf('const segWatchRef = useRef')).toBeGreaterThan(-1);
     expect(src.indexOf('const segWatchRef = useRef')).toBeLessThan(src.indexOf('    if (!material) {'));
   });
-  it('校對畫面：監看讀最新的句尾', () => {
-    expect(read('src/components/MaterialReviewPanel.tsx')).toMatch(/watchSegmentEnd\(el, endNow,/);
+  it('校對畫面：監看讀最新的句尾，句子變更時 refresh', () => {
+    const src = read('src/components/MaterialReviewPanel.tsx');
+    expect(src).toMatch(/watchSegmentEnd\(el, endNow,/);
+    expect(src).toMatch(/useEffect\(\(\) => \{ segWatchRef\.current\?\.refresh\(\); \}, \[sentences\]\)/);
   });
 });

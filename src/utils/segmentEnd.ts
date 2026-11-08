@@ -47,7 +47,7 @@ const browserDeps = (): SegmentEndDeps => {
 
 /**
  * 監看播放，到 endTime 就暫停並回呼 onEnd('end')；頁面隱藏時直接暫停並回呼 onEnd('hidden')（擁有者決定）。
- * 每次檢查都以實際 currentTime 為準；暫停、seek、變速時重新排程。回傳取消函式（不暫停、不回呼）。
+ * 每次檢查都以實際 currentTime 為準；暫停、seek、變速時重新排程。回傳取消函式（不暫停、不回呼），附帶 refresh()。
  */
 export function watchSegmentEnd(
     media: SegmentMedia,
@@ -55,7 +55,7 @@ export function watchSegmentEnd(
     endTimeOrGetter: number | (() => number),
     onEnd: (reason: SegmentEndReason) => void,
     deps: SegmentEndDeps = browserDeps(),
-): () => void {
+): (() => void) & { refresh: () => void } {
     const endOf = typeof endTimeOrGetter === 'function' ? endTimeOrGetter : () => endTimeOrGetter;
     let done = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -117,8 +117,11 @@ export function watchSegmentEnd(
     if (deps.onHidden) unlisten.push(deps.onHidden(() => finish('hidden')));
 
     check();
-    return () => { if (!done) cleanup(); };
+    // 取消函式附帶 refresh：句尾改了（例如校對播放中縮短）時立刻依新句尾重新檢查與排程
+    return Object.assign(() => { if (!done) cleanup(); }, { refresh: () => { if (!done) check(); } });
 }
+
+export type SegmentEndWatch = ReturnType<typeof watchSegmentEnd>;
 
 const pendingSeek = new WeakMap<object, () => void>();
 

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useId } from 'react';
-import { watchSegmentEnd, seekSegmentStart } from '../utils/segmentEnd';
+import { watchSegmentEnd, seekSegmentStart, SegmentEndWatch } from '../utils/segmentEnd';
 import { Play, Pause, Check, AlertCircle, Trash2, RotateCcw, ChevronDown } from 'lucide-react';
 import SegmentedControl from './ui/SegmentedControl';
 import Button from './ui/Button';
@@ -96,9 +96,11 @@ export default function MaterialReviewPanel({
     }, [audioFile, audioBlob]);
 
     // 準時停在句尾（docs/plans/import-timestamp-accuracy.md PR-A）：校對時聽到的句尾要和練習時一致
-    const segWatchRef = useRef<(() => void) | null>(null);
+    const segWatchRef = useRef<SegmentEndWatch | null>(null);
     const sentencesRef = useRef(sentences);
     sentencesRef.current = sentences;
+    // 播放中修改了句尾 → 依新句尾重新排程（縮短時才不會多播，Codex 第 2 輪）
+    useEffect(() => { segWatchRef.current?.refresh(); }, [sentences]);
     const stopSegWatch = () => { segWatchRef.current?.(); segWatchRef.current = null; };
     useEffect(() => stopSegWatch, []);
 
