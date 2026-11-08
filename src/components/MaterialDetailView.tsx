@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { watchSegmentEnd, seekSegmentStart } from '../utils/segmentEnd';
 import { Material, CoverStyle } from '../types';
-import { ChevronLeft, Play, Pause, Mic, Loader2, Sparkles, Trash2, RotateCcw, BookOpen, X, Search, RefreshCw } from 'lucide-react';
+import { ChevronLeft, Play, Pause, Mic, Loader2, Sparkles, Trash2, RotateCcw, BookOpen, X, Search, RefreshCw, Clock3 } from 'lucide-react';
+import SentenceTimeEditor from './SentenceTimeEditor';
 import { auth, db, appId } from '../firebase';
 import { doc, onSnapshot, collection, setDoc, updateDoc, getDoc } from 'firebase/firestore';
 import ShadowingPracticeView from './ShadowingPracticeView';
@@ -109,6 +110,9 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
 
     // 準時停在句尾（docs/plans/import-timestamp-accuracy.md PR-A）；Hooks 必須在所有提早 return 之前（Codex）
     const segWatchRef = useRef<(() => void) | null>(null);
+    // 修正時間（docs/plans/import-timestamp-accuracy.md PR-G）：正在編輯的句子、編輯器裡正在播放的範圍
+    const [editingTimeId, setEditingTimeId] = useState<string | null>(null);
+    const [playingKey, setPlayingKey] = useState<string | null>(null);
     const stopSegWatch = () => { segWatchRef.current?.(); segWatchRef.current = null; };
     useEffect(() => stopSegWatch, []);
 
@@ -164,6 +168,7 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
             seekSegmentStart(el, sentence.startTime);
             el.play()?.catch?.(() => setPlayingIndex(null));
             setPlayingIndex(index);
+            setPlayingKey(null);
             if (sentence.endTime > 0) {
                 segWatchRef.current = watchSegmentEnd(el, sentence.endTime, () => {
                     segWatchRef.current = null;
@@ -185,10 +190,26 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
 
     const handlePause = () => {
         stopSegWatch();
+        setPlayingKey(null);
         if (audioRef.current) {
             audioRef.current.pause();
             setPlayingIndex(null);
         }
+    };
+
+    /** 修正時間時試聽（用編輯中的時間，還沒存檔） */
+    const handlePlayRange = (key: string, start: number, end: number) => {
+        const el = audioRef.current;
+        if (!el) return;
+        stopSegWatch();
+        seekSegmentStart(el, start);
+        el.play()?.catch?.(() => setPlayingKey(null));
+        setPlayingIndex(null);
+        setPlayingKey(key);
+        segWatchRef.current = watchSegmentEnd(el, end, () => {
+            segWatchRef.current = null;
+            setPlayingKey(null);
+        });
     };
 
     // 把句子標記為「已萃取」
@@ -506,6 +527,16 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
                                         {s.lowConfidence && (
                                             <span className="rounded-full bg-warn/10 px-2 py-0.5 text-[11px] text-warn">低信心度</span>
                                         )}
+                                        {/* 修正時間（PR-G）：放在卡片右上，不擠動下方按鈕列 */}
+                                        <button
+                                            type="button"
+                                            aria-expanded={editingTimeId === s.id}
+                                            onClick={() => { handlePause(); setEditingTimeId(editingTimeId === s.id ? null : s.id); }}
+                                            className={`-my-1 ml-auto flex min-h-8 items-center gap-1 rounded-full px-2.5 text-xs transition-colors hover:bg-line focus-visible:outline-2 focus-visible:outline-accent ${editingTimeId === s.id ? 'bg-accent-soft text-ink' : 'text-muted'}`}
+                                        >
+                                            <Clock3 size={14} aria-hidden="true" />
+                                            調整時間
+                                        </button>
                                     </div>
                                     <p lang="en" className="font-reading text-[20px] leading-[1.4] text-ink break-words">
                                         {s.text}
@@ -577,6 +608,16 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
                                             </Button>
                                         </div>
                                     </div>
+                                    {editingTimeId === s.id && (
+                                        <SentenceTimeEditor
+                                            materialId={material.id}
+                                            sentence={s}
+                                            playingKey={playingKey}
+                                            onPlayRange={handlePlayRange}
+                                            onStop={handlePause}
+                                            onClose={() => setEditingTimeId(null)}
+                                        />
+                                    )}
                                 </article>
                             );
                         })}

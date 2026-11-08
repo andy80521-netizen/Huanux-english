@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect, useId } from 'react';
 import { watchSegmentEnd, seekSegmentStart, SegmentEndWatch } from '../utils/segmentEnd';
-import { Play, Pause, Check, AlertCircle, Trash2, RotateCcw, ChevronDown } from 'lucide-react';
+import { Play, Pause, Check, AlertCircle, Trash2, RotateCcw, ChevronDown, Merge, Scissors, Ear } from 'lucide-react';
+import TimeStepperField from './ui/TimeStepperField';
+import { adjustTime, tailRange, mergeWithPrevious, splitSentenceAt } from '../utils/timeEdit';
 import SegmentedControl from './ui/SegmentedControl';
 import Button from './ui/Button';
 
@@ -104,25 +106,47 @@ export default function MaterialReviewPanel({
     const stopSegWatch = () => { segWatchRef.current?.(); segWatchRef.current = null; };
     useEffect(() => stopSegWatch, []);
 
+    /** 播放一段範圍（聽句尾用，key＝`${id}:tail`） */
+    const playRange = (key: string, start: number, end: number) => {
+        const el = audioRef.current;
+        if (!el) return;
+        stopSegWatch();
+        seekSegmentStart(el, start);
+        el.play()?.catch?.(() => setPlayingId(null));
+        setPlayingId(key);
+        segWatchRef.current = watchSegmentEnd(el, end, () => {
+            segWatchRef.current = null;
+            setPlayingId(null);
+        });
+    };
+
     const handlePlaySegment = (id: string) => {
         const sentence = sentences.find(s => s.internalId === id);
         const el = audioRef.current;
-        if (sentence && el) {
-            stopSegWatch();
-            seekSegmentStart(el, sentence.startTime);
-            el.play()?.catch?.(() => setPlayingId(null));
-            setPlayingId(id);
-            if (sentence.endTime > 0) {
-                // 讀最新的句尾：播放中修改結束時間，這次試聽就照新的句尾停（Codex）
-                const endNow = () => sentencesRef.current.find(x => x.internalId === id)?.endTime ?? sentence.endTime;
-                segWatchRef.current = watchSegmentEnd(el, endNow, () => {
-                    segWatchRef.current = null;
-                    setPlayingId(null);
-                });
-            }
+        if (!sentence || !el) return;
+        stopSegWatch();
+        seekSegmentStart(el, sentence.startTime);
+        el.play()?.catch?.(() => setPlayingId(null));
+        setPlayingId(id);
+        if (sentence.endTime > 0) {
+            // 讀最新的句尾：播放中修改結束時間，這次試聽就照新的句尾停（Codex）
+            const endNow = () => sentencesRef.current.find(x => x.internalId === id)?.endTime ?? sentence.endTime;
+            segWatchRef.current = watchSegmentEnd(el, endNow, () => {
+                segWatchRef.current = null;
+                setPlayingId(null);
+            });
         }
     };
 
+    /** 聽句尾：句尾前 1.5 秒播到句尾後 0.5 秒，確認有沒有切掉最後一個字、或吃到下一句 */
+    const handlePlayTail = (id: string) => {
+        const sentence = sentences.find(s => s.internalId === id);
+        if (!sentence || !(sentence.endTime > 0)) return;
+        const r = tailRange(sentence.endTime);
+        playRange(`${id}:tail`, r.start, r.end);
+    };
+
+    // 保險：主要由 watchSegmentEnd 準時停止（聽句尾只靠監看，句子 id 對不上這裡不處理）
     const handleTimeUpdate = () => {
         if (playingId && audioRef.current) {
             const sentence = sentences.find(s => s.internalId === playingId);
@@ -164,35 +188,57 @@ export default function MaterialReviewPanel({
         setSentences(prev => prev.map(s => s.internalId === id ? { ...s, deleted: false } : s));
     };
 
+    const clearWarning = (id: string) => setTimeAdjustWarnings(prev => {
+        if (!prev[id]) return prev;
+        const updated = { ...prev };
+        delete updated[id];
+        return updated;
+    });
+
     const handleAdjustTime = (id: string, field: 'startTime' | 'endTime', delta: number) => {
         const sentence = sentences.find(s => s.internalId === id);
         if (!sentence) return;
-
-        const currentVal = sentence[field];
-        const newVal = Math.round(Math.max(0, currentVal + delta) * 100) / 100;
-
-        const newStart = field === 'startTime' ? newVal : sentence.startTime;
-        const newEnd = field === 'endTime' ? newVal : sentence.endTime;
-
-        const oldGap = sentence.startTime - sentence.endTime;
-        const newGap = newStart - newEnd;
-        // 調整後仍不合理，且沒有比原本改善時才擋下（原本合理、調整後變不合理，也屬於這種情況）
-        if (newStart >= newEnd && newGap >= oldGap) {
-            setTimeAdjustWarnings(prev => ({
-                ...prev,
-                [id]: '此調整會使開始時間大於或等於結束時間，已取消'
-            }));
+        const r = adjustTime(sentence, field, delta);
+        if ('warning' in r) {
+            const warning = r.warning;
+            setTimeAdjustWarnings(prev => ({ ...prev, [id]: warning }));
             return;
         }
+        clearWarning(id);
+        setSentences(prev => prev.map(s => s.internalId === id ? { ...s, startTime: r.startTime, endTime: r.endTime } : s));
+    };
 
-        setTimeAdjustWarnings(prev => {
-            if (!prev[id]) return prev;
-            const updated = { ...prev };
-            delete updated[id];
-            return updated;
+    /** 合併到上一句（上一句＝前一個沒刪除的句子） */
+    const handleMergeWithPrevious = (id: string) => {
+        if (playingId) handlePause();
+        setSentences(prev => {
+            const idx = prev.findIndex(s => s.internalId === id);
+            let p = idx - 1;
+            while (p >= 0 && prev[p].deleted) p--;
+            if (idx < 0 || p < 0) return prev;
+            const merged = mergeWithPrevious(prev[p], prev[idx]);
+            return prev.filter((_, i) => i !== idx).map(s => (s.internalId === prev[p].internalId ? merged : s));
         });
+        clearWarning(id);
+    };
 
-        setSentences(prev => prev.map(s => s.internalId === id ? { ...s, [field]: newVal } : s));
+    const splitCounter = useRef(0);
+    /** 拆成兩句：以原文欄位的游標位置拆開 */
+    const handleSplit = (id: string, textareaId: string) => {
+        const sentence = sentences.find(s => s.internalId === id);
+        const el = document.getElementById(textareaId) as HTMLTextAreaElement | null;
+        if (!sentence || !el) return;
+        const parts = splitSentenceAt(sentence, el.selectionStart ?? 0);
+        if (!parts) {
+            setTimeAdjustWarnings(prev => ({ ...prev, [id]: '請先在原文中點一下要拆開的位置（不能在開頭或結尾）' }));
+            return;
+        }
+        if (playingId) handlePause();
+        clearWarning(id);
+        const newId = `rev_split_${++splitCounter.current}`;
+        setSentences(prev => prev.flatMap(s => s.internalId === id
+            ? [{ ...parts[0], internalId: id }, { ...parts[1], internalId: newId, deleted: false }]
+            : [s]));
     };
 
     const activeSentences = sentences.filter(s => !s.deleted);
@@ -232,7 +278,7 @@ export default function MaterialReviewPanel({
         <>
             {notice && (
                 <p role="alert" className="flex items-start gap-1.5 text-[13px] font-medium leading-relaxed text-danger">
-                    <AlertCircle size={15} className="mt-0.5 shrink-0" aria-hidden="true" />{notice}
+                    <AlertCircle size={15} className="mt-[0.125rem] shrink-0" aria-hidden="true" />{notice}
                 </p>
             )}
             {activeSentences.length === 0 && (
@@ -250,7 +296,7 @@ export default function MaterialReviewPanel({
     const discardConfirm = showDiscardConfirm && (
         <div className="flex flex-col gap-3 rounded-2xl bg-warn/10 p-4">
             <div className="flex items-start gap-3">
-                <AlertCircle className="mt-0.5 shrink-0 text-warn" size={18} aria-hidden="true" />
+                <AlertCircle className="mt-[0.125rem] shrink-0 text-warn" size={18} aria-hidden="true" />
                 <div className="flex flex-col gap-1">
                     <p className="text-sm font-bold text-warn">
                         將永久捨棄 {deletedSentences.length} 句，確定要存檔嗎？
@@ -324,39 +370,17 @@ export default function MaterialReviewPanel({
                     const fieldId = `${uid}-${s.internalId}`;
 
                     const timeField = (field: 'startTime' | 'endTime', label: string) => (
-                        <div className="flex min-w-0 flex-col gap-1.5">
-                            <label htmlFor={`${fieldId}-${field}`} className="text-xs text-muted">{label}</label>
-                            <div className={`flex h-11 items-center overflow-hidden rounded-full border bg-surface-2 ${isTimeInvalid ? 'border-danger' : 'border-muted/35'} focus-within:border-accent`}>
-                                <button
-                                    type="button"
-                                    aria-label={`${label} 減 0.5 秒`}
-                                    onClick={() => handleAdjustTime(s.internalId, field, -0.5)}
-                                    disabled={isSaving}
-                                    className="h-full w-11 shrink-0 text-xs text-ink transition-colors hover:bg-line disabled:opacity-50 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
-                                >
-                                    −0.5
-                                </button>
-                                <input
-                                    id={`${fieldId}-${field}`}
-                                    type="number"
-                                    step="0.01"
-                                    inputMode="decimal"
-                                    value={s[field]}
-                                    onChange={(e) => updateSentence(s.internalId, field, parseFloat(e.target.value) || 0)}
-                                    className="h-full min-w-0 flex-1 bg-transparent text-center font-reading text-base text-ink tabular-nums outline-hidden [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                                />
-                                <button
-                                    type="button"
-                                    aria-label={`${label} 加 0.5 秒`}
-                                    onClick={() => handleAdjustTime(s.internalId, field, 0.5)}
-                                    disabled={isSaving}
-                                    className="h-full w-11 shrink-0 text-xs text-ink transition-colors hover:bg-line disabled:opacity-50 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
-                                >
-                                    +0.5
-                                </button>
-                            </div>
-                        </div>
+                        <TimeStepperField
+                            id={`${fieldId}-${field}`}
+                            label={label}
+                            value={s[field]}
+                            invalid={isTimeInvalid}
+                            disabled={isSaving}
+                            onChange={(v) => updateSentence(s.internalId, field, v)}
+                            onStep={(d) => handleAdjustTime(s.internalId, field, d)}
+                        />
                     );
+                    const isTailPlaying = playingId === `${s.internalId}:tail`;
 
                     return (
                         <article
@@ -434,17 +458,55 @@ export default function MaterialReviewPanel({
                                         {timeField('startTime', '開始 (s)')}
                                         {timeField('endTime', '結束 (s)')}
                                     </div>
-                                    <Button
-                                        variant="secondary"
-                                        size="sm"
-                                        fullWidth
-                                        aria-pressed={isPlaying}
-                                        onClick={() => isPlaying ? handlePause() : handlePlaySegment(s.internalId)}
-                                        className={isPlaying ? 'border-accent bg-accent-soft' : ''}
-                                        icon={isPlaying ? <Pause size={14} aria-hidden="true" /> : <Play size={14} className="fill-current" aria-hidden="true" />}
-                                    >
-                                        {isPlaying ? '暫停播放' : '播放片段'}
-                                    </Button>
+                                    <div className="grid grid-cols-2 gap-2.5">
+                                        <Button
+                                            variant="secondary"
+                                            size="sm"
+                                            fullWidth
+                                            aria-pressed={isPlaying}
+                                            onClick={() => isPlaying ? handlePause() : handlePlaySegment(s.internalId)}
+                                            className={isPlaying ? 'border-accent bg-accent-soft' : ''}
+                                            icon={isPlaying ? <Pause size={14} aria-hidden="true" /> : <Play size={14} className="fill-current" aria-hidden="true" />}
+                                        >
+                                            {isPlaying ? '暫停播放' : '播放片段'}
+                                        </Button>
+                                        <Button
+                                            variant="secondary"
+                                            size="sm"
+                                            fullWidth
+                                            aria-pressed={isTailPlaying}
+                                            onClick={() => isTailPlaying ? handlePause() : handlePlayTail(s.internalId)}
+                                            className={isTailPlaying ? 'border-accent bg-accent-soft' : ''}
+                                            title="從句尾前 1.5 秒播到句尾後 0.5 秒"
+                                            icon={isTailPlaying ? <Pause size={14} aria-hidden="true" /> : <Ear size={14} aria-hidden="true" />}
+                                        >
+                                            {isTailPlaying ? '暫停播放' : '聽句尾'}
+                                        </Button>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2.5">
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            fullWidth
+                                            onClick={() => handleMergeWithPrevious(s.internalId)}
+                                            disabled={isSaving || index === 0}
+                                            title={index === 0 ? '第一句沒有上一句' : '把這句接到上一句後面'}
+                                            icon={<Merge size={14} aria-hidden="true" />}
+                                        >
+                                            合併到上一句
+                                        </Button>
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            fullWidth
+                                            onClick={() => handleSplit(s.internalId, `${fieldId}-text`)}
+                                            disabled={isSaving}
+                                            title="先在原文中點一下要拆開的位置"
+                                            icon={<Scissors size={14} aria-hidden="true" />}
+                                        >
+                                            拆成兩句
+                                        </Button>
+                                    </div>
                                 </div>
                             </div>
                         </article>
