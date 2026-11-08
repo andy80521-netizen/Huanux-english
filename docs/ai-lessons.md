@@ -36,6 +36,9 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 - 跟讀是「邊播原音邊錄音」：手機沒戴耳機時原音進麥克風、回音消除會連人聲一起壓 → 辨識差。語言模型複習錄音時不播聲音，所以辨識好（兩邊用同一套轉錄）
 - 語言模型複習舊版從按下錄音就算 1.5 秒靜音：回想句子或中途停頓會被切斷 → 開口前 5 秒、開口後 2.5 秒（PR #22）；評分時長仍用「最後出聲 + 1.5 秒」，避免同樣的朗讀分數變低
 - Whisper 帶 prompt（參考原句）在長句（約 20 秒）會吐出與錄音無關的幻覺句（2026-11-07：「In the following video, we will discuss…」→ 內容 2 分）。帶原句的結果一定要跟不帶原句的結果雙向比對（多補字、少很多字、與原句重疊更少），只有帶原句成功時要檢查與原句的重疊（PR #33）
+- 播放一句只靠 `timeupdate` 判斷句尾會多播：Chromium 實測 36～187ms（所有瀏覽器約每 250ms 觸發一次）。一律用 `src/utils/segmentEnd.ts` 的 `watchSegmentEnd`（PR #35）；新增的 Hooks 要放在元件所有提早 `return` 之前（教材詳情頁有 `if (!material) return`）
+- 委員會針對性質詢時，Codex 收到一般 `@codex` 問題會回「需要建立環境」；要把問題寫進規劃文件、推送後用 `@codex review 只需檢查 <舊>..<新>` 才會逐題回答（PR #35）
+- 規格附錄 B 列了已放棄的做法但沒記原因（`word` 顆粒度、`findPreciseBoundary`、緩衝）；2026-11-08 擁有者同意 `word` 顆粒度只做離線對照
 - 跟讀改成先錄音、錄音真正開始後 300ms 才播原音；原音在 await 之後才播放，iPhone 要在點擊當下先靜音 play/pause 解鎖（PR #22）
 - 語音轉文字主力 2026-10-30 起是 Groq `whisper-large-v3`（`netlify/shared/transcribe.ts`）→ OpenAI `whisper-1` → Gemini（只用 Flash，不用 flash-lite）。Netlify 函式整條鏈 9 秒內完成；空字串是合法結果（沒有人聲），與服務失敗分開（PR #23）
 - Gemini SDK 的 `response.text` 在沒有文字時是 undefined：要看 `finishReason` 分辨「正常的空白」與「被擋下」（PR #23）
@@ -145,3 +148,8 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 | 參考原句幻覺修正（PR #33，小級，審查） | Codex | 1 | 0 | 帶原句判定沒有人聲時，新的 short 規則會被不帶原句的幻覺蓋過 |
 | 參考原句幻覺修正（PR #33，小級，審查） | Gemini Flash Lite（3.8 Flash 503） | 0 | 0 | 兩輪皆無意見 |
 | 維持複習文案（PR #34，小級，審查） | Codex／Gemini Flash | 0 | 0 | 皆無意見；防作弊檢查一度回報測試數減少，原因是審查期間 main 合入 PR #33，合入 main 後即正常 |
+| 時間軸精確度（PR #35，規劃） | Codex | 7 | 0 | Groq 支援 word 的前提有誤、B 的記憶體以解碼峰值估算、校對與聽聽看也要納入 A、A 要處理暫停／seek／背景、C 不可當自動切點（🔴）、E 缺字級時間無法定句界（🔴）、先建基準 |
+| 時間軸精確度（PR #35，規劃） | Gemini／Nemotron／DeepSeek／Grok（Poolside 已下架） | 8 | 5 | 校對播放晚停、seek 未完成就播、縮寫表太窄、空結果卡住、多播量＝0.25×速度（Grok）；駁回：Whisper prompt 寫指令（Gemini）、ffmpeg.wasm／torch、單筆重新轉錄覆寫資料（Nemotron）、間隔一半的起點緩衝（Gemini）、碎片起點（Grok 第一輪，第二輪自行推翻） |
+| 時間軸精確度（PR #35，質詢） | Codex／Grok | 2 | 0 | 播放寬限公式會被「下一句已提前 0.1 秒的起點」夾住，反而比句尾早停 |
+| 時間軸 PR-A（PR #35，審查） | Codex | 3 | 0 | Hooks 在提早 return 之後（🔴）、校對播放中改句尾未更新、refresh 前未清排程 |
+| 時間軸 PR-A（PR #35，審查） | Gemini 3.8 Flash | 1 | 4 | 跟讀起點改用 seekSegmentStart；誤判：暫停時未清監看（已有）、元素移除後繼續播放（規格會自動暫停）、`#t=` 讓 currentTime 從 0 起算 |
