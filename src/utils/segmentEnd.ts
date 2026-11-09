@@ -126,21 +126,20 @@ export type SegmentEndWatch = ReturnType<typeof watchSegmentEnd>;
 const pendingSeek = new WeakMap<object, () => void>();
 
 /**
- * 設定起點。音檔還沒載入時間資訊（readyState < 1）時，iPhone 可能忽略 currentTime 的設定，
- * 改成等 loadedmetadata 再設定（只套用最後一次要求）。play() 仍由呼叫端在點擊當下呼叫。
+ * 設定起點：一律立刻設定 currentTime（音檔還沒載入時瀏覽器會記成「預設起點」，載入後從這裡播，iPhone 靠這個）。
+ * 還沒載入時間資訊（readyState < 1）→ 再等 loadedmetadata 確認一次，不在起點就再設一次（只套用最後一次要求）。
+ * 擁有者 2026-11-09：PR #35 改成「沒載入就只等 loadedmetadata 才設定」後，iPhone 每一句跟讀都從頭播（docs/plans/ios-seek-fix.md）
  */
 export function seekSegmentStart(media: SegmentMedia, startTime: number): void {
     const start = Number.isFinite(startTime) && startTime > 0 ? startTime : 0;
     pendingSeek.get(media)?.();
     pendingSeek.delete(media);
-    if (media.readyState === undefined || media.readyState >= 1) {
-        media.currentTime = start;
-        return;
-    }
+    media.currentTime = start;
+    if (media.readyState === undefined || media.readyState >= 1) return;
     const onMeta = () => {
         media.removeEventListener('loadedmetadata', onMeta);
         pendingSeek.delete(media);
-        media.currentTime = start;
+        if (Math.abs(media.currentTime - start) > 0.05) media.currentTime = start;
     };
     media.addEventListener('loadedmetadata', onMeta);
     pendingSeek.set(media, () => media.removeEventListener('loadedmetadata', onMeta));
