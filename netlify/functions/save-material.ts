@@ -2,7 +2,7 @@
 // 規劃：docs/plans/background-material-save.md（擁有者 2026-11-09 核准）
 // 流程與所有權規則見 netlify/shared/saveMaterial.ts
 import { verifyRealUserToken } from '../shared/auth';
-import { runTransaction, patchFields, APP_ID } from '../shared/firestoreRest';
+import { runOptimistic, patchFields, APP_ID } from '../shared/firestoreRest';
 import { translateBatch } from '../shared/translate';
 import { runSaveMaterial } from '../shared/saveMaterial';
 import { randomUUID } from 'node:crypto';
@@ -67,7 +67,8 @@ export default async (req: Request) => {
     const origin = siteOrigin(req);
     const started = Date.now();
     const outcome = await runSaveMaterial({
-        tx: (fn) => runTransaction(idToken, fn),
+        // 不可用 REST beginTransaction（使用者 Token 會 403），改用 updateTime 前置條件＋批次 commit
+        tx: (fn) => runOptimistic(idToken, fn),
         translate: translateBatch,
         dispatch: async (fn, body) => {
             if (!origin) return false;

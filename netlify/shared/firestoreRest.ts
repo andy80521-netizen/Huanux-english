@@ -66,6 +66,7 @@ export class FirestoreRestError extends Error {
 }
 
 /**
+ * ⚠️ 正式環境以使用者 ID Token 呼叫 beginTransaction 會 403（2026-11-09），後端請改用下方的 runOptimistic。
  * 執行一筆讀寫交易：開交易 → fn（交易內讀取、收集寫入）→ commit。
  * 衝突（ABORTED／前置條件失敗）時整筆重跑，最多 maxAttempts 次。fn 可能被執行多次，不可有其他副作用。
  */
@@ -136,4 +137,107 @@ export async function patchFields(idToken: string, path: string, data: Record<st
         body: JSON.stringify({ fields: toFields(data) }),
     });
     return res.ok;
+}
+
+/**
+ * 不用交易的樂觀並行：讀取時記下每份文件的 updateTime，寫入時以它為前置條件（沒讀過的更新用 exists=true、
+ * 讀到不存在的建立用 exists=false），所有寫入用一次 commit（批次寫入，全部成功或全部失敗）。
+ * 前置條件失敗（別人先改了）→ 重讀並整筆重跑。
+ *
+ * 背景：正式環境以使用者 ID Token 呼叫 REST beginTransaction 會回 403 PERMISSION_DENIED（2026-11-09 診斷），
+ * 所以後端一律用這個；做法與 generate-practice-image 的「讀取 → 帶 updateTime 寫回」相同。
+ */
+export async function runOptimistic<T>(
+    idToken: string,
+    fn: (tx: TxApi) => Promise<T>,
+    opts: { fetchImpl?: typeof fetch; maxAttempts?: number } = {},
+): Promise<T> {
+    const doFetch = opts.fetchImpl ?? fetch;
+    const maxAttempts = opts.maxAttempts ?? 5;
+    const headers = { 'Authorization': `Bearer ${idToken}`, 'Content-Type': 'application/json' };
+    const name = (path: string) => `${DOCS_ROOT}/${path}`;
+    let lastErr: unknown = null;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        const seen = new Map<string, string | null>();   // path → updateTime（null＝讀到不存在）
+        const writes: any[] = [];
+        const precondition = (path: string, fallback: Record<string, unknown>) => {
+            if (!seen.has(path)) return fallback;
+            const t = seen.get(path);
+            return t ? { updateTime: t } : { exists: false };
+        };
+
+        const api: TxApi = {
+            get: async (path) => {
+                const res = await doFetch(`${FS_BASE}/${path}`, { headers });
+                if (res.status === 404) { seen.set(path, null); return null; }
+                if (!res.ok) { const b = await res.text(); throw new FirestoreRestError(`讀取失敗 (HTTP ${res.status}) ${b.slice(0, 160)}`, res.status, b); }
+                const doc = await res.json() as { fields?: any; updateTime?: string };
+                seen.set(path, doc.updateTime || null);
+                return fieldsToObject(doc.fields);
+            },
+            update: (path, data, deleteFields = []) => {
+                writes.push({
+                    update: { name: name(path), fields: toFields(data) },
+                    updateMask: { fieldPaths: [...Object.keys(data).filter(k => data[k] !== undefined), ...deleteFields] },
+                    currentDocument: precondition(path, { exists: true }),
+                });
+            },
+            set: (path, data) => {
+                const pre = seen.has(path) ? { currentDocument: precondition(path, {}) } : {};
+                writes.push({
+                    update: { name: name(path), fields: toFields(data) },
+                    updateMask: { fieldPaths: Object.keys(data).filter(k => data[k] !== undefined) },
+                    ...pre,
+                });
+            },
+            create: (path, data) => {
+                writes.push({ update: { name: name(path), fields: toFields(data) }, currentDocument: { exists: false } });
+            },
+            delete: (path) => {
+                const pre = seen.get(path) ? { currentDocument: { updateTime: seen.get(path) } } : {};
+                writes.push({ delete: name(path), ...pre });
+            },
+        };
+
+        const result = await fn(api);
+        if (writes.length === 0) return result;
+        const commit = await doFetch(`${FS_BASE}:commit`, { method: 'POST', headers, body: JSON.stringify({ writes }) });
+        if (commit.ok) return result;
+        const body = await commit.text();
+        lastErr = new FirestoreRestError(`寫入失敗 (HTTP ${commit.status}) ${body.slice(0, 160)}`, commit.status, body);
+        // 批次寫入若被拒（403）且只有一筆，改用 PATCH／DELETE（一筆本來就是原子的）。
+        // 多筆（例如建立教材＋任務改 saved）不可拆開，否則可能只成功一半（Codex）→ 直接丟錯
+        if (commit.status === 403 && writes.length === 1) {
+            const r = await writeOneByOne(doFetch, headers, writes);
+            if (r === 'ok') return result;
+            if (r === 'conflict') continue;
+            throw r;
+        }
+        if (!isRetryable(commit.status, body)) throw lastErr;
+    }
+    throw lastErr ?? new Error('寫入衝突重試次數已用完');
+}
+
+async function writeOneByOne(doFetch: typeof fetch, headers: Record<string, string>, writes: any[]): Promise<'ok' | 'conflict' | Error> {
+    for (const w of writes) {
+        const pre = w.currentDocument
+            ? Object.entries(w.currentDocument).map(([k, v]) => `currentDocument.${k}=${encodeURIComponent(String(v))}`)
+            : [];
+        let res: Response;
+        if (w.delete) {
+            res = await doFetch(`https://firestore.googleapis.com/v1/${w.delete}${pre.length ? `?${pre.join('&')}` : ''}`, { method: 'DELETE', headers });
+        } else {
+            const mask = (w.updateMask?.fieldPaths || []).map((f: string) => `updateMask.fieldPaths=${encodeURIComponent(f)}`);
+            const q = [...mask, ...pre].join('&');
+            res = await doFetch(`https://firestore.googleapis.com/v1/${w.update.name}${q ? `?${q}` : ''}`, {
+                method: 'PATCH', headers, body: JSON.stringify({ fields: w.update.fields }),
+            });
+        }
+        if (res.ok) continue;
+        const b = await res.text();
+        if (isRetryable(res.status, b)) return 'conflict';
+        return new FirestoreRestError(`寫入失敗 (HTTP ${res.status}) ${b.slice(0, 160)}`, res.status, b);
+    }
+    return 'ok';
 }
