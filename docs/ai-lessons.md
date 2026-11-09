@@ -164,3 +164,4 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 | 背景存檔（PR #37，質詢） | Codex／Grok／Gemini | 3 | 0 | 同 attempt 需要租約、心跳不可用平行計時器、`process.env.URL` 在預覽指向正式站 |
 | 背景存檔（PR #37，審查） | Codex | 2 | 0 | 切換回到校對沿用上一份句子（🔴）、交接中仍可編輯 |
 | 背景存檔（PR #37，審查） | Gemini（3.8 Flash 額度用完改 Flash Lite） | 0 | 0 | 兩輪皆無意見 |
+| 存檔按鈕顯示進度（PR #38，小級，審查） | Codex／Gemini Flash | 0 | 0 | 皆無意見 |
