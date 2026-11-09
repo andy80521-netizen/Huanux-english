@@ -29,6 +29,8 @@ export interface ListenPlayerOptions {
   onChange?: (mode: ListenMode | null) => void;
   /** 原音播放速度（這次錄音當下的速度）；不傳＝1 倍。使用者錄音一律 1 倍 */
   rate?: () => number;
+  /** 原音沒辦法跳到這一句的開頭（iPhone 長教材，docs/plans/ios-seek-fix.md）：已停止播放，附診斷文字 */
+  onStartFail?: (diag: string) => void;
 }
 
 export interface ListenPlayer {
@@ -50,7 +52,7 @@ const safePlay = (m: MediaLike) => {
 };
 
 export function createListenPlayer(opts: ListenPlayerOptions): ListenPlayer {
-  const { recording, original, setOriginalVolume, segment, offsetMs, onChange, rate } = opts;
+  const { recording, original, setOriginalVolume, segment, offsetMs, onChange, rate, onStartFail } = opts;
   const setOriginalRate = (r: number) => {
     original.playbackRate = r;
     const a = original as { preservesPitch?: boolean; webkitPreservesPitch?: boolean };
@@ -125,7 +127,12 @@ export function createListenPlayer(opts: ListenPlayerOptions): ListenPlayer {
     later(((end - start) / (r > 0 ? r : 1)) * 1000 + 500, check);
     safePlay(original);
     // 確認真的從句子開頭播（iPhone 長教材會跳不過去，docs/plans/ios-seek-fix.md）；跳不過去就停，不從音檔開頭播
-    cleanups.push(guardSegmentStart(original, start, () => finish()));
+    // 失敗時整個停止（重疊播放不留下只有錄音在播）並回報，讓畫面顯示診斷（Codex）
+    cleanups.push(guardSegmentStart(original, start, (diag) => {
+      if (gen !== generation) return;
+      stop();
+      onStartFail?.(diag);
+    }));
     // 準時停在句尾（docs/plans/import-timestamp-accuracy.md PR-A）；頁面隱藏時整個停止（擁有者決定）
     cleanups.push(watchSegmentEnd(original, end, (reason) => {
       if (gen !== generation) return;

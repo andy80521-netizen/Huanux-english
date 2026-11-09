@@ -182,27 +182,56 @@ export function describeSeekFailure(media: GuardMedia, start: number): string {
     return `目標 ${start.toFixed(1)} 秒，目前 ${media.currentTime.toFixed(1)} 秒，長度 ${dur} 秒，可跳轉 ${fmtRanges(media.seekable)}，已下載 ${fmtRanges(media.buffered)}，狀態 ${media.readyState ?? '?'}`;
 }
 
-/** 用網址指定起點重新載入（iPhone 原生支援，不靠事後跳轉）；沒有網址時回傳 false */
-function reloadWithFragment(media: GuardMedia, start: number): boolean {
-    const base = (media.currentSrc || media.src || '').split('#')[0];
-    if (!base) return false;
-    media.src = `${base}#t=${start.toFixed(2)}`;
-    try { media.load?.(); } catch { /* 忽略 */ }
-    try { const p = media.play?.(); if (p && typeof (p as Promise<void>).catch === 'function') (p as Promise<void>).catch(() => {}); } catch { /* 忽略 */ }
-    return true;
+/** 網址加上 #t=起點（iPhone 原生支援，載入時就從起點開始，不靠事後跳轉） */
+export function withStartFragment(url: string, start: number): string {
+    const base = (url || '').split('#')[0];
+    return start > 0 ? `${base}#t=${start.toFixed(2)}` : base;
+}
+
+export interface GuardOptions {
+    /**
+     * 補跳無效時是否改用 #t= 重新載入並播放（預設 true）。
+     * 跟讀錄音中不適合重新載入（原音會延後、和錄音時序脫鉤，Gemini）→ 傳 false，直接回報失敗。
+     */
+    allowReload?: boolean;
 }
 
 /**
  * 播放一段時確認真的從起點開始。在 seekSegmentStart 與 play() 之後呼叫；回傳取消函式（段落結束、停止時呼叫）。
- * 失敗時會暫停並呼叫 onFail（附診斷文字）。
+ * 失敗時會暫停並呼叫 onFail（附診斷文字）；#t= 重新載入後播放被拒或載入失敗也算失敗（Codex）。
+ * 重新載入後 src 會留著 #t=：只在載入當下決定起點，之後設定 currentTime 照常有效，所以不還原（還原會重新下載整份音檔）。
  */
-export function guardSegmentStart(media: GuardMedia, startTime: number, onFail: (diag: string) => void): () => void {
+export function guardSegmentStart(media: GuardMedia, startTime: number, onFail: (diag: string) => void, opts: GuardOptions = {}): () => void {
     const start = Number.isFinite(startTime) && startTime > 0 ? startTime : 0;
+    const allowReload = opts.allowReload !== false;
     let done = false;
     let retries = 0;
     let usedFragment = false;
     const unlisten: Array<() => void> = [];
     const cleanup = () => { done = true; unlisten.forEach((u) => u()); unlisten.length = 0; };
+
+    const fail = () => {
+        if (done) return;
+        const diag = describeSeekFailure(media, start);
+        cleanup();
+        try { media.pause(); } catch { /* 忽略 */ }
+        console.warn('[播放] 沒辦法跳到起點:', diag);
+        onFail(diag);
+    };
+
+    const reload = (): boolean => {
+        const base = (media.currentSrc || media.src || '').split('#')[0];
+        if (!base) return false;
+        try {
+            media.src = withStartFragment(base, start);
+            media.load?.();
+            const p = media.play?.();
+            if (p && typeof (p as Promise<void>).then === 'function') (p as Promise<void>).then(undefined, () => fail());
+        } catch {
+            fail();
+        }
+        return true;
+    };
 
     const check = () => {
         if (done || start <= START_TOLERANCE_SEC) return;
@@ -213,17 +242,16 @@ export function guardSegmentStart(media: GuardMedia, startTime: number, onFail: 
             media.currentTime = start;
             return;
         }
-        if (!usedFragment) {
+        if (allowReload && !usedFragment) {
             usedFragment = true;
-            if (reloadWithFragment(media, start)) return;
+            if (reload()) return;
         }
-        const diag = describeSeekFailure(media, start);
-        cleanup();
-        try { media.pause(); } catch { /* 忽略 */ }
-        console.warn('[播放] 沒辦法跳到起點:', diag);
-        onFail(diag);
+        fail();
     };
 
+    const onError = () => { if (usedFragment) fail(); };
+    media.addEventListener('error', onError);
+    unlisten.push(() => media.removeEventListener('error', onError));
     for (const type of ['playing', 'timeupdate', 'seeked']) {
         media.addEventListener(type, check);
         unlisten.push(() => media.removeEventListener(type, check));

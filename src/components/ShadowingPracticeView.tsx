@@ -22,7 +22,7 @@ import { PLAYBACK_LEAD_MS, RECORDING_ORIGINAL_VOLUME, canSetElementVolume, overl
 import { createListenPlayer, ListenMode, ListenPlayer } from '../utils/shadowingPlayback';
 import { SHADOWING_SPEEDS, ShadowingSpeed, ShadowingAttempt, loadSpeed, saveSpeed, applyPlaybackSpeed, effectiveOriginalSec, scoreShadowingAttempt } from '../utils/shadowingSpeed';
 import SegmentedControl from './ui/SegmentedControl';
-import { watchSegmentEnd, seekSegmentStart, guardSegmentStart } from '../utils/segmentEnd';
+import { watchSegmentEnd, seekSegmentStart, guardSegmentStart, withStartFragment } from '../utils/segmentEnd';
 
 /** 系統是否開啟「減少動態效果」（分數跑動是 JS，全域 CSS 規則管不到，要自己判斷） */
 const prefersReducedMotion = () => {
@@ -151,6 +151,8 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
     const endWatchRef = useRef<(() => void) | null>(null);
     /** 確認原音真的從句子開頭播（iPhone 長教材會跳不過去，docs/plans/ios-seek-fix.md）；回傳值是取消函式 */
     const startGuardRef = useRef<(() => void) | null>(null);
+    /** 這台裝置跳不到句子開頭過：之後按跟讀時改用 #t= 在點擊當下就從句子開頭載入（錄音中不重新載入，Gemini） */
+    const useStartFragmentRef = useRef(false);
     
     const audioRef = useRef<HTMLAudioElement>(null);
     const recordedAudioRef = useRef<HTMLAudioElement>(null);
@@ -226,6 +228,7 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
             offsetMs: () => overlayOffsetMs(recordStartAtRef.current, originalPlayingAtRef.current),
             onChange: setListenMode,
             rate: () => lastRecordingRef.current?.speed ?? 1,
+            onStartFail: (diag) => setError(`原音沒辦法跳到這一句的開頭，請截圖回報：${diag}`),
         });
         playerRef.current = player;
         return () => {
@@ -342,6 +345,7 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
         if (audioRef.current) {
             const org = audioRef.current;
             // 先設定起點再解鎖：iPhone 不要從 0 秒開始緩衝（docs/plans/ios-seek-fix.md）
+            if (useStartFragmentRef.current) org.src = withStartFragment(material.audioUrl, sentence.startTime);
             seekSegmentStart(org, sentence.startTime);
             applyPlaybackSpeed(org, speed);
             org.muted = true;
@@ -453,8 +457,14 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                         if (isCancelled()) return;
                         abortRecording();
                         setPracticeState('idle');
-                        setError(`原音沒辦法跳到這一句的開頭，請截圖回報：${diag}`);
-                    });
+                        if (!useStartFragmentRef.current) {
+                            // 第一次：下次按跟讀改用另一種載入方式（點擊當下就從句子開頭載入）
+                            useStartFragmentRef.current = true;
+                            setError('原音沒有從這一句的開頭開始，已換另一種載入方式，請再按一次「開始跟讀」。');
+                        } else {
+                            setError(`原音沒辦法跳到這一句的開頭，請截圖回報：${diag}`);
+                        }
+                    }, { allowReload: false });
                     endWatchRef.current?.();
                     endWatchRef.current = sentence.endTime > 0
                         ? watchSegmentEnd(audioRef.current, sentence.endTime, () => {

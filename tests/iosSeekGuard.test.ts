@@ -166,3 +166,68 @@ describe('接線：所有直接跳位置的播放入口都確認起點', () => {
     expect(read('src/utils/timeEdit.ts')).toMatch(/TAIL_AFTER_SEC\s*=\s*0\.5/);
   });
 });
+
+describe('審查第 1 輪補充', () => {
+  it('#t= 重新載入時 play() 被拒 → 暫停並回報（Codex）', async () => {
+    const m = new FakeMedia(99, true);
+    m.currentTime = 300;
+    m.play();
+    m.play = () => { m.plays++; return Promise.reject(new Error('NotAllowedError')); };
+    const onFail = vi.fn();
+    guardSegmentStart(m, 300, onFail);   // 立即檢查 → 補跳 2 次無效 → #t= 重新載入 → play 被拒
+    await Promise.resolve(); await Promise.resolve();
+    expect(m.loads).toBe(1);
+    expect(onFail).toHaveBeenCalledTimes(1);
+    expect(m.count()).toBe(0);
+  });
+
+  it('#t= 重新載入後音檔載入失敗（error）→ 回報', () => {
+    const m = new FakeMedia(99, true);
+    m.currentTime = 300;
+    m.play();
+    const onFail = vi.fn();
+    guardSegmentStart(m, 300, onFail);
+    expect(m.loads).toBe(1);
+    m.emit('error');
+    expect(onFail).toHaveBeenCalledTimes(1);
+  });
+
+  it('allowReload: false → 不重新載入，直接回報（跟讀錄音中，Gemini）', () => {
+    const m = new FakeMedia(99, true);
+    m.currentTime = 300;
+    m.play();
+    const onFail = vi.fn();
+    (seg as any).guardSegmentStart(m, 300, onFail, { allowReload: false });
+    expect(m.loads).toBe(0);
+    expect(onFail).toHaveBeenCalledTimes(1);
+    expect(m.paused).toBe(true);
+  });
+
+  it('withStartFragment：去掉舊的 #t= 再加新的', () => {
+    expect((seg as any).withStartFragment('https://x/a.mp3?alt=media#t=300.00', 12.5)).toBe('https://x/a.mp3?alt=media#t=12.50');
+    expect((seg as any).withStartFragment('https://x/a.mp3#t=3', 0)).toBe('https://x/a.mp3');
+  });
+
+  it('跟讀：跳不過去過一次後，按跟讀時改用 #t= 載入；錄音中不重新載入', () => {
+    const src = read('src/components/ShadowingPracticeView.tsx');
+    expect(src).toMatch(/org\.src = withStartFragment\(material\.audioUrl, sentence\.startTime\)/);
+    expect(src).toMatch(/\{ allowReload: false \}/);
+  });
+
+  it('聽聽看：跳不過去時回報給畫面（Codex）', async () => {
+    const { createListenPlayer } = await import('../src/utils/shadowingPlayback');
+    const original = new FakeMedia(99, false);
+    const recording = new FakeMedia(0);
+    const onStartFail = vi.fn();
+    const player = createListenPlayer({
+      recording: recording as any, original: original as any, setOriginalVolume: () => {},
+      segment: () => ({ start: 300, end: 303 }), offsetMs: () => 0, onStartFail,
+    } as any);
+    player.toggle('original');
+    original.emit('timeupdate');
+    expect(onStartFail).toHaveBeenCalledTimes(1);
+    expect(player.playing()).toBe(null);
+    player.dispose();
+    expect(read('src/components/ShadowingPracticeView.tsx')).toMatch(/onStartFail: \(diag\) =>/);
+  });
+});
