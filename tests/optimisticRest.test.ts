@@ -58,9 +58,21 @@ describe('runOptimistic', () => {
     expect(commits).toBe(2);
   });
 
-  it('其他錯誤（例如權限）→ 直接丟錯，訊息附回應內容', async () => {
-    const fetchImpl = vi.fn(async (url: string) => {
+  it('批次寫入被拒（403）→ 逐筆 PATCH（帶同樣的前置條件）', async () => {
+    const fetchImpl = vi.fn(async (url: string, _init?: RequestInit) => {
       if (url.endsWith(':commit')) return json({ error: { code: 403, status: 'PERMISSION_DENIED' } }, 403);
+      if (_init?.method === 'PATCH') return json({});
+      return json({ fields: toFields({ n: 1 }), updateTime: 't1' });
+    });
+    await runOptimistic('tok', async (t) => { await t.get(JOB); t.update(JOB, { n: 2 }); }, { fetchImpl: fetchImpl as any });
+    const patch = fetchImpl.mock.calls.find(c => (c[1] as RequestInit | undefined)?.method === 'PATCH')!;
+    expect(String(patch[0])).toContain('updateMask.fieldPaths=n');
+    expect(String(patch[0])).toContain('currentDocument.updateTime=t1');
+  });
+
+  it('其他錯誤（例如逐筆也被拒）→ 直接丟錯，訊息附回應內容', async () => {
+    const fetchImpl = vi.fn(async (url: string, _init?: RequestInit) => {
+      if (url.endsWith(':commit') || _init?.method === 'PATCH') return json({ error: { code: 403, status: 'PERMISSION_DENIED' } }, 403);
       return json({ fields: toFields({ n: 1 }), updateTime: 't' });
     });
     await expect(runOptimistic('tok', async (t) => { await t.get(JOB); t.update(JOB, { n: 2 }); }, { fetchImpl: fetchImpl as any }))
