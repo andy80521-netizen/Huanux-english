@@ -66,6 +66,7 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 - 錄音轉文字（影子跟讀、語言模型練習）會把原句交給 Whisper（`prompt`），**同時**跑一次不帶原句的；不帶原句那次字數 < 60% 時改用它（防「補了沒念的字」）。Gemini 備援不帶原句（PR #31）
 - 語言模型複習的通過判斷一律用 `canAccumulatePattern({ errors, targetCount })`：錯 1 個字以內算通過、原句 3 字以內要全對；不傳 `targetCount` 會被當成要全對（PR #31）
 - 影子跟讀的原音語速：每次錄音拍下速度快照（`lastRecordingRef` 的 `speed`），評分（`scoreShadowingAttempt`）、重試評分、聽聽看都讀快照，不讀目前設定；放慢時流暢度用放慢後的原音長度（PR #32）
+- iPhone 播放：沙盒只有 Chromium，測不到 WebKit。PR #35 把「未載入就等 loadedmetadata 才設起點」→ iPhone 每句從頭播（PR #42 修）；PR #42 的起點確認「一播放就判斷」又在 iPhone 誤判、中止跟讀，失敗後每次換 `#t=` 重新下載讓情況更糟（PR #43 修：先就位才錄音、位置確實前進才判斷）。**播放時序的修改一律先加診斷紀錄（`playbackTrace`），推測的原因不能當成已證實**（Codex）；不要在非同步流程中換 `src`
 
 ## 防作弊機制的已知限制（2026-10-25 多輪攻擊測試後）
 - 「把斷言改弱」「mock 掉被測程式」「程式偵測測試環境」只能列為 ⚠️ 注意事項，無法自動判定是否作弊，要靠審查者與完成報告說明
@@ -168,3 +169,8 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 | 存檔按鈕顯示進度（PR #38，小級，審查） | Codex／Gemini Flash | 0 | 0 | 皆無意見 |
 | 背景存檔診斷（PR #39，小級，審查） | Codex | 0 | 0 | 無意見；診斷顯示 beginTransaction 403 |
 | 背景存檔改前置條件寫入（PR #40，小級，審查） | Codex | 1 | 0 | 逐筆備援會破壞「建立教材＋任務改 saved」的原子性（🔴） |
+| iPhone 跳轉修正（PR #42，小級，審查） | Codex | 2 | 0 | #t= 重新載入後 play 被拒被吞掉、聽聽看丟掉診斷文字 |
+| iPhone 跳轉修正（PR #42，小級，審查） | Gemini 3.8 Flash | 1 | 2 | 跟讀錄音中重新載入會脫鉤；駁回（列擁有者）：src 留著 #t= 會拉回、補跳 seeked 重複計數 |
+| 跟讀播放穩定（PR #43，規劃） | Codex | 3 | 0 | 原因分析是推測（規範上 currentTime／pause 行為不符），要先加診斷；只靠 timeupdate 停句尾會多播 0.25 秒 |
+| 跟讀播放穩定（PR #43，規劃） | Gemini／Nemotron／DeepSeek（Poolside 已下架） | 5 | 2 | 逾時換 src 可能讓 iPhone 播放權限失效（Gemini）、暫停時 readyState 可能停在 1（DeepSeek）、未儲存狀態要提升；駁回：未儲存提醒拆 PR（DeepSeek）、逾時 3 秒（擁有者定 6 秒） |
+| 跟讀播放穩定（PR #43，審查） | Codex／Gemini 3.8 Flash | 0 | 0 | 皆無意見 |
