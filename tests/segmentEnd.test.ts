@@ -200,11 +200,13 @@ describe('seekSegmentStart（驗收 7）', () => {
     seekSegmentStart(m, 12.5);
     expect(m.currentTime).toBe(12.5);
   });
-  it('還沒載入（readyState 0）→ 等 loadedmetadata 才設定', () => {
+  // 擁有者 2026-11-09 同意修改：原本「沒載入時不設定、等 loadedmetadata」讓 iPhone 每一句跟讀都從頭播（docs/plans/ios-seek-fix.md）
+  it('還沒載入（readyState 0）→ 立刻設定（預設起點），loadedmetadata 時被重設就再設一次', () => {
     const m = new ClockMedia();
     m.readyState = 0;
     seekSegmentStart(m, 12.5);
-    expect(m.currentTime).toBe(0);
+    expect(m.currentTime).toBe(12.5);
+    m.currentTime = 0;            // 載入時被重設
     m.readyState = 1;
     m.emit('loadedmetadata');
     expect(m.currentTime).toBe(12.5);

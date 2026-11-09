@@ -22,7 +22,7 @@ import { PLAYBACK_LEAD_MS, RECORDING_ORIGINAL_VOLUME, canSetElementVolume, overl
 import { createListenPlayer, ListenMode, ListenPlayer } from '../utils/shadowingPlayback';
 import { SHADOWING_SPEEDS, ShadowingSpeed, ShadowingAttempt, loadSpeed, saveSpeed, applyPlaybackSpeed, effectiveOriginalSec, scoreShadowingAttempt } from '../utils/shadowingSpeed';
 import SegmentedControl from './ui/SegmentedControl';
-import { watchSegmentEnd, seekSegmentStart } from '../utils/segmentEnd';
+import { watchSegmentEnd, seekSegmentStart, guardSegmentStart, withStartFragment } from '../utils/segmentEnd';
 
 /** 系統是否開啟「減少動態效果」（分數跑動是 JS，全域 CSS 規則管不到，要自己判斷） */
 const prefersReducedMotion = () => {
@@ -149,6 +149,10 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
     const isBufferPhaseRef = useRef<boolean>(false);
     /** 原音準時停在句尾的監看（docs/plans/import-timestamp-accuracy.md PR-A）；回傳值是取消函式 */
     const endWatchRef = useRef<(() => void) | null>(null);
+    /** 確認原音真的從句子開頭播（iPhone 長教材會跳不過去，docs/plans/ios-seek-fix.md）；回傳值是取消函式 */
+    const startGuardRef = useRef<(() => void) | null>(null);
+    /** 這台裝置跳不到句子開頭過：之後按跟讀時改用 #t= 在點擊當下就從句子開頭載入（錄音中不重新載入，Gemini） */
+    const useStartFragmentRef = useRef(false);
     
     const audioRef = useRef<HTMLAudioElement>(null);
     const recordedAudioRef = useRef<HTMLAudioElement>(null);
@@ -175,6 +179,8 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
         isBufferPhaseRef.current = false;
         endWatchRef.current?.();
         endWatchRef.current = null;
+        startGuardRef.current?.();
+        startGuardRef.current = null;
         if (requestAnimationFrameRef.current) {
             cancelAnimationFrame(requestAnimationFrameRef.current);
             requestAnimationFrameRef.current = 0;
@@ -222,6 +228,7 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
             offsetMs: () => overlayOffsetMs(recordStartAtRef.current, originalPlayingAtRef.current),
             onChange: setListenMode,
             rate: () => lastRecordingRef.current?.speed ?? 1,
+            onStartFail: (diag) => setError(`原音沒辦法跳到這一句的開頭，請截圖回報：${diag}`),
         });
         playerRef.current = player;
         return () => {
@@ -337,6 +344,9 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
         recordSpeedRef.current = speed;   // 這次錄音的原音速度快照
         if (audioRef.current) {
             const org = audioRef.current;
+            // 先設定起點再解鎖：iPhone 不要從 0 秒開始緩衝（docs/plans/ios-seek-fix.md）
+            if (useStartFragmentRef.current) org.src = withStartFragment(material.audioUrl, sentence.startTime);
+            seekSegmentStart(org, sentence.startTime);
             applyPlaybackSpeed(org, speed);
             org.muted = true;
             org.play()
@@ -440,10 +450,27 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                         setError("無法播放教材音訊，請確認裝置音量設定。");
                     });
                     // 準時停在句尾；鎖屏或切 App 時直接暫停原音，一樣進入緩衝倒數（擁有者決定）
+                    // 確認真的從句子開頭播；跳不過去就停下來顯示診斷（不默默從頭播）
+                    startGuardRef.current?.();
+                    startGuardRef.current = guardSegmentStart(audioRef.current, sentence.startTime, (diag) => {
+                        startGuardRef.current = null;
+                        if (isCancelled()) return;
+                        abortRecording();
+                        setPracticeState('idle');
+                        if (!useStartFragmentRef.current) {
+                            // 第一次：下次按跟讀改用另一種載入方式（點擊當下就從句子開頭載入）
+                            useStartFragmentRef.current = true;
+                            setError('原音沒有從這一句的開頭開始，已換另一種載入方式，請再按一次「開始跟讀」。');
+                        } else {
+                            setError(`原音沒辦法跳到這一句的開頭，請截圖回報：${diag}`);
+                        }
+                    }, { allowReload: false });
                     endWatchRef.current?.();
                     endWatchRef.current = sentence.endTime > 0
                         ? watchSegmentEnd(audioRef.current, sentence.endTime, () => {
                             endWatchRef.current = null;
+                            startGuardRef.current?.();
+                            startGuardRef.current = null;
                             if (isCancelled()) return;
                             enterBufferPhase();
                         })

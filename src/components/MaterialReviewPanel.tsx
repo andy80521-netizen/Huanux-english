@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useId } from 'react';
-import { watchSegmentEnd, seekSegmentStart, SegmentEndWatch } from '../utils/segmentEnd';
+import { watchSegmentEnd, seekSegmentStart, guardSegmentStart, SegmentEndWatch } from '../utils/segmentEnd';
 import { Play, Pause, Check, AlertCircle, Trash2, RotateCcw, ChevronDown, Merge, Scissors, Ear, Loader2 } from 'lucide-react';
 import TimeStepperField from './ui/TimeStepperField';
 import { adjustTime, tailRange, mergeWithPrevious, splitSentenceAt } from '../utils/timeEdit';
@@ -116,7 +116,13 @@ export default function MaterialReviewPanel({
     sentencesRef.current = sentences;
     // 播放中修改了句尾 → 依新句尾重新排程（縮短時才不會多播，Codex 第 2 輪）
     useEffect(() => { segWatchRef.current?.refresh(); }, [sentences]);
-    const stopSegWatch = () => { segWatchRef.current?.(); segWatchRef.current = null; };
+    // 確認真的從起點播（iPhone 長教材會跳不過去，docs/plans/ios-seek-fix.md）
+    const startGuardRef = useRef<(() => void) | null>(null);
+    const [playbackError, setPlaybackError] = useState<string | null>(null);
+    const stopSegWatch = () => {
+        segWatchRef.current?.(); segWatchRef.current = null;
+        startGuardRef.current?.(); startGuardRef.current = null;
+    };
     useEffect(() => stopSegWatch, []);
 
     /** 播放一段範圍（聽句尾用，key＝`${id}:tail`）；終點可傳函式讀最新值 */
@@ -124,8 +130,14 @@ export default function MaterialReviewPanel({
         const el = audioRef.current;
         if (!el) return;
         stopSegWatch();
+        setPlaybackError(null);
         seekSegmentStart(el, start);
         el.play()?.catch?.(() => setPlayingId(null));
+        startGuardRef.current = guardSegmentStart(el, start, (diag) => {
+            stopSegWatch();
+            setPlayingId(null);
+            setPlaybackError(`音檔沒辦法跳到這一句的開頭，請截圖回報：${diag}`);
+        });
         setPlayingId(key);
         segWatchRef.current = watchSegmentEnd(el, end, () => {
             segWatchRef.current = null;
@@ -138,8 +150,14 @@ export default function MaterialReviewPanel({
         const el = audioRef.current;
         if (!sentence || !el) return;
         stopSegWatch();
+        setPlaybackError(null);
         seekSegmentStart(el, sentence.startTime);
         el.play()?.catch?.(() => setPlayingId(null));
+        startGuardRef.current = guardSegmentStart(el, sentence.startTime, (diag) => {
+            stopSegWatch();
+            setPlayingId(null);
+            setPlaybackError(`音檔沒辦法跳到這一句的開頭，請截圖回報：${diag}`);
+        });
         setPlayingId(id);
         if (sentence.endTime > 0) {
             // 讀最新的句尾：播放中修改結束時間，這次試聽就照新的句尾停（Codex）
@@ -304,6 +322,11 @@ export default function MaterialReviewPanel({
 
     const messages = (
         <>
+            {playbackError && (
+                <p role="alert" className="flex items-start gap-1.5 text-[13px] font-medium leading-relaxed text-danger break-words">
+                    <AlertCircle size={15} className="mt-[0.125rem] shrink-0" aria-hidden="true" />{playbackError}
+                </p>
+            )}
             {notice && (
                 <p role="alert" className="flex items-start gap-1.5 text-[13px] font-medium leading-relaxed text-danger">
                     <AlertCircle size={15} className="mt-[0.125rem] shrink-0" aria-hidden="true" />{notice}
