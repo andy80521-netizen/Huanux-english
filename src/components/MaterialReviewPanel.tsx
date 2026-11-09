@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useId } from 'react';
 import { watchSegmentEnd, seekSegmentStart, SegmentEndWatch } from '../utils/segmentEnd';
-import { Play, Pause, Check, AlertCircle, Trash2, RotateCcw, ChevronDown, Merge, Scissors, Ear } from 'lucide-react';
+import { Play, Pause, Check, AlertCircle, Trash2, RotateCcw, ChevronDown, Merge, Scissors, Ear, Loader2 } from 'lucide-react';
 import TimeStepperField from './ui/TimeStepperField';
 import { adjustTime, tailRange, mergeWithPrevious, splitSentenceAt } from '../utils/timeEdit';
 import SegmentedControl from './ui/SegmentedControl';
@@ -17,6 +17,8 @@ export interface MaterialReviewPanelProps {
     fileName: string;
     initialSentences: ReviewSentence[];
     isSaving?: boolean;
+    /** 存檔中按鈕顯示的文字（例如「翻譯中 12/35…」）；null＝沒有在存檔 */
+    savingLabel?: string | null;
     onSave: (sentences: ReviewSentence[], coverChoice: CoverStyle | 'none') => void;
     onCancel: () => void;
     /** 標題左側的元素（匯入頁的返回鈕） */
@@ -49,6 +51,7 @@ export default function MaterialReviewPanel({
     fileName,
     initialSentences,
     isSaving = false,
+    savingLabel = null,
     onSave,
     onCancel,
     headerStart,
@@ -369,7 +372,7 @@ export default function MaterialReviewPanel({
                 <div className="hidden shrink-0 flex-col items-end gap-2 lg:flex lg:max-w-sm">
                     <div className="flex gap-3">
                         <Button variant="secondary" onClick={onCancel} disabled={isSaving}>取消</Button>
-                        <Button onClick={handleSaveClick} disabled={saveDisabled} icon={<Check size={17} aria-hidden="true" />}>確認儲存</Button>
+                        <Button onClick={handleSaveClick} disabled={saveDisabled} aria-live="polite" icon={savingLabel ? <Loader2 size={17} className="animate-spin" aria-hidden="true" /> : <Check size={17} aria-hidden="true" />}>{savingLabel ?? '確認儲存'}</Button>
                     </div>
                     <div className="flex flex-col items-end gap-1 text-right">{messages}</div>
                 </div>
@@ -587,7 +590,7 @@ export default function MaterialReviewPanel({
                 {messages}
                 <div className="grid grid-cols-[1fr_2fr] gap-2.5">
                     <Button variant="secondary" size="lg" onClick={onCancel} disabled={isSaving} className="px-4">取消</Button>
-                    <Button size="lg" onClick={handleSaveClick} disabled={saveDisabled} icon={<Check size={17} aria-hidden="true" />} className="px-4">確認儲存</Button>
+                    <Button size="lg" onClick={handleSaveClick} disabled={saveDisabled} aria-live="polite" icon={savingLabel ? <Loader2 size={17} className="animate-spin" aria-hidden="true" /> : <Check size={17} aria-hidden="true" />} className="px-4">{savingLabel ?? '確認儲存'}</Button>
                 </div>
             </div>
         </div>

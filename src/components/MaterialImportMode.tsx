@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { saveButtonLabel } from '../utils/saveProgressLabel';
 import { FileText, Headphones, AlertCircle, Loader2, Upload, CheckCircle, Volume2, Sparkles, FolderOpen, Check } from 'lucide-react';
 import { splitTextToSentences, generateSpeechForSentences, extractPatternsFromText, translateSentences } from '../services/gemini';
 import { extractTextFromPdf } from '../utils/pdfExtract';
@@ -1008,7 +1009,8 @@ export default function MaterialImportMode() {
                     audioBlob={pendingMaterial.audioBlob}
                     fileName={pendingMaterial.fileName}
                     initialSentences={pendingMaterial.sentences}
-                    isSaving={loadingState === 'translating'}
+                    isSaving={loadingState === 'translating' || loadingState === 'processing'}
+                    savingLabel={saveButtonLabel(loadingState, translateProgress)}
                     onSave={confirmAndSaveMaterial}
                     onCancel={handleCancelReview}
                     headerStart={backButton}
