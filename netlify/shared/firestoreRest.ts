@@ -206,8 +206,9 @@ export async function runOptimistic<T>(
         if (commit.ok) return result;
         const body = await commit.text();
         lastErr = new FirestoreRestError(`寫入失敗 (HTTP ${commit.status}) ${body.slice(0, 160)}`, commit.status, body);
-        // 批次寫入若也被拒（403），改成逐筆寫入（各自帶同樣的前置條件；不保證全部一起成功，順序與 writes 相同）
-        if (commit.status === 403) {
+        // 批次寫入若被拒（403）且只有一筆，改用 PATCH／DELETE（一筆本來就是原子的）。
+        // 多筆（例如建立教材＋任務改 saved）不可拆開，否則可能只成功一半（Codex）→ 直接丟錯
+        if (commit.status === 403 && writes.length === 1) {
             const r = await writeOneByOne(doFetch, headers, writes);
             if (r === 'ok') return result;
             if (r === 'conflict') continue;

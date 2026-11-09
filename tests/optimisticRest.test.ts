@@ -58,7 +58,7 @@ describe('runOptimistic', () => {
     expect(commits).toBe(2);
   });
 
-  it('批次寫入被拒（403）→ 逐筆 PATCH（帶同樣的前置條件）', async () => {
+  it('批次寫入被拒（403）且只有一筆 → 改用 PATCH（帶同樣的前置條件）', async () => {
     const fetchImpl = vi.fn(async (url: string, _init?: RequestInit) => {
       if (url.endsWith(':commit')) return json({ error: { code: 403, status: 'PERMISSION_DENIED' } }, 403);
       if (_init?.method === 'PATCH') return json({});
@@ -89,5 +89,20 @@ describe('runOptimistic', () => {
 
   it('背景存檔改用 runOptimistic', () => {
     expect(read('netlify/functions/save-material.ts')).toMatch(/tx: \(fn\) => runOptimistic\(idToken, fn\)/);
+  });
+
+  it('多筆寫入（建立教材＋任務改 saved）被拒 → 不拆開逐筆寫，直接丟錯（Codex）', async () => {
+    const fetchImpl = vi.fn(async (url: string, _init?: RequestInit) => {
+      if (url.endsWith(':commit')) return json({ error: { code: 403, status: 'PERMISSION_DENIED' } }, 403);
+      if (_init?.method === 'PATCH') throw new Error('不可逐筆寫入');
+      if (url.includes('/materials/')) return json({ error: { status: 'NOT_FOUND' } }, 404);
+      return json({ fields: toFields({ status: 'saving' }), updateTime: 't' });
+    });
+    await expect(runOptimistic('tok', async (t) => {
+      await t.get(JOB);
+      if (!(await t.get(MAT))) t.create(MAT, { a: 1 });
+      t.update(JOB, { status: 'saved' });
+    }, { fetchImpl: fetchImpl as any })).rejects.toThrow(/PERMISSION_DENIED/);
+    expect(fetchImpl.mock.calls.some(c => (c[1] as RequestInit | undefined)?.method === 'PATCH')).toBe(false);
   });
 });
