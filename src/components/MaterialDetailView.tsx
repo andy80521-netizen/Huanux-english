@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { watchSegmentEnd, seekSegmentStart, SegmentEndWatch } from '../utils/segmentEnd';
+import { watchSegmentEnd, seekSegmentStart, guardSegmentStart, SegmentEndWatch } from '../utils/segmentEnd';
 import { Material, CoverStyle } from '../types';
 import { ChevronLeft, Play, Pause, Mic, Loader2, Sparkles, Trash2, RotateCcw, BookOpen, X, Search, RefreshCw, Clock3 } from 'lucide-react';
 import SentenceTimeEditor from './SentenceTimeEditor';
@@ -113,7 +113,12 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
     // 修正時間（docs/plans/import-timestamp-accuracy.md PR-G）：正在編輯的句子、編輯器裡正在播放的範圍
     const [editingTimeId, setEditingTimeId] = useState<string | null>(null);
     const [playingKey, setPlayingKey] = useState<string | null>(null);
-    const stopSegWatch = () => { segWatchRef.current?.(); segWatchRef.current = null; };
+    // 確認真的從起點播（iPhone 長教材會跳不過去，docs/plans/ios-seek-fix.md）
+    const startGuardRef = useRef<(() => void) | null>(null);
+    const stopSegWatch = () => {
+        segWatchRef.current?.(); segWatchRef.current = null;
+        startGuardRef.current?.(); startGuardRef.current = null;
+    };
     useEffect(() => stopSegWatch, []);
 
     if (!material) {
@@ -165,8 +170,15 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
         const el = audioRef.current;
         if (el) {
             stopSegWatch();
+           setExtractMessage(m => (m?.text.startsWith('音檔沒辦法跳') ? null : m));
             seekSegmentStart(el, sentence.startTime);
             el.play()?.catch?.(() => setPlayingIndex(null));
+            startGuardRef.current = guardSegmentStart(el, sentence.startTime, (diag) => {
+                stopSegWatch();
+                setPlayingIndex(null);
+                setPlayingKey(null);
+                setExtractMessage({ text: `音檔沒辦法跳到這一句的開頭，請截圖回報：${diag}`, isError: true });
+            });
             setPlayingIndex(index);
             setPlayingKey(null);
             if (sentence.endTime > 0) {
@@ -203,8 +215,15 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
         const el = audioRef.current;
         if (!el) return;
         stopSegWatch();
+       setExtractMessage(m => (m?.text.startsWith('音檔沒辦法跳') ? null : m));
         seekSegmentStart(el, start);
         el.play()?.catch?.(() => setPlayingKey(null));
+        startGuardRef.current = guardSegmentStart(el, start, (diag) => {
+            stopSegWatch();
+            setPlayingIndex(null);
+            setPlayingKey(null);
+            setExtractMessage({ text: `音檔沒辦法跳到這一句的開頭，請截圖回報：${diag}`, isError: true });
+        });
         setPlayingIndex(null);
         setPlayingKey(key);
         segWatchRef.current = watchSegmentEnd(el, end, () => {

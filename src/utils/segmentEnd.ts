@@ -145,3 +145,89 @@ export function seekSegmentStart(media: SegmentMedia, startTime: number): void {
     media.addEventListener('loadedmetadata', onMeta);
     pendingSeek.set(media, () => media.removeEventListener('loadedmetadata', onMeta));
 }
+
+// ── 起點確認（docs/plans/ios-seek-fix.md）────────────────────────────────
+// 擁有者 2026-11-09 回報：iPhone（Chrome，底層與 Safari 相同）上 9 分鐘的教材，每次播放（跟讀、詳情頁、聽句尾）
+// 都從音檔開頭播；幾分鐘內的短教材正常。電腦版 Chromium 用同一個音檔正常 → 判斷是 iPhone 跳到「還沒下載的位置」失敗。
+// 做法：播放中確認位置；落在起點之前 → 再跳一次；仍不行 → 改用網址指定起點（#t=）重新載入；再不行 → 停止並回報診斷。
+
+/** 播放位置落在起點之前超過這個（秒）就算沒跳成功 */
+export const START_TOLERANCE_SEC = 0.5;
+/** 直接重新設定起點的次數上限（之後改用 #t= 重新載入） */
+export const MAX_START_RETRIES = 2;
+
+interface RangesLike { length: number; start(i: number): number; end(i: number): number }
+
+export interface GuardMedia extends SegmentMedia {
+    seeking?: boolean;
+    duration?: number;
+    src?: string;
+    currentSrc?: string;
+    seekable?: RangesLike;
+    buffered?: RangesLike;
+    load?(): void;
+    play?(): Promise<void> | void;
+}
+
+const fmtRanges = (r?: RangesLike) => {
+    if (!r || !r.length) return '無';
+    const parts: string[] = [];
+    for (let i = 0; i < r.length; i++) parts.push(`${r.start(i).toFixed(1)}～${r.end(i).toFixed(1)}`);
+    return parts.join('、');
+};
+
+/** 給使用者截圖回報用的診斷文字 */
+export function describeSeekFailure(media: GuardMedia, start: number): string {
+    const dur = typeof media.duration === 'number' && Number.isFinite(media.duration) ? media.duration.toFixed(1) : String(media.duration);
+    return `目標 ${start.toFixed(1)} 秒，目前 ${media.currentTime.toFixed(1)} 秒，長度 ${dur} 秒，可跳轉 ${fmtRanges(media.seekable)}，已下載 ${fmtRanges(media.buffered)}，狀態 ${media.readyState ?? '?'}`;
+}
+
+/** 用網址指定起點重新載入（iPhone 原生支援，不靠事後跳轉）；沒有網址時回傳 false */
+function reloadWithFragment(media: GuardMedia, start: number): boolean {
+    const base = (media.currentSrc || media.src || '').split('#')[0];
+    if (!base) return false;
+    media.src = `${base}#t=${start.toFixed(2)}`;
+    try { media.load?.(); } catch { /* 忽略 */ }
+    try { const p = media.play?.(); if (p && typeof (p as Promise<void>).catch === 'function') (p as Promise<void>).catch(() => {}); } catch { /* 忽略 */ }
+    return true;
+}
+
+/**
+ * 播放一段時確認真的從起點開始。在 seekSegmentStart 與 play() 之後呼叫；回傳取消函式（段落結束、停止時呼叫）。
+ * 失敗時會暫停並呼叫 onFail（附診斷文字）。
+ */
+export function guardSegmentStart(media: GuardMedia, startTime: number, onFail: (diag: string) => void): () => void {
+    const start = Number.isFinite(startTime) && startTime > 0 ? startTime : 0;
+    let done = false;
+    let retries = 0;
+    let usedFragment = false;
+    const unlisten: Array<() => void> = [];
+    const cleanup = () => { done = true; unlisten.forEach((u) => u()); unlisten.length = 0; };
+
+    const check = () => {
+        if (done || start <= START_TOLERANCE_SEC) return;
+        if (media.paused || media.seeking) return;
+        if (media.currentTime >= start - START_TOLERANCE_SEC) return;
+        if (retries < MAX_START_RETRIES) {
+            retries += 1;
+            media.currentTime = start;
+            return;
+        }
+        if (!usedFragment) {
+            usedFragment = true;
+            if (reloadWithFragment(media, start)) return;
+        }
+        const diag = describeSeekFailure(media, start);
+        cleanup();
+        try { media.pause(); } catch { /* 忽略 */ }
+        console.warn('[播放] 沒辦法跳到起點:', diag);
+        onFail(diag);
+    };
+
+    for (const type of ['playing', 'timeupdate', 'seeked']) {
+        media.addEventListener(type, check);
+        unlisten.push(() => media.removeEventListener(type, check));
+    }
+    check();
+    return () => { if (!done) cleanup(); };
+}
