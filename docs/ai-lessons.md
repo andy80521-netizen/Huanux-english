@@ -39,6 +39,8 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 - 播放一句只靠 `timeupdate` 判斷句尾會多播：Chromium 實測 36～187ms（所有瀏覽器約每 250ms 觸發一次）。一律用 `src/utils/segmentEnd.ts` 的 `watchSegmentEnd`（PR #35）；新增的 Hooks 要放在元件所有提早 `return` 之前（教材詳情頁有 `if (!material) return`）
 - 教材的 `sentences` 是整個陣列寫回：任何寫入都要用交易讀最新陣列、只改那一句；用畫面上的舊陣列 `updateDoc` 會蓋掉別處同時做的修改（PR #36 跟讀熟練度改交易）
 - 校對畫面拆句時不可把整句翻譯複製給兩半；合併時任一半還沒補翻譯就要清空並要求補齊；捨棄確認區的「確定存檔」也要再檢查一次（PR #36）
+- 後端背景流程用使用者 ID Token＋Firestore REST 交易（`netlify/shared/firestoreRest.ts`）；需要「舊執行不可再寫入」時，用 `saveAttempt`＋`leaseId` 在交易內重新確認，關鍵寫入（教材＋狀態）放同一筆 commit（PR #37）
+- 同一元件顯示不同資料（例如切換校對的教材）時要給 `key`；本專案元件型別不接受直接傳 `key`，用 `React.Fragment key` 包起來（PR #37）
 - 委員會針對性質詢時，Codex 收到一般 `@codex` 問題會回「需要建立環境」；要把問題寫進規劃文件、推送後用 `@codex review 只需檢查 <舊>..<新>` 才會逐題回答（PR #35）
 - 規格附錄 B 列了已放棄的做法但沒記原因（`word` 顆粒度、`findPreciseBoundary`、緩衝）；2026-11-08 擁有者同意 `word` 顆粒度只做離線對照
 - 跟讀改成先錄音、錄音真正開始後 300ms 才播原音；原音在 await 之後才播放，iPhone 要在點擊當下先靜音 play/pause 解鎖（PR #22）
@@ -157,4 +159,9 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 | 時間軸 PR-A（PR #35，審查） | Gemini 3.8 Flash | 1 | 4 | 跟讀起點改用 seekSegmentStart；誤判：暫停時未清監看（已有）、元素移除後繼續播放（規格會自動暫停）、`#t=` 讓 currentTime 從 0 起算 |
 | 時間軸 PR-G（PR #36，審查） | Codex | 4 | 0 | 拆句複製翻譯、跟讀以舊陣列寫回會蓋掉新時間、合併消掉待補翻譯、確認存檔繞過檢查 |
 | 時間軸 PR-G（PR #36，審查） | Gemini 3.8 Flash | 2 | 2 | 聽句尾／編輯器播放中改時間停止點未跟著改；誤判：拆出的句子沒有 id（存檔時統一產生）、補翻譯後仍誤擋 |
+| 背景存檔（PR #37，規劃） | Codex | 6 | 0 | 交接不可靠、舊執行不失效、已建教材被標失敗（皆 🔴）、Token 效期、任務文件兩份全文 |
+| 背景存檔（PR #37，規劃） | Gemini／Nemotron／DeepSeek／Grok（Poolside 已下架） | 8 | 3 | 轉錄函式會蓋回狀態、安全驗證清單（DeepSeek）、預覽網址自呼叫；駁回：寫入頻率限制（Nemotron）、`-background` 檔名（Gemini）、直接 import 封面／重逢（Gemini、Nemotron） |
+| 背景存檔（PR #37，質詢） | Codex／Grok／Gemini | 3 | 0 | 同 attempt 需要租約、心跳不可用平行計時器、`process.env.URL` 在預覽指向正式站 |
+| 背景存檔（PR #37，審查） | Codex | 2 | 0 | 切換回到校對沿用上一份句子（🔴）、交接中仍可編輯 |
+| 背景存檔（PR #37，審查） | Gemini（3.8 Flash 額度用完改 Flash Lite） | 0 | 0 | 兩輪皆無意見 |
 | 存檔按鈕顯示進度（PR #38，小級，審查） | Codex／Gemini Flash | 0 | 0 | 皆無意見 |
