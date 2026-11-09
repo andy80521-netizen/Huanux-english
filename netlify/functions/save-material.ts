@@ -2,7 +2,7 @@
 // 規劃：docs/plans/background-material-save.md（擁有者 2026-11-09 核准）
 // 流程與所有權規則見 netlify/shared/saveMaterial.ts
 import { verifyRealUserToken } from '../shared/auth';
-import { runTransaction, APP_ID } from '../shared/firestoreRest';
+import { runTransaction, patchFields, APP_ID } from '../shared/firestoreRest';
 import { translateBatch } from '../shared/translate';
 import { runSaveMaterial } from '../shared/saveMaterial';
 import { randomUUID } from 'node:crypto';
@@ -58,6 +58,12 @@ export default async (req: Request) => {
         return new Response(null, { status: 200 });
     }
 
+    // 診斷：把每次執行的結果寫回任務（saveDiag），全域提示在「可能中斷了」時顯示，方便找出原因
+    const jobPath = `artifacts/${APP_ID}/users/${authResult.uid}/transcriptionJobs/${materialId}`;
+    const diag = (text: string) => patchFields(idToken, jobPath, { saveDiag: `第 ${saveAttempt} 次：${text}`.slice(0, 300), saveDiagAt: Date.now() })
+        .catch((e) => { console.error('[背景存檔] 寫入診斷失敗：', e?.message); return false; });
+    await diag('伺服器已收到');
+
     const origin = siteOrigin(req);
     const started = Date.now();
     const outcome = await runSaveMaterial({
@@ -85,8 +91,13 @@ export default async (req: Request) => {
         newId: () => randomUUID(),
         log: (msg) => console.log(`[背景存檔] ${msg}`),   // 只記流程，不記句子內容與 Token
     }, { uid: authResult.uid, materialId, saveAttempt, idToken, appId: APP_ID, bucket: BUCKET })
-        .catch((e) => { console.error('[背景存檔] 未預期的錯誤：', e?.message); return 'error' as const; });
+        .catch(async (e) => {
+            console.error('[背景存檔] 未預期的錯誤：', e?.message);
+            await diag(`出錯：${e?.message || e}`);
+            return 'error' as const;
+        });
 
     console.log(`[背景存檔] 結果：${outcome}，${Date.now() - started}ms`);
+    if (outcome === 'stale' || outcome === 'busy' || outcome === 'lost') await diag(`結束（${outcome}）`);
     return new Response(null, { status: 200 });
 };
