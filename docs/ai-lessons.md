@@ -39,7 +39,8 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 - 播放一句只靠 `timeupdate` 判斷句尾會多播：Chromium 實測 36～187ms（所有瀏覽器約每 250ms 觸發一次）。一律用 `src/utils/segmentEnd.ts` 的 `watchSegmentEnd`（PR #35）；新增的 Hooks 要放在元件所有提早 `return` 之前（教材詳情頁有 `if (!material) return`）
 - 教材的 `sentences` 是整個陣列寫回：任何寫入都要用交易讀最新陣列、只改那一句；用畫面上的舊陣列 `updateDoc` 會蓋掉別處同時做的修改（PR #36 跟讀熟練度改交易）
 - 校對畫面拆句時不可把整句翻譯複製給兩半；合併時任一半還沒補翻譯就要清空並要求補齊；捨棄確認區的「確定存檔」也要再檢查一次（PR #36）
-- 後端背景流程用使用者 ID Token＋Firestore REST 交易（`netlify/shared/firestoreRest.ts`）；需要「舊執行不可再寫入」時，用 `saveAttempt`＋`leaseId` 在交易內重新確認，關鍵寫入（教材＋狀態）放同一筆 commit（PR #37）
+- 後端用使用者 ID Token 寫 Firestore REST 時，**不可用 `beginTransaction`（正式環境回 403 PERMISSION_DENIED）**，改用 `netlify/shared/firestoreRest.ts` 的 `runOptimistic`：讀取記下 `updateTime`、寫入以它為前置條件、多筆用一次 `commit`（批次寫入可用）。需要「舊執行不可再寫入」時，用 `saveAttempt`＋`leaseId` 每次重讀確認（PR #37、#40）
+- 假的 Firestore 測不到權限問題：用到新的 Firestore REST 端點時，要在預覽網站實際跑一次才算驗證；背景函式的錯誤要寫回文件（`saveDiag`）才看得到（PR #39）
 - 同一元件顯示不同資料（例如切換校對的教材）時要給 `key`；本專案元件型別不接受直接傳 `key`，用 `React.Fragment key` 包起來（PR #37）
 - 委員會針對性質詢時，Codex 收到一般 `@codex` 問題會回「需要建立環境」；要把問題寫進規劃文件、推送後用 `@codex review 只需檢查 <舊>..<新>` 才會逐題回答（PR #35）
 - 規格附錄 B 列了已放棄的做法但沒記原因（`word` 顆粒度、`findPreciseBoundary`、緩衝）；2026-11-08 擁有者同意 `word` 顆粒度只做離線對照
@@ -165,3 +166,5 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 | 背景存檔（PR #37，審查） | Codex | 2 | 0 | 切換回到校對沿用上一份句子（🔴）、交接中仍可編輯 |
 | 背景存檔（PR #37，審查） | Gemini（3.8 Flash 額度用完改 Flash Lite） | 0 | 0 | 兩輪皆無意見 |
 | 存檔按鈕顯示進度（PR #38，小級，審查） | Codex／Gemini Flash | 0 | 0 | 皆無意見 |
+| 背景存檔診斷（PR #39，小級，審查） | Codex | 0 | 0 | 無意見；診斷顯示 beginTransaction 403 |
+| 背景存檔改前置條件寫入（PR #40，小級，審查） | Codex | 1 | 0 | 逐筆備援會破壞「建立教材＋任務改 saved」的原子性（🔴） |
