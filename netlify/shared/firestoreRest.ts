@@ -82,7 +82,7 @@ export async function runTransaction<T>(
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
         const begin = await doFetch(`${FS_BASE}:beginTransaction`, { method: 'POST', headers, body: JSON.stringify({ options: { readWrite: {} } }) });
-        if (!begin.ok) throw new FirestoreRestError(`開始交易失敗 (HTTP ${begin.status})`, begin.status, await begin.text());
+        if (!begin.ok) { const b = await begin.text(); throw new FirestoreRestError(`開始交易失敗 (HTTP ${begin.status}) ${b.slice(0, 160)}`, begin.status, b); }
         const { transaction } = await begin.json() as { transaction: string };
         const writes: any[] = [];
 
@@ -90,7 +90,7 @@ export async function runTransaction<T>(
             get: async (path) => {
                 const res = await doFetch(`${FS_BASE}/${path}?transaction=${encodeURIComponent(transaction)}`, { headers });
                 if (res.status === 404) return null;
-                if (!res.ok) throw new FirestoreRestError(`讀取失敗 (HTTP ${res.status})`, res.status, await res.text());
+                if (!res.ok) { const b = await res.text(); throw new FirestoreRestError(`讀取失敗 (HTTP ${res.status}) ${b.slice(0, 160)}`, res.status, b); }
                 const doc = await res.json() as { fields?: any };
                 return fieldsToObject(doc.fields);
             },
@@ -117,8 +117,23 @@ export async function runTransaction<T>(
         const commit = await doFetch(`${FS_BASE}:commit`, { method: 'POST', headers, body: JSON.stringify({ writes, transaction }) });
         if (commit.ok) return result;
         const body = await commit.text();
-        lastErr = new FirestoreRestError(`寫入失敗 (HTTP ${commit.status})`, commit.status, body);
+        lastErr = new FirestoreRestError(`寫入失敗 (HTTP ${commit.status}) ${body.slice(0, 160)}`, commit.status, body);
         if (!isRetryable(commit.status, body)) throw lastErr;
     }
     throw lastErr ?? new Error('交易重試次數已用完');
+}
+
+/**
+ * 診斷用：直接 PATCH 任務文件的幾個欄位（不經交易），文件不存在就不寫。
+ * 只用來寫 saveDiag 等說明，不可用來改變所有權相關欄位。
+ */
+export async function patchFields(idToken: string, path: string, data: Record<string, any>, opts: { fetchImpl?: typeof fetch } = {}): Promise<boolean> {
+    const doFetch = opts.fetchImpl ?? fetch;
+    const mask = Object.keys(data).map(k => `updateMask.fieldPaths=${encodeURIComponent(k)}`).join('&');
+    const res = await doFetch(`${FS_BASE}/${path}?${mask}&currentDocument.exists=true`, {
+        method: 'PATCH',
+        headers: { 'Authorization': `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fields: toFields(data) }),
+    });
+    return res.ok;
 }

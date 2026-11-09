@@ -16,6 +16,8 @@ export interface SaveJobDoc {
     heartbeatAt?: number;
     errorMessage?: string;
     saveAttempt?: number;
+    /** 背景函式寫回的診斷說明（例如「第 2 次：出錯：…」） */
+    saveDiag?: string;
 }
 
 export type SaveJobView =
@@ -39,8 +41,9 @@ export function describeSaveJob(job: SaveJobDoc, now: number): SaveJobView | nul
             const stalled = typeof job.heartbeatAt === 'number'
                 ? now - job.heartbeatAt > SAVE_STALL_HEARTBEAT_MS
                 : typeof job.saveRequestedAt === 'number' && now - job.saveRequestedAt > SAVE_STALL_NO_START_MS;
+            const diag = job.saveDiag ? `｜${job.saveDiag}` : '';
             return stalled
-                ? { kind: 'stalled', text: `${title} 的儲存可能中斷了${progress ? `（已完成${progress}）` : ''}` }
+                ? { kind: 'stalled', text: `${title} 的儲存可能中斷了${progress ? `（已完成${progress}）` : ''}${diag}` }
                 : { kind: 'saving', text: `教材儲存中：${title}${progress}` };
         }
         case 'saveError':
