@@ -19,9 +19,11 @@ interface SentenceTimeEditorProps {
     onTimesChanged?: () => void;
     onStop: () => void;
     onClose: () => void;
+    /** 有沒有未儲存的修改（null＝沒有）：詳情頁在按跟讀、開另一句、返回時提醒（docs/plans/shadowing-stable-playback.md） */
+    onDirtyChange?: (draft: { startTime: number; endTime: number; valid: boolean } | null) => void;
 }
 
-const SentenceTimeEditor: React.FC<SentenceTimeEditorProps> = ({ materialId, sentence, playingKey, onPlayRange, onStop, onClose, onTimesChanged }) => {
+const SentenceTimeEditor: React.FC<SentenceTimeEditorProps> = ({ materialId, sentence, playingKey, onPlayRange, onStop, onClose, onTimesChanged, onDirtyChange }) => {
     const [startTime, setStartTime] = useState(sentence.startTime);
     const [endTime, setEndTime] = useState(sentence.endTime);
     const [warning, setWarning] = useState<string | null>(null);
@@ -46,6 +48,14 @@ const SentenceTimeEditor: React.FC<SentenceTimeEditorProps> = ({ materialId, sen
     const hasOriginal = typeof sentence.originalStartTime === 'number' && typeof sentence.originalEndTime === 'number';
     const playKey = `${sentence.id}:edit`;
     const tailKey = `${sentence.id}:tail`;
+
+    // 回報未儲存的修改；編輯器關閉（卸載）時清掉
+    const dirtyRef = useRef(onDirtyChange);
+    dirtyRef.current = onDirtyChange;
+    useEffect(() => {
+        dirtyRef.current?.(dirty ? { startTime: round2(startTime), endTime: round2(endTime), valid: !invalid } : null);
+    }, [dirty, startTime, endTime, invalid]);
+    useEffect(() => () => dirtyRef.current?.(null), []);
 
     const step = (field: 'startTime' | 'endTime', delta: number) => {
         const r = adjustTime({ startTime, endTime }, field, delta);

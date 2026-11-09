@@ -100,7 +100,7 @@ iPhone 上跟讀「按一次就正常」：原音一定從這一句的開頭播�
 
 ## 定案（委員會＋Codex 第一輪後，擁有者 2026-11-10 核准）
 - 原因分析目前是**推測**（Codex：依規範，未載入時讀 currentTime 應回傳預設起點，pause 也會取消等待中的 play）→ 加「播放診斷紀錄」，在 iPhone 上找真正的原因
-- A：點擊當下設定起點 → 靜音解鎖 → 等麥克風與解鎖結束（解鎖最多等 `UNLOCK_WAIT_MS = 1500`）→ 暫停、拉回起點 → `prepareSegmentStart`（`PREPARE_TIMEOUT_MS = 6000`）→ ready 才開始錄音
+- A：點擊當下設定起點 → 靜音解鎖（一開始播就暫停）→ 等麥克風與解鎖（最多等 `UNLOCK_WAIT_MS = 1500`；還在載入就讓它靜音繼續載入，避免 iPhone 暫停後不再載入）→ `prepareSegmentStart`（`PREPARE_TIMEOUT_MS = 6000`）→ 暫停、取消靜音、拉回句首 → 才開始錄音
   - 就位：`readyState >= 1`、`!seeking`、`|currentTime - 起點| <= 0.25`（DeepSeek：iPhone 暫停時 readyState 可能停在 1，不要求 2）
   - 逾時：**不重新載入**（Gemini：換 src 可能讓 iPhone 播放權限失效，又要整份重新下載）→「原音載入失敗，請檢查網路後再試」，不錄音
   - 取消：換句、離開（isCancelled）、頁面隱藏
@@ -115,4 +115,5 @@ iPhone 上跟讀「按一次就正常」：原音一定從這一句的開頭播�
 - 2026-11-10 擁有者：中級、先開委員會；調整時間未儲存 → 跳提醒「儲存／不儲存」；聽句尾 0.5 秒維持（2026-11-09）
 
 ## 進度紀錄
+- 2026-11-10 驗收測試 commit `0971f11`；實作完成，check.sh 通過；Chromium 實測（preload=none 新播放器，起點 45.3／300／500 秒）：就位成功、起點確認沒有誤判、句尾超出 0.004～0.012 秒
 - 2026-11-10 建立規劃；委員會（Gemini、Nemotron、DeepSeek；Poolside 已下架）＋Codex 第一輪完成；擁有者核准（等待 6 秒、診斷紀錄問題解決後拿掉、句尾誤差 0.1 秒、同意修改 #42 測試）

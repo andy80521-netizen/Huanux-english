@@ -68,7 +68,7 @@ describe('guardSegmentStart：確認真的從起點播放', () => {
     guardSegmentStart(m, 300, onFail);
     run(m, 6);
     expect(m.currentTime).toBeGreaterThanOrEqual(300);
-    expect(m.currentTime).toBeLessThan(301);
+    expect(m.currentTime).toBeLessThanOrEqual(301);
     expect(onFail).not.toHaveBeenCalled();
     expect(m.paused).toBe(false);
   });
@@ -93,7 +93,7 @@ describe('guardSegmentStart：確認真的從起點播放', () => {
     m.currentTime = 300;
     m.play();
     guardSegmentStart(m, 300, onFail);
-    run(m, 9);
+    run(m, 6);
     expect(m.src).toBe('https://example.test/a.mp3?alt=media#t=300.00');
     expect(m.loads).toBe(1);
     expect(m.paused).toBe(false);
