@@ -22,7 +22,12 @@ import { PLAYBACK_LEAD_MS, RECORDING_ORIGINAL_VOLUME, canSetElementVolume, overl
 import { createListenPlayer, ListenMode, ListenPlayer } from '../utils/shadowingPlayback';
 import { SHADOWING_SPEEDS, ShadowingSpeed, ShadowingAttempt, loadSpeed, saveSpeed, applyPlaybackSpeed, effectiveOriginalSec, scoreShadowingAttempt } from '../utils/shadowingSpeed';
 import SegmentedControl from './ui/SegmentedControl';
-import { watchSegmentEnd, seekSegmentStart, guardSegmentStart, withStartFragment } from '../utils/segmentEnd';
+import { watchSegmentEnd, seekSegmentStart, guardSegmentStart, prepareSegmentStart, PREPARE_TIMEOUT_MS } from '../utils/segmentEnd';
+import { createPlaybackTrace, PlaybackTrace } from '../utils/playbackTrace';
+import { formatPlayRange } from '../utils/timeEdit';
+
+/** 按下跟讀的靜音解鎖播放最多等幾毫秒，之後一律暫停、拉回起點（docs/plans/shadowing-stable-playback.md） */
+const UNLOCK_WAIT_MS = 1500;
 
 /** 系統是否開啟「減少動態效果」（分數跑動是 JS，全域 CSS 規則管不到，要自己判斷） */
 const prefersReducedMotion = () => {
@@ -151,8 +156,11 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
     const endWatchRef = useRef<(() => void) | null>(null);
     /** 確認原音真的從句子開頭播（iPhone 長教材會跳不過去，docs/plans/ios-seek-fix.md）；回傳值是取消函式 */
     const startGuardRef = useRef<(() => void) | null>(null);
-    /** 這台裝置跳不到句子開頭過：之後按跟讀時改用 #t= 在點擊當下就從句子開頭載入（錄音中不重新載入，Gemini） */
-    const useStartFragmentRef = useRef(false);
+    /** 播放診斷紀錄（暫時功能，問題解決後拿掉；擁有者 2026-11-10） */
+    const traceRef = useRef<PlaybackTrace | null>(null);
+    const trace = (msg: string) => traceRef.current?.mark(msg);
+    const [traceCopied, setTraceCopied] = useState<string | null>(null);
+    const [traceFallback, setTraceFallback] = useState<string | null>(null);
     
     const audioRef = useRef<HTMLAudioElement>(null);
     const recordedAudioRef = useRef<HTMLAudioElement>(null);
@@ -236,6 +244,54 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
             playerRef.current = null;
         };
     }, []);
+
+    /**
+     * 原音每一次開始播放都掛上精準的句尾監看（Codex：只靠 timeupdate 會多播約 0.25 秒）：
+     * 錄音中到句尾 → 進入緩衝倒數；其他情況（準備、中止後意外開始播放）只暫停。聽聽看由它自己的監看處理。
+     */
+    const armEndWatch = () => {
+        const a = audioRef.current;
+        const s = sentenceRef.current;
+        if (!a || endWatchRef.current || !(s.endTime > 0)) return;
+        endWatchRef.current = watchSegmentEnd(a, s.endTime, (reason) => {
+            endWatchRef.current = null;
+            startGuardRef.current?.();
+            startGuardRef.current = null;
+            trace(`句尾監看結束（${reason}）`);
+            if (mediaRecorderRef.current?.state === 'recording') enterBufferPhase();
+        });
+    };
+
+    // 診斷紀錄與「任何一次開始播放都有句尾監看」：元件存活期間掛在原音元素上
+    useEffect(() => {
+        const a = audioRef.current;
+        if (!a) return;
+        const t = createPlaybackTrace(a);
+        traceRef.current = t;
+        const onPlaying = () => {
+            if (playerRef.current?.playing()) return;
+            armEndWatch();
+        };
+        a.addEventListener('playing', onPlaying);
+        return () => {
+            a.removeEventListener('playing', onPlaying);
+            t.dispose();
+            traceRef.current = null;
+        };
+    }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+
+    const copyTrace = async () => {
+        const text = traceRef.current?.text() ?? '';
+        try {
+            await navigator.clipboard.writeText(text);
+            setTraceCopied('已複製，請貼給開發者');
+            setTraceFallback(null);
+        } catch {
+            // 不能寫入剪貼簿：顯示文字讓使用者自己長按複製
+            setTraceFallback(text);
+            setTraceCopied(null);
+        }
+    };
 
     // Reset state when sentence changes
     useEffect(() => {
@@ -339,23 +395,28 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
             recordedAudioRef.current.src = SILENT_AUDIO;
             recordedAudioRef.current.play().then(() => recordedAudioRef.current?.pause()).catch(() => {});
         }
-        // 原音會在錄音開始後才播放（不是在點擊當下）：先在點擊當下靜音解鎖一次，iPhone 之後才允許播放
-        let realPlayStarted = false;
         recordSpeedRef.current = speed;   // 這次錄音的原音速度快照
-        if (audioRef.current) {
-            const org = audioRef.current;
-            // 先設定起點再解鎖：iPhone 不要從 0 秒開始緩衝（docs/plans/ios-seek-fix.md）
-            if (useStartFragmentRef.current) org.src = withStartFragment(material.audioUrl, sentence.startTime);
+        trace(`按下跟讀：第 ${displayPosition} 句 ${formatPlayRange(sentence.startTime, sentence.endTime)}，語速 ${speed}`);
+        // 原音在錄音開始後才播放：先在點擊當下靜音解鎖一次（iPhone 之後才允許播放）。
+        // 解鎖前先設定起點，iPhone 不要從 0 秒開始緩衝（docs/plans/ios-seek-fix.md）
+        const org = audioRef.current;
+        let unlock: Promise<'ok' | 'rejected'> = Promise.resolve('rejected');
+        let unlockEnded = false;
+        if (org) {
             seekSegmentStart(org, sentence.startTime);
             applyPlaybackSpeed(org, speed);
             org.muted = true;
-            org.play()
-                .then(() => { if (!realPlayStarted) org.pause(); })
-                .catch(() => {})
-                .finally(() => { org.muted = false; });
+            // 解鎖播放一開始播就暫停（已有資料）；還在載入時（超過 UNLOCK_WAIT_MS）就讓它靜音繼續載入，就位後才暫停
+            unlock = Promise.resolve(org.play()).then(
+                () => { if (!unlockEnded) org.pause(); return 'ok' as const; },
+                () => 'rejected' as const,
+            );
+            trace('靜音解鎖 play()');
         }
 
         setError(null);
+        setTraceCopied(null);
+        setTraceFallback(null);
         cleanupAudio();
         mic.resume();   // iPhone：喚醒 AudioContext 要在點擊當下、任何 await 之前
         startingRef.current = true;
@@ -363,16 +424,51 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
         // 等待麥克風權限期間可能已換句或離開（桌機可點右側句子）：每個 await 之後都檢查，過期就結束，不啟動舊句子的錄音
         const startToken = scoringTokenRef.current;
         const isStale = () => startToken !== scoringTokenRef.current;
+        const stopStarting = () => {
+            startingRef.current = false;
+            setMicPreparing(false);
+        };
         const pressedAt = performance.now();
         try {
-            const h = await mic.acquire();
-            if (isStale()) {
-                startingRef.current = false;
-                setMicPreparing(false);
+            // 同時等麥克風與解鎖播放（解鎖最多等 UNLOCK_WAIT_MS，避免卡住）
+            const [h, unlockResult] = await Promise.all([
+                mic.acquire(),
+                Promise.race([unlock, new Promise<'slow'>((r) => setTimeout(() => r('slow'), UNLOCK_WAIT_MS))]),
+            ]);
+            trace(`解鎖結果：${unlockResult}`);
+            /** 結束靜音解鎖播放：暫停並取消靜音 */
+            const endUnlock = () => {
+                unlockEnded = true;
+                const el = audioRef.current;
+                if (!el) return;
+                if (!el.paused) el.pause();
+                el.muted = false;
+            };
+            if (isStale() || !audioRef.current) {
+                endUnlock();
+                stopStarting();
                 return;
             }
             mic.resume();
-            
+
+            // 原音先就位（停在句首、可以播放）才開始錄音（docs/plans/shadowing-stable-playback.md）。
+            // 解鎖播放還在載入時不先暫停（iPhone 暫停後可能不再載入）：靜音繼續，就位後才暫停
+            seekSegmentStart(audioRef.current, sentence.startTime);
+            trace('等待原音就位');
+            const ready = await prepareSegmentStart(audioRef.current, sentence.startTime, {
+                timeoutMs: PREPARE_TIMEOUT_MS,
+                isCancelled: isStale,
+                log: trace,
+            });
+            endUnlock();
+            if (ready !== 'ready' || !audioRef.current) {
+                stopStarting();
+                if (ready === 'timeout' && !isStale()) setError('原音載入失敗，請檢查網路後再試。');
+                return;
+            }
+            // 解鎖播放可能在就位後又往前走了一點：暫停後再拉回句首（資料已在，跳轉很快；之後由起點確認把關）
+            seekSegmentStart(audioRef.current, sentence.startTime);
+
             const mimeType = getSupportedMimeType();
             const mediaRecorder = new MediaRecorder(h.stream, mimeType ? { mimeType } : undefined);
             mediaRecorderRef.current = mediaRecorder;
@@ -415,7 +511,6 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
             recordStartAtRef.current = null;
             originalPlayingAtRef.current = null;
             if (audioRef.current) {
-                seekSegmentStart(audioRef.current, sentence.startTime);   // 還沒載入時間資訊時等 loadedmetadata（Gemini）
                 // 錄音時原音調小聲，讓使用者的聲音蓋過原音（不能調的裝置不變）
                 setOriginalVolume(RECORDING_ORIGINAL_VOLUME);
                 audioRef.current.addEventListener('playing', () => {
@@ -438,43 +533,42 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                 play: () => {
                     setMicPreparing(false);
                     if (!audioRef.current) return;
+                    const a = audioRef.current;
                     // 流暢度的講話時間從原音開始播放算起（不含前面等待的時間）
                     recordingStartTimeRef.current = Date.now();
-                    realPlayStarted = true;
-                    applyPlaybackSpeed(audioRef.current, recordSpeedRef.current);
-                    audioRef.current.muted = false;
-                    audioRef.current.play().catch(e => {
-                        console.error("Audio play failed:", e);
-                        abortRecording();
-                        setPracticeState('idle');
-                        setError("無法播放教材音訊，請確認裝置音量設定。");
-                    });
-                    // 準時停在句尾；鎖屏或切 App 時直接暫停原音，一樣進入緩衝倒數（擁有者決定）
-                    // 確認真的從句子開頭播；跳不過去就停下來顯示診斷（不默默從頭播）
+                    applyPlaybackSpeed(a, recordSpeedRef.current);
+                    a.muted = false;
+                    trace('正式播放 play()');
+                    audioRef.current.play()
+                        .then(() => {
+                            // 播放真的開始時錄音已經停了（中止、換句）：立刻暫停，不留下沒人管的播放
+                            if (isCancelled() || mediaRecorderRef.current?.state !== 'recording') {
+                                trace('播放開始時錄音已停止 → 暫停');
+                                a.pause();
+                            }
+                        })
+                        .catch(e => {
+                            if (e?.name === 'AbortError') return;   // 我們自己暫停造成的
+                            console.error("Audio play failed:", e);
+                            trace(`play() 失敗：${e?.name || e}`);
+                            if (isCancelled()) return;
+                            abortRecording();
+                            setPracticeState('idle');
+                            setError("無法播放教材音訊，請確認裝置音量設定。");
+                        });
+                    // 確認真的從句子開頭播（位置確實在前進才判斷）；錄音中不重新載入，失敗就停止並請使用者複製診斷紀錄
                     startGuardRef.current?.();
-                    startGuardRef.current = guardSegmentStart(audioRef.current, sentence.startTime, (diag) => {
+                    startGuardRef.current = guardSegmentStart(a, sentence.startTime, (diag) => {
                         startGuardRef.current = null;
                         if (isCancelled()) return;
                         abortRecording();
                         setPracticeState('idle');
-                        if (!useStartFragmentRef.current) {
-                            // 第一次：下次按跟讀改用另一種載入方式（點擊當下就從句子開頭載入）
-                            useStartFragmentRef.current = true;
-                            setError('原音沒有從這一句的開頭開始，已換另一種載入方式，請再按一次「開始跟讀」。');
-                        } else {
-                            setError(`原音沒辦法跳到這一句的開頭，請截圖回報：${diag}`);
-                        }
-                    }, { allowReload: false });
+                        setError(`原音沒有從這一句的開頭開始播（${diag}）。請按下方「複製診斷紀錄」貼給開發者。`);
+                    }, { allowReload: false, log: trace });
+                    // 準時停在句尾；鎖屏或切 App 時直接暫停原音，一樣進入緩衝倒數（擁有者決定）
                     endWatchRef.current?.();
-                    endWatchRef.current = sentence.endTime > 0
-                        ? watchSegmentEnd(audioRef.current, sentence.endTime, () => {
-                            endWatchRef.current = null;
-                            startGuardRef.current?.();
-                            startGuardRef.current = null;
-                            if (isCancelled()) return;
-                            enterBufferPhase();
-                        })
-                        : null;
+                    endWatchRef.current = null;
+                    armEndWatch();
                 },
             });
             await playback;
@@ -483,6 +577,12 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
         } catch (err: any) {
             startingRef.current = false;
             setMicPreparing(false);
+            // 麥克風失敗：結束靜音解鎖播放（不留下靜音中或播放中的原音）
+            unlockEnded = true;
+            if (audioRef.current) {
+                if (!audioRef.current.paused) audioRef.current.pause();
+                audioRef.current.muted = false;
+            }
             if (err instanceof MicReleasedError) return;
             console.error("Mic access error:", err);
             if (isStale()) return;
@@ -517,10 +617,14 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
         }, 1000);
     };
 
-    // 保險：主要由 watchSegmentEnd 準時停止，timeupdate 只在監看沒觸發時補上
+    // 安全網：主要由 watchSegmentEnd 準時停止；不論什麼狀態，原音播過句尾都暫停（docs/plans/shadowing-stable-playback.md）
     const handleTimeUpdate = () => {
-        if (practiceState !== 'recording' || !audioRef.current) return;
-        if (audioRef.current.currentTime >= sentence.endTime && sentence.endTime > 0) enterBufferPhase();
+        const a = audioRef.current;
+        if (!a || a.paused || !(sentence.endTime > 0) || a.currentTime < sentence.endTime) return;
+        if (mediaRecorderRef.current?.state === 'recording') { enterBufferPhase(); return; }
+        if (playerRef.current?.playing()) return;   // 聽聽看由它自己的監看停止
+        trace('安全網：播過句尾 → 暫停');
+        a.pause();
     };
 
     const handleRetry = () => {
@@ -758,6 +862,9 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                                         {originalSec > 0 && <span>原音 {effectiveOriginalSec(originalSec, speed).toFixed(1)} 秒</span>}
                                         {typeof lastTotal === 'number' && <span>上次 {lastTotal} 分</span>}
                                     </div>
+                                    {sentence.endTime > 0 && (
+                                        <p className="text-[13px] tabular-nums text-muted">播放範圍 {formatPlayRange(sentence.startTime, sentence.endTime)}</p>
+                                    )}
                                 </div>
                             )}
                         </div>
@@ -971,6 +1078,27 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                                     </div>
                                 )}
                             </div>
+                        )}
+                    </div>
+
+                    {/* 播放診斷紀錄（暫時功能，問題解決後拿掉；擁有者 2026-11-10） */}
+                    <div className="mt-auto flex flex-col items-start gap-2 pt-10 pb-6">
+                        <button
+                            type="button"
+                            onClick={copyTrace}
+                            className="min-h-9 rounded-full px-3 text-xs text-muted underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-accent"
+                        >
+                            複製診斷紀錄
+                        </button>
+                        {traceCopied && <p role="status" className="px-3 text-xs text-accent">{traceCopied}</p>}
+                        {traceFallback && (
+                            <textarea
+                                readOnly
+                                aria-label="診斷紀錄"
+                                value={traceFallback}
+                                onFocus={(e) => e.currentTarget.select()}
+                                className="h-40 w-full max-w-[640px] rounded-xl border border-line bg-surface-2 p-3 font-mono text-[11px] text-ink"
+                            />
                         )}
                     </div>
                 </main>

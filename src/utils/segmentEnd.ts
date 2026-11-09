@@ -193,27 +193,39 @@ export interface GuardOptions {
      * 跟讀錄音中不適合重新載入（原音會延後、和錄音時序脫鉤，Gemini）→ 傳 false，直接回報失敗。
      */
     allowReload?: boolean;
+    /** 診斷紀錄（docs/plans/shadowing-stable-playback.md） */
+    log?: (msg: string) => void;
 }
+
+/** 連續看到幾次「位置在前進」才判斷起點（避免播放初期的空窗被誤判，擁有者 2026-11-10） */
+const ADVANCE_SAMPLES = 2;
 
 /**
  * 播放一段時確認真的從起點開始。在 seekSegmentStart 與 play() 之後呼叫；回傳取消函式（段落結束、停止時呼叫）。
- * 失敗時會暫停並呼叫 onFail（附診斷文字）；#t= 重新載入後播放被拒或載入失敗也算失敗（Codex）。
- * 重新載入後 src 會留著 #t=：只在載入當下決定起點，之後設定 currentTime 照常有效，所以不還原（還原會重新下載整份音檔）。
+ * 只在「正在播放、沒在跳轉、已有資料（readyState ≥ 2），而且連續看到位置在前進」時才判斷（docs/plans/shadowing-stable-playback.md）：
+ * iPhone 播放初期可能短暫回報 0 秒，PR #42 一播放就判斷 → 誤判、中止跟讀。
+ * 位置在起點之前 → 補跳（最多 MAX_START_RETRIES 次，每次補跳後重新取樣）→ #t= 重新載入（allowReload）→ 暫停並回報。
+ * #t= 重新載入後播放被拒或載入失敗也算失敗（Codex）。重新載入後 src 會留著 #t=：只在載入當下決定起點，之後設定 currentTime 照常有效。
  */
 export function guardSegmentStart(media: GuardMedia, startTime: number, onFail: (diag: string) => void, opts: GuardOptions = {}): () => void {
     const start = Number.isFinite(startTime) && startTime > 0 ? startTime : 0;
     const allowReload = opts.allowReload !== false;
+    const log = opts.log ?? (() => {});
     let done = false;
     let retries = 0;
     let usedFragment = false;
+    let last: number | null = null;
+    let streak = 0;
     const unlisten: Array<() => void> = [];
     const cleanup = () => { done = true; unlisten.forEach((u) => u()); unlisten.length = 0; };
+    const resetSamples = () => { last = null; streak = 0; };
 
     const fail = () => {
         if (done) return;
         const diag = describeSeekFailure(media, start);
         cleanup();
         try { media.pause(); } catch { /* 忽略 */ }
+        log(`起點確認失敗：${diag}`);
         console.warn('[播放] 沒辦法跳到起點:', diag);
         onFail(diag);
     };
@@ -221,6 +233,7 @@ export function guardSegmentStart(media: GuardMedia, startTime: number, onFail: 
     const reload = (): boolean => {
         const base = (media.currentSrc || media.src || '').split('#')[0];
         if (!base) return false;
+        log('起點確認：改用 #t= 重新載入');
         try {
             media.src = withStartFragment(base, start);
             media.load?.();
@@ -232,29 +245,118 @@ export function guardSegmentStart(media: GuardMedia, startTime: number, onFail: 
         return true;
     };
 
-    const check = () => {
+    const sample = () => {
         if (done || start <= START_TOLERANCE_SEC) return;
-        if (media.paused || media.seeking) return;
-        if (media.currentTime >= start - START_TOLERANCE_SEC) return;
+        const ready = !media.paused && !media.seeking && (media.readyState === undefined || media.readyState >= 2);
+        if (!ready) { resetSamples(); return; }
+        const ct = media.currentTime;
+        const prev = last;
+        last = ct;
+        if (prev === null || !(ct > prev + 0.01)) { streak = 0; return; }   // 還沒確認在前進
+        streak += 1;
+        if (streak < ADVANCE_SAMPLES) return;
+        if (ct >= start - START_TOLERANCE_SEC) return;
         if (retries < MAX_START_RETRIES) {
             retries += 1;
+            log(`起點確認：在 ${ct.toFixed(2)} 秒往前播，補跳回 ${start.toFixed(2)}（第 ${retries} 次）`);
+            resetSamples();
             media.currentTime = start;
             return;
         }
         if (allowReload && !usedFragment) {
             usedFragment = true;
+            resetSamples();
             if (reload()) return;
         }
         fail();
     };
 
+    const onSeeked = () => { resetSamples(); sample(); };
     const onError = () => { if (usedFragment) fail(); };
-    media.addEventListener('error', onError);
-    unlisten.push(() => media.removeEventListener('error', onError));
-    for (const type of ['playing', 'timeupdate', 'seeked']) {
-        media.addEventListener(type, check);
-        unlisten.push(() => media.removeEventListener(type, check));
-    }
-    check();
+    const listen = (type: string, fn: () => void) => {
+        media.addEventListener(type, fn);
+        unlisten.push(() => media.removeEventListener(type, fn));
+    };
+    listen('error', onError);
+    listen('playing', sample);
+    listen('timeupdate', sample);
+    listen('seeked', onSeeked);
+    listen('pause', resetSamples);
+    sample();
     return () => { if (!done) cleanup(); };
+}
+
+// ── 原音先就位才錄音（docs/plans/shadowing-stable-playback.md）─────────────
+
+/** 原音就位最多等幾毫秒（擁有者 2026-11-10：6 秒） */
+export const PREPARE_TIMEOUT_MS = 6000;
+/** 就位的位置誤差（秒） */
+export const READY_TOLERANCE_SEC = 0.25;
+/** 就位等待中最多重新設定起點幾次 */
+const MAX_PREPARE_SEEKS = 3;
+/** 沒有事件時的檢查間隔（偵測取消） */
+const PREPARE_POLL_MS = 200;
+
+export type PrepareResult = 'ready' | 'timeout' | 'cancelled';
+
+export interface PrepareOptions {
+    timeoutMs?: number;
+    isCancelled?: () => boolean;
+    /** 頁面被隱藏時呼叫 fn；回傳取消監聽的函式（預設：document visibilitychange） */
+    onHidden?: (fn: () => void) => () => void;
+    log?: (msg: string) => void;
+}
+
+const browserOnHidden = (fn: () => void) => {
+    if (typeof document === 'undefined') return () => {};
+    const handler = () => { if (document.visibilityState === 'hidden') fn(); };
+    document.addEventListener('visibilitychange', handler);
+    return () => document.removeEventListener('visibilitychange', handler);
+};
+
+/**
+ * 等原音停在起點而且可以播放：readyState ≥ 1、沒在跳轉、位置與起點相差 ≤ 0.25 秒。
+ * 不在起點就重新設定（例如靜音解鎖播放往前走了）。不會呼叫 play()、不會換 src。
+ */
+export function prepareSegmentStart(media: GuardMedia, startTime: number, opts: PrepareOptions = {}): Promise<PrepareResult> {
+    const start = Number.isFinite(startTime) && startTime > 0 ? startTime : 0;
+    const timeoutMs = opts.timeoutMs ?? PREPARE_TIMEOUT_MS;
+    const log = opts.log ?? (() => {});
+    return new Promise<PrepareResult>((resolve) => {
+        let settled = false;
+        let seeks = 0;
+        const unlisten: Array<() => void> = [];
+        let poll: ReturnType<typeof setInterval> | null = null;
+        let timer: ReturnType<typeof setTimeout> | null = null;
+        const finish = (r: PrepareResult) => {
+            if (settled) return;
+            settled = true;
+            unlisten.forEach((u) => u());
+            unlisten.length = 0;
+            if (poll !== null) clearInterval(poll);
+            if (timer !== null) clearTimeout(timer);
+            log(`就位結果：${r}（ct=${media.currentTime.toFixed(2)} rs=${media.readyState ?? '?'}）`);
+            resolve(r);
+        };
+        const evaluate = () => {
+            if (settled) return;
+            if (opts.isCancelled?.()) { finish('cancelled'); return; }
+            const rs = media.readyState === undefined ? 4 : media.readyState;
+            if (rs < 1 || media.seeking) return;
+            if (Math.abs(media.currentTime - start) <= READY_TOLERANCE_SEC) { finish('ready'); return; }
+            if (seeks < MAX_PREPARE_SEEKS) {
+                seeks += 1;
+                log(`就位：在 ${media.currentTime.toFixed(2)} 秒，拉回 ${start.toFixed(2)}`);
+                media.currentTime = start;
+            }
+        };
+        for (const type of ['loadedmetadata', 'loadeddata', 'canplay', 'canplaythrough', 'seeked', 'timeupdate', 'progress', 'pause', 'durationchange']) {
+            media.addEventListener(type, evaluate);
+            unlisten.push(() => media.removeEventListener(type, evaluate));
+        }
+        unlisten.push((opts.onHidden ?? browserOnHidden)(() => finish('cancelled')));
+        poll = setInterval(evaluate, PREPARE_POLL_MS);
+        timer = setTimeout(() => finish('timeout'), timeoutMs);
+        evaluate();
+    });
 }

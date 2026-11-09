@@ -43,11 +43,17 @@ class FakeMedia {
     const m = /#t=([\d.]+)/.exec(this.src);
     this.pos = m && this.fragmentWorks ? Number(m[1]) : 0;
   }
+  /** 播放中前進 0.25 秒並觸發 timeupdate（2026-11-10 起，起點確認要看到位置在前進才判斷） */
+  tick() { if (!this.paused) this.pos += 0.25; this.emit('timeupdate'); }
   addEventListener(t: string, f: () => void) { if (!this.ls.has(t)) this.ls.set(t, new Set()); this.ls.get(t)!.add(f); }
   removeEventListener(t: string, f: () => void) { this.ls.get(t)?.delete(f); }
   emit(t: string) { [...(this.ls.get(t) ?? [])].forEach(f => f()); }
   count() { let n = 0; this.ls.forEach(s => (n += s.size)); return n; }
 }
+
+// 擁有者 2026-11-10 同意：起點確認改成「位置確實在前進後才判斷」（docs/plans/shadowing-stable-playback.md），
+// 以下測試由「emit 一次 timeupdate 就判斷」改成「播放前進幾次（run）後判斷」，補跳／失敗回報／拆監聽的檢查保留
+const run = (m: { tick(): void }, n: number) => { for (let i = 0; i < n; i++) m.tick(); };
 
 describe('guardSegmentStart：確認真的從起點播放', () => {
   it('匯出 guardSegmentStart', () => {
@@ -60,8 +66,9 @@ describe('guardSegmentStart：確認真的從起點播放', () => {
     m.currentTime = 300;          // 呼叫端的 seekSegmentStart（被忽略）
     m.play();
     guardSegmentStart(m, 300, onFail);
-    m.emit('timeupdate');
-    expect(m.currentTime).toBe(300);
+    run(m, 6);
+    expect(m.currentTime).toBeGreaterThanOrEqual(300);
+    expect(m.currentTime).toBeLessThanOrEqual(301);
     expect(onFail).not.toHaveBeenCalled();
     expect(m.paused).toBe(false);
   });
@@ -72,9 +79,11 @@ describe('guardSegmentStart：確認真的從起點播放', () => {
     m.currentTime = 120;
     m.play();
     guardSegmentStart(m, 120, onFail);
+    run(m, 3);
     m.pos = 0.3;                  // 播放開始時被重設
-    m.emit('timeupdate');
-    expect(m.currentTime).toBe(120);
+    run(m, 4);
+    expect(m.currentTime).toBeGreaterThanOrEqual(120);
+    expect(m.currentTime).toBeLessThan(121);
     expect(onFail).not.toHaveBeenCalled();
   });
 
@@ -84,7 +93,7 @@ describe('guardSegmentStart：確認真的從起點播放', () => {
     m.currentTime = 300;
     m.play();
     guardSegmentStart(m, 300, onFail);
-    m.emit('timeupdate');
+    run(m, 6);
     expect(m.src).toBe('https://example.test/a.mp3?alt=media#t=300.00');
     expect(m.loads).toBe(1);
     expect(m.paused).toBe(false);
@@ -98,7 +107,7 @@ describe('guardSegmentStart：確認真的從起點播放', () => {
     m.currentTime = 300;
     m.play();
     guardSegmentStart(m, 300, onFail);
-    m.emit('timeupdate');
+    run(m, 12);
     expect(onFail).toHaveBeenCalledTimes(1);
     const diag = onFail.mock.calls[0][0] as string;
     expect(diag).toContain('目標 300.0 秒');
@@ -174,7 +183,8 @@ describe('審查第 1 輪補充', () => {
     m.play();
     m.play = () => { m.plays++; return Promise.reject(new Error('NotAllowedError')); };
     const onFail = vi.fn();
-    guardSegmentStart(m, 300, onFail);   // 立即檢查 → 補跳 2 次無效 → #t= 重新載入 → play 被拒
+    guardSegmentStart(m, 300, onFail);   // 播放前進 → 補跳 2 次無效 → #t= 重新載入 → play 被拒
+    run(m, 9);
     await Promise.resolve(); await Promise.resolve();
     expect(m.loads).toBe(1);
     expect(onFail).toHaveBeenCalledTimes(1);
@@ -187,6 +197,7 @@ describe('審查第 1 輪補充', () => {
     m.play();
     const onFail = vi.fn();
     guardSegmentStart(m, 300, onFail);
+    run(m, 9);
     expect(m.loads).toBe(1);
     m.emit('error');
     expect(onFail).toHaveBeenCalledTimes(1);
@@ -198,6 +209,7 @@ describe('審查第 1 輪補充', () => {
     m.play();
     const onFail = vi.fn();
     (seg as any).guardSegmentStart(m, 300, onFail, { allowReload: false });
+    run(m, 12);
     expect(m.loads).toBe(0);
     expect(onFail).toHaveBeenCalledTimes(1);
     expect(m.paused).toBe(true);
@@ -208,10 +220,11 @@ describe('審查第 1 輪補充', () => {
     expect((seg as any).withStartFragment('https://x/a.mp3#t=3', 0)).toBe('https://x/a.mp3');
   });
 
-  it('跟讀：跳不過去過一次後，按跟讀時改用 #t= 載入；錄音中不重新載入', () => {
+  // 擁有者 2026-11-10 核准規劃：拿掉「跳不過去後每次按跟讀都換網址」（整份重新下載、造成連續誤判），錄音中仍不重新載入
+  it('跟讀：不換音檔網址；錄音中不重新載入', () => {
     const src = read('src/components/ShadowingPracticeView.tsx');
-    expect(src).toMatch(/org\.src = withStartFragment\(material\.audioUrl, sentence\.startTime\)/);
-    expect(src).toMatch(/\{ allowReload: false \}/);
+    expect(src).not.toMatch(/\.src = withStartFragment/);
+    expect(src).toMatch(/\{ allowReload: false/);
   });
 
   it('聽聽看：跳不過去時回報給畫面（Codex）', async () => {
@@ -224,7 +237,7 @@ describe('審查第 1 輪補充', () => {
       segment: () => ({ start: 300, end: 303 }), offsetMs: () => 0, onStartFail,
     } as any);
     player.toggle('original');
-    original.emit('timeupdate');
+    run(original, 12);
     expect(onStartFail).toHaveBeenCalledTimes(1);
     expect(player.playing()).toBe(null);
     player.dispose();

@@ -102,3 +102,6 @@ export function restoreSentenceTime(sentences: MaterialSentence[], id: string): 
     const next: MaterialSentence = { ...rest, startTime: originalStartTime, endTime: originalEndTime };
     return sentences.map((s, i) => (i === idx ? next : s));
 }
+
+/** 播放範圍顯示（跟讀畫面與調整時間對照用）：「12.40s ～ 15.80s」 */
+export const formatPlayRange = (start: number, end: number) => `${round2(start).toFixed(2)}s ～ ${round2(end).toFixed(2)}s`;

@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { watchSegmentEnd, seekSegmentStart, guardSegmentStart, SegmentEndWatch } from '../utils/segmentEnd';
+import { saveSentenceTime } from '../services/materialTimeEdit';
+import { formatPlayRange } from '../utils/timeEdit';
 import { Material, CoverStyle } from '../types';
 import { ChevronLeft, Play, Pause, Mic, Loader2, Sparkles, Trash2, RotateCcw, BookOpen, X, Search, RefreshCw, Clock3 } from 'lucide-react';
 import SentenceTimeEditor from './SentenceTimeEditor';
@@ -21,6 +23,9 @@ import IconButton from './ui/IconButton';
 import ProgressBar from './ui/ProgressBar';
 import SegmentedControl from './ui/SegmentedControl';
 import { materialProgress, MASTERY_MAX } from '../utils/materialProgress';
+
+/** 按「儲存」後等教材資料更新的上限（毫秒） */
+const PENDING_SAVE_MS = 3000;
 
 export default function MaterialDetailView({ materialId, onBack }: { materialId: string, onBack: () => void }) {
     const [material, setMaterial] = useState<Material | null>(null);
@@ -112,6 +117,13 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
     const segWatchRef = useRef<SegmentEndWatch | null>(null);
     // 修正時間（docs/plans/import-timestamp-accuracy.md PR-G）：正在編輯的句子、編輯器裡正在播放的範圍
     const [editingTimeId, setEditingTimeId] = useState<string | null>(null);
+    // 調整時間未儲存提醒（擁有者 2026-11-10：儲存／不儲存；docs/plans/shadowing-stable-playback.md）
+    const [unsavedTime, setUnsavedTime] = useState<{ id: string; startTime: number; endTime: number; valid: boolean } | null>(null);
+    const [unsavedAction, setUnsavedAction] = useState<{ run: () => void } | null>(null);
+    const [savingUnsaved, setSavingUnsaved] = useState(false);
+    const [unsavedError, setUnsavedError] = useState<string | null>(null);
+    /** 按「儲存」後：等教材資料更新成新時間才繼續（跟讀要用新時間），最多等 PENDING_SAVE_MS */
+    const pendingAfterSave = useRef<{ id: string; startTime: number; endTime: number; run: () => void; timer: ReturnType<typeof setTimeout> } | null>(null);
     const [playingKey, setPlayingKey] = useState<string | null>(null);
     // 確認真的從起點播（iPhone 長教材會跳不過去，docs/plans/ios-seek-fix.md）
     const startGuardRef = useRef<(() => void) | null>(null);
@@ -120,6 +132,48 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
         startGuardRef.current?.(); startGuardRef.current = null;
     };
     useEffect(() => stopSegWatch, []);
+
+    useEffect(() => {
+        const p = pendingAfterSave.current;
+        if (!p || !material) return;
+        const s = material.sentences.find(x => x.id === p.id);
+        if (s && s.startTime === p.startTime && s.endTime === p.endTime) {
+            clearTimeout(p.timer);
+            pendingAfterSave.current = null;
+            p.run();
+        }
+    }, [material]);
+    useEffect(() => () => { if (pendingAfterSave.current) clearTimeout(pendingAfterSave.current.timer); }, []);
+
+    /** 有未儲存的時間修改 → 先問「儲存／不儲存」，否則直接做 */
+    const guardUnsaved = (action: () => void) => {
+        if (!unsavedTime) { action(); return; }
+        setUnsavedError(null);
+        setUnsavedAction({ run: action });
+    };
+    const discardUnsaved = () => {
+        const act = unsavedAction;
+        setUnsavedAction(null);
+        setUnsavedTime(null);
+        setEditingTimeId(null);
+        act?.run();
+    };
+    const saveUnsaved = async () => {
+        const u = unsavedTime;
+        const act = unsavedAction;
+        if (!u || !act || !material) return;
+        setSavingUnsaved(true);
+        setUnsavedError(null);
+        try {
+            await saveSentenceTime(material.id, u.id, u.startTime, u.endTime);
+            const run = () => { setSavingUnsaved(false); setUnsavedAction(null); setUnsavedTime(null); setEditingTimeId(null); act.run(); };
+            const timer = setTimeout(() => { if (pendingAfterSave.current) { pendingAfterSave.current = null; run(); } }, PENDING_SAVE_MS);
+            pendingAfterSave.current = { id: u.id, startTime: u.startTime, endTime: u.endTime, run, timer };
+        } catch (err: any) {
+            setSavingUnsaved(false);
+            setUnsavedError(err?.message || '儲存失敗，請再試一次');
+        }
+    };
 
     if (!material) {
         return (
@@ -405,7 +459,7 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
                 {/* 左欄：封面、標題、進度、工具 */}
                 <section className="flex flex-col gap-5">
                     <div className="-mx-3 flex items-center justify-between">
-                        <IconButton aria-label="返回教材列表" onClick={onBack}>
+                        <IconButton aria-label="返回教材列表" onClick={() => guardUnsaved(onBack)}>
                             <ChevronLeft size={22} aria-hidden="true" />
                         </IconButton>
                         <IconButton
@@ -551,7 +605,7 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
                                         <button
                                             type="button"
                                             aria-expanded={editingTimeId === s.id}
-                                            onClick={() => { handlePause(); setEditingTimeId(editingTimeId === s.id ? null : s.id); }}
+                                            onClick={() => guardUnsaved(() => { handlePause(); setEditingTimeId(editingTimeId === s.id ? null : s.id); })}
                                             className={`-my-1 ml-auto flex min-h-8 items-center gap-1 rounded-full px-2.5 text-xs transition-colors hover:bg-line focus-visible:outline-2 focus-visible:outline-accent ${editingTimeId === s.id ? 'bg-accent-soft text-ink' : 'text-muted'}`}
                                         >
                                             <Clock3 size={14} aria-hidden="true" />
@@ -623,7 +677,7 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
                                                     ? <Pause size={16} className="fill-current" aria-hidden="true" />
                                                     : <Play size={16} className="fill-current ml-0.5" aria-hidden="true" />}
                                             </IconButton>
-                                            <Button onClick={() => setPracticeIndex(i)} icon={<Mic size={16} aria-hidden="true" />}>
+                                            <Button onClick={() => guardUnsaved(() => setPracticeIndex(i))} icon={<Mic size={16} aria-hidden="true" />}>
                                                 跟讀
                                             </Button>
                                         </div>
@@ -637,6 +691,7 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
                                             onTimesChanged={() => segWatchRef.current?.refresh()}
                                             onStop={handlePause}
                                             onClose={() => setEditingTimeId(null)}
+                                            onDirtyChange={(d) => setUnsavedTime(d ? { id: s.id, ...d } : null)}
                                         />
                                     )}
                                 </article>
@@ -645,6 +700,34 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
                     </div>
                 </section>
             </div>
+
+            {/* 調整時間未儲存提醒 */}
+            {unsavedAction && (
+                <div className="fixed inset-0 z-100 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4" onClick={() => { if (!savingUnsaved) setUnsavedAction(null); }}>
+                    <div
+                        role="alertdialog"
+                        aria-modal="true"
+                        aria-labelledby="unsaved-time-h"
+                        onClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => { if (e.key === 'Escape' && !savingUnsaved) setUnsavedAction(null); }}
+                        className="flex w-full max-w-xs flex-col gap-3 rounded-3xl border border-line bg-surface p-7 text-center shadow-[0_24px_48px_-12px_rgb(0_0_0/0.25)]"
+                    >
+                        <h3 id="unsaved-time-h" className="text-xl font-bold text-ink">這句的時間還沒儲存</h3>
+                        <p className="text-[15px] leading-relaxed text-muted">
+                            {unsavedTime?.valid
+                                ? <>要先儲存 <span className="tabular-nums">{formatPlayRange(unsavedTime.startTime, unsavedTime.endTime)}</span> 嗎？不儲存會用原本的時間。</>
+                                : '修改的時間不正確（開始必須小於結束），不儲存會用原本的時間。'}
+                        </p>
+                        {unsavedError && <p role="alert" className="text-xs font-medium text-danger">{unsavedError}</p>}
+                        <Button size="lg" fullWidth autoFocus disabled={savingUnsaved || !unsavedTime?.valid} onClick={saveUnsaved}
+                            icon={savingUnsaved ? <Loader2 size={16} className="animate-spin" aria-hidden="true" /> : undefined}>
+                            儲存
+                        </Button>
+                        <Button variant="secondary" size="lg" fullWidth disabled={savingUnsaved} onClick={discardUnsaved}>不儲存</Button>
+                        <Button variant="ghost" fullWidth disabled={savingUnsaved} onClick={() => setUnsavedAction(null)} className="text-muted">取消</Button>
+                    </div>
+                </div>
+            )}
 
             {/* 刪除確認對話框 */}
             <ConfirmDialog
