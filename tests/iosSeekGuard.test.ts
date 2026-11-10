@@ -162,13 +162,18 @@ describe('接線：所有直接跳位置的播放入口都確認起點', () => {
     });
   }
 
-  it('跟讀：按下時先設定起點，再做靜音解鎖播放', () => {
+  // 擁有者 2026-11-10 同意修改：iPhone 診斷紀錄顯示「先設定起點（跳轉中）→ 靜音播放 → 馬上暫停」會讓播放器回到 0 秒並宣告已播完，
+  // 之後每次跳轉都停在 0、按播放就從頭播（docs/plans/ios-ended-fix.md）→ 改成解鎖時不跳位置，解鎖結束後才設定起點
+  it('跟讀：解鎖時不跳位置，解鎖結束後才設定起點', () => {
     const src = read('src/components/ShadowingPracticeView.tsx');
-    const body = src.slice(src.indexOf('const handleStart'));
-    const seekAt = body.indexOf('seekSegmentStart(org, sentence.startTime)');
+    const body = src.slice(src.indexOf('const handleStart'), src.indexOf('const enterBufferPhase'));
+    expect(body).not.toContain('seekSegmentStart(org, sentence.startTime)');
     const unlockAt = body.indexOf('org.play()');
-    expect(seekAt).toBeGreaterThan(-1);
-    expect(unlockAt).toBeGreaterThan(seekAt);
+    const awaitAt = body.indexOf('await Promise.all(');
+    const seekAt = body.indexOf('seekSegmentStart(audioRef.current, sentence.startTime)');
+    expect(unlockAt).toBeGreaterThan(-1);
+    expect(awaitAt).toBeGreaterThan(unlockAt);
+    expect(seekAt).toBeGreaterThan(awaitAt);
   });
 
   it('聽句尾維持句尾後多播 0.5 秒（擁有者 2026-11-09：不要拿掉）', () => {
