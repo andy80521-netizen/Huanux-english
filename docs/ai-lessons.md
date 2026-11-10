@@ -68,6 +68,7 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 - 影子跟讀的原音語速：每次錄音拍下速度快照（`lastRecordingRef` 的 `speed`），評分（`scoreShadowingAttempt`）、重試評分、聽聽看都讀快照，不讀目前設定；放慢時流暢度用放慢後的原音長度（PR #32）
 - iPhone 播放：沙盒只有 Chromium，測不到 WebKit。PR #35 把「未載入就等 loadedmetadata 才設起點」→ iPhone 每句從頭播（PR #42 修）；PR #42 的起點確認「一播放就判斷」又在 iPhone 誤判、中止跟讀，失敗後每次換 `#t=` 重新下載讓情況更糟（PR #43 修：先就位才錄音、位置確實前進才判斷）。**播放時序的修改一律先加診斷紀錄（`playbackTrace`），推測的原因不能當成已證實**（Codex）；不要在非同步流程中換 `src`
 
+- **iPhone（WebKit）跳轉中呼叫 `pause()` 會讓播放器回到 0 秒並宣告 ended**，之後跳轉都落在 0、按播放從頭播（PR #45，擁有者貼回的診斷紀錄證實）。規則：不要在 `seeking` 時暫停（用 `pauseSafely`）、靜音解鎖不跳位置；PR #35～#43 的推測都沒抓到這點，直到加了 `playbackTrace` 才找到
 ## 防作弊機制的已知限制（2026-10-25 多輪攻擊測試後）
 - 「把斷言改弱」「mock 掉被測程式」「程式偵測測試環境」只能列為 ⚠️ 注意事項，無法自動判定是否作弊，要靠審查者與完成報告說明
 - Claude 若繞過 `gh_ai.py` 直接用 `gh api` 留言，留言會被當成擁有者的發言（Claude 使用擁有者帳號）；只能靠規則遵守
@@ -174,3 +175,5 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 | 跟讀播放穩定（PR #43，規劃） | Codex | 3 | 0 | 原因分析是推測（規範上 currentTime／pause 行為不符），要先加診斷；只靠 timeupdate 停句尾會多播 0.25 秒 |
 | 跟讀播放穩定（PR #43，規劃） | Gemini／Nemotron／DeepSeek（Poolside 已下架） | 5 | 2 | 逾時換 src 可能讓 iPhone 播放權限失效（Gemini）、暫停時 readyState 可能停在 1（DeepSeek）、未儲存狀態要提升；駁回：未儲存提醒拆 PR（DeepSeek）、逾時 3 秒（擁有者定 6 秒） |
 | 跟讀播放穩定（PR #43，審查） | Codex／Gemini 3.8 Flash | 0 | 0 | 皆無意見 |
+| iPhone 跳轉中暫停（PR #45，小級，審查） | Codex | 1 | 0 | pauseSafely 的延遲暫停會中斷新的播放（聽聽看切換、快速重播） |
+| iPhone 跳轉中暫停（PR #45，小級，審查） | Gemini（3.8 Flash 逾時／過載，備援模型） | 0 | 0 | 兩輪皆無意見 |
