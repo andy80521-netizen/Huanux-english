@@ -163,7 +163,8 @@ describe('跟讀流程：每個播放器只解鎖一次，解鎖不跳位置', (
     expect(rec).toBeGreaterThan(prep);
   });
 
-  it('解鎖時不設定起點、不改語速（避免跳轉中暫停）', () => {
+  // 語速（playbackRate）不是跳轉，可以在解鎖時套用（tests/shadowingSpeed.test.ts 驗收 6 要求解鎖預播放也套用速度）
+  it('解鎖時不設定起點（避免跳轉中暫停）', () => {
     const b = body();
     const unlockBlock = b.slice(b.indexOf('if (org && !unlockedRef.current)'), b.indexOf('await Promise.all('));
     expect(unlockBlock).not.toMatch(/seekSegmentStart|currentTime\s*=/);

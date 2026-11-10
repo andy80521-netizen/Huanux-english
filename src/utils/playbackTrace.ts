@@ -7,6 +7,8 @@ export interface TraceMedia {
     readyState?: number;
     seeking?: boolean;
     paused?: boolean;
+    ended?: boolean;
+    duration?: number;
     playbackRate?: number;
     src?: string;
     currentSrc?: string;
@@ -37,7 +39,7 @@ export function createPlaybackTrace(media: TraceMedia, opts: { limit?: number; n
     const state = () => {
         const src = media.currentSrc || media.src || '';
         const frag = src.includes('#') ? ` src#${src.split('#')[1]}` : '';
-        return `ct=${Number(media.currentTime).toFixed(2)} rs=${media.readyState ?? '?'} seek=${media.seeking ? 1 : 0} paused=${media.paused ? 1 : 0} rate=${media.playbackRate ?? 1}${frag}`;
+        return `ct=${Number(media.currentTime).toFixed(2)} rs=${media.readyState ?? '?'} seek=${media.seeking ? 1 : 0} paused=${media.paused ? 1 : 0} ended=${media.ended ? 1 : 0} dur=${typeof media.duration === 'number' ? Number(media.duration.toFixed(2)) : '?'} rate=${media.playbackRate ?? 1}${frag}`;
     };
     const push = (what: string) => {
         lines.push(`${((now() - t0) / 1000).toFixed(3)} ${what} ${state()}`);

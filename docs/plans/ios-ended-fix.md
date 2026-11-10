@@ -1,7 +1,7 @@
 # iPhone 跳轉中暫停讓播放器壞掉（小級）
 
 ## 狀態
-實作中（擁有者 2026-11-10 同意）
+實作完成，等審查與擁有者 iPhone 試用
 
 ## 證據（擁有者貼回的診斷紀錄：iPhone Safari 18.7、iPhone Chrome 157）
 - 按下跟讀：`seekSegmentStart(org, 19.90)`（seeking=1）→ 靜音 `play()` → 解鎖 promise 一結束就 `pause()`
@@ -23,3 +23,5 @@
 
 ## 進度紀錄
 - 2026-11-10 建立
+- 2026-11-10 驗收測試 `19eeb10`；實作：解鎖只做一次且原地播放、`prepareSegmentStart` 自動重新載入、`pauseSafely`（跳轉中等跳完才暫停：跟讀、詳情頁、校對、聽聽看）、`recoverIfEnded`（詳情頁／校對／聽聽看播放前）、診斷紀錄加 ended／dur
+- 2026-11-10 驗收測試修改：`tests/iosEndedFix.test.ts`「解鎖時不設定起點、不改語速」拿掉「不改語速」（語速不是跳轉；`tests/shadowingSpeed.test.ts` 驗收 6 要求解鎖預播放套用速度）
