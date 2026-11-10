@@ -1,5 +1,5 @@
 import { OVERLAY_ORIGINAL_VOLUME } from './shadowingAudio';
-import { watchSegmentEnd, guardSegmentStart, pauseSafely, recoverIfEnded } from './segmentEnd';
+import { watchSegmentEnd, guardSegmentStart, pauseSafely, recoverIfEnded, cancelPendingPause } from './segmentEnd';
 
 // 跟讀結果頁「聽聽看」的播放控制器（PR #20）：注入播放元素與音量設定，不直接碰 DOM，方便用替身測試
 
@@ -101,6 +101,7 @@ export function createListenPlayer(opts: ListenPlayerOptions): ListenPlayer {
     const r = rate ? rate() : 1;
     if (rate) setOriginalRate(r);
     setOriginalVolume(volume);
+    cancelPendingPause(original);   // 切換模式時 stop() 留下的延遲暫停不可中斷這次播放（Codex）
     recoverIfEnded(original);   // iPhone：播放器已處於「已播完」→ 重新載入，否則會從頭播（docs/plans/ios-ended-fix.md）
     original.currentTime = start;
     originalDone = false;

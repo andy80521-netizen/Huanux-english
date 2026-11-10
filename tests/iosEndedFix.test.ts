@@ -182,3 +182,35 @@ describe('診斷紀錄多記「是否已播完」與音檔長度', () => {
     t.dispose();
   });
 });
+
+describe('審查第 1 輪（Codex）：延遲暫停可被新的播放取消', () => {
+  it('跳轉中 pauseSafely → 隨即 seekSegmentStart 開始新播放 → 跳轉完成時不暫停', async () => {
+    const { pauseSafely, seekSegmentStart } = await import('../src/utils/segmentEnd');
+    const m = new WebKitMedia();
+    m.play();
+    m.currentTime = 19.9;          // 跳轉中
+    pauseSafely(m as any);         // 延遲到 seeked
+    expect(m.paused).toBe(false);
+    seekSegmentStart(m as any, 30);
+    m.finishSeek();
+    expect(m.paused).toBe(false);
+    expect(m.ended).toBe(false);
+    expect(m.count()).toBe(0);
+  });
+
+  it('沒有新的播放 → 跳轉完成後才暫停（不在跳轉中暫停，播放器不壞）', async () => {
+    const { pauseSafely } = await import('../src/utils/segmentEnd');
+    const m = new WebKitMedia();
+    m.play();
+    m.currentTime = 19.9;
+    pauseSafely(m as any);
+    m.finishSeek();
+    expect(m.paused).toBe(true);
+    expect(m.ended).toBe(false);
+    expect(m.currentTime).toBe(19.9);
+  });
+
+  it('聽聽看播原音前取消舊的延遲暫停', () => {
+    expect(read('src/utils/shadowingPlayback.ts')).toMatch(/cancelPendingPause\(original\)/);
+  });
+});

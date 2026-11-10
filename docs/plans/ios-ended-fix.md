@@ -25,3 +25,4 @@
 - 2026-11-10 建立
 - 2026-11-10 驗收測試 `19eeb10`；實作：解鎖只做一次且原地播放、`prepareSegmentStart` 自動重新載入、`pauseSafely`（跳轉中等跳完才暫停：跟讀、詳情頁、校對、聽聽看）、`recoverIfEnded`（詳情頁／校對／聽聽看播放前）、診斷紀錄加 ended／dur
 - 2026-11-10 驗收測試修改：`tests/iosEndedFix.test.ts`「解鎖時不設定起點、不改語速」拿掉「不改語速」（語速不是跳轉；`tests/shadowingSpeed.test.ts` 驗收 6 要求解鎖預播放套用速度）
+- 2026-11-10 審查第 1 輪：Codex 🟠 延遲暫停會中斷新的播放 → `cancelPendingPause`（seekSegmentStart 與聽聽看自動取消）；Gemini 無意見

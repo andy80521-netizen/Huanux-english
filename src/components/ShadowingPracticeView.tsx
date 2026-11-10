@@ -447,7 +447,7 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                 const el = audioRef.current;
                 if (!el) return;
                 pauseSafely(el);
-                el.muted = false;
+                if (!el.seeking) el.muted = false;   // 還在跳轉（極少見）：維持靜音，就位後再處理
             };
             endUnlock();
             if (isStale() || !audioRef.current) {
@@ -466,10 +466,17 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                 log: trace,
             });
             if (ready !== 'ready' || !audioRef.current) {
+                if (audioRef.current) { pauseSafely(audioRef.current); audioRef.current.muted = false; }
                 stopStarting();
                 if (ready === 'timeout' && !isStale()) setError('原音載入失敗，請檢查網路後再試。若一直失敗，請按下方「複製診斷紀錄」貼給開發者。');
                 return;
             }
+            // 就位時不在跳轉中：還在播（解鎖延遲暫停被取消）就在這裡暫停並重新設定句首，確保安靜、從句首開始
+            if (!audioRef.current.paused) {
+                audioRef.current.pause();
+                seekSegmentStart(audioRef.current, sentence.startTime);
+            }
+            audioRef.current.muted = false;
 
             const mimeType = getSupportedMimeType();
             const mediaRecorder = new MediaRecorder(h.stream, mimeType ? { mimeType } : undefined);

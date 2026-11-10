@@ -132,6 +132,7 @@ const pendingSeek = new WeakMap<object, () => void>();
  */
 export function seekSegmentStart(media: SegmentMedia, startTime: number): void {
     const start = Number.isFinite(startTime) && startTime > 0 ? startTime : 0;
+    cancelPendingPause(media);   // 新的播放：取消舊的延遲暫停（docs/plans/ios-ended-fix.md）
     pendingSeek.get(media)?.();
     pendingSeek.delete(media);
     media.currentTime = start;
@@ -389,20 +390,35 @@ export function prepareSegmentStart(media: GuardMedia, startTime: number, opts: 
 /** 跳轉等待暫停的上限（毫秒），超過就直接暫停 */
 const PAUSE_AFTER_SEEK_MAX_MS = 1000;
 
-/** 暫停；正在跳轉時等跳轉完成才暫停（最多等 1 秒） */
+const pendingPause = new WeakMap<object, () => void>();
+
+/** 取消還在等跳轉完成的暫停（開始新的播放前呼叫；seekSegmentStart 會自動呼叫，Codex） */
+export function cancelPendingPause(media: object): void {
+    pendingPause.get(media)?.();
+    pendingPause.delete(media);
+}
+
+/** 暫停；正在跳轉時等跳轉完成才暫停（最多等 1 秒）。之後若開始新的播放（seekSegmentStart）就取消 */
 export function pauseSafely(media: GuardMedia): void {
+    cancelPendingPause(media);
     if (media.paused) return;
     if (!media.seeking) { media.pause(); return; }
     let done = false;
-    const go = () => {
+    const cancel = () => {
         if (done) return;
         done = true;
         media.removeEventListener('seeked', go);
         clearTimeout(timer);
+        if (pendingPause.get(media) === cancel) pendingPause.delete(media);
+    };
+    const go = () => {
+        if (done) return;
+        cancel();
         if (!media.paused) media.pause();
     };
     const timer = setTimeout(go, PAUSE_AFTER_SEEK_MAX_MS);
     media.addEventListener('seeked', go);
+    pendingPause.set(media, cancel);
 }
 
 /** 播放器已處於「已播完」：重新載入（之後設定的起點會在載入後套用）。回傳是否重新載入 */
