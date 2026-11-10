@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useId } from 'react';
-import { watchSegmentEnd, seekSegmentStart, guardSegmentStart, SegmentEndWatch } from '../utils/segmentEnd';
+import { watchSegmentEnd, seekSegmentStart, guardSegmentStart, pauseSafely, recoverIfEnded, SegmentEndWatch } from '../utils/segmentEnd';
 import { Play, Pause, Check, AlertCircle, Trash2, RotateCcw, ChevronDown, Merge, Scissors, Ear, Loader2 } from 'lucide-react';
 import TimeStepperField from './ui/TimeStepperField';
 import { adjustTime, tailRange, mergeWithPrevious, splitSentenceAt } from '../utils/timeEdit';
@@ -131,6 +131,7 @@ export default function MaterialReviewPanel({
         if (!el) return;
         stopSegWatch();
         setPlaybackError(null);
+        recoverIfEnded(el);   // 播放器已處於「已播完」（iPhone）→ 重新載入，否則按播放會從頭播
         seekSegmentStart(el, start);
         el.play()?.catch?.(() => setPlayingId(null));
         startGuardRef.current = guardSegmentStart(el, start, (diag) => {
@@ -151,6 +152,7 @@ export default function MaterialReviewPanel({
         if (!sentence || !el) return;
         stopSegWatch();
         setPlaybackError(null);
+        recoverIfEnded(el);   // 播放器已處於「已播完」（iPhone）→ 重新載入，否則按播放會從頭播
         seekSegmentStart(el, sentence.startTime);
         el.play()?.catch?.(() => setPlayingId(null));
         startGuardRef.current = guardSegmentStart(el, sentence.startTime, (diag) => {
@@ -193,7 +195,7 @@ export default function MaterialReviewPanel({
     const handlePause = () => {
         stopSegWatch();
         if (audioRef.current) {
-            audioRef.current.pause();
+            pauseSafely(audioRef.current);   // iPhone：跳轉中暫停會讓播放器壞掉（docs/plans/ios-ended-fix.md）
             setPlayingId(null);
         }
     };

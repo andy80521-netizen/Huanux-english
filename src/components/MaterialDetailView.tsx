@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { watchSegmentEnd, seekSegmentStart, guardSegmentStart, SegmentEndWatch } from '../utils/segmentEnd';
+import { watchSegmentEnd, seekSegmentStart, guardSegmentStart, pauseSafely, recoverIfEnded, SegmentEndWatch } from '../utils/segmentEnd';
 import { saveSentenceTime } from '../services/materialTimeEdit';
 import { formatPlayRange } from '../utils/timeEdit';
 import { Material, CoverStyle } from '../types';
@@ -225,6 +225,7 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
         if (el) {
             stopSegWatch();
            setExtractMessage(m => (m?.text.startsWith('音檔沒辦法跳') ? null : m));
+            recoverIfEnded(el);   // 播放器已處於「已播完」（iPhone）→ 重新載入，否則按播放會從頭播
             seekSegmentStart(el, sentence.startTime);
             el.play()?.catch?.(() => setPlayingIndex(null));
             startGuardRef.current = guardSegmentStart(el, sentence.startTime, (diag) => {
@@ -258,7 +259,7 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
         stopSegWatch();
         setPlayingKey(null);
         if (audioRef.current) {
-            audioRef.current.pause();
+            pauseSafely(audioRef.current);   // iPhone：跳轉中暫停會讓播放器壞掉（docs/plans/ios-ended-fix.md）
             setPlayingIndex(null);
         }
     };
@@ -270,6 +271,7 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
         if (!el) return;
         stopSegWatch();
        setExtractMessage(m => (m?.text.startsWith('音檔沒辦法跳') ? null : m));
+        recoverIfEnded(el);   // 播放器已處於「已播完」（iPhone）→ 重新載入，否則按播放會從頭播
         seekSegmentStart(el, start);
         el.play()?.catch?.(() => setPlayingKey(null));
         startGuardRef.current = guardSegmentStart(el, start, (diag) => {

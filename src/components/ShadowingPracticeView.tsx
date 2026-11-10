@@ -22,7 +22,7 @@ import { PLAYBACK_LEAD_MS, RECORDING_ORIGINAL_VOLUME, canSetElementVolume, overl
 import { createListenPlayer, ListenMode, ListenPlayer } from '../utils/shadowingPlayback';
 import { SHADOWING_SPEEDS, ShadowingSpeed, ShadowingAttempt, loadSpeed, saveSpeed, applyPlaybackSpeed, effectiveOriginalSec, scoreShadowingAttempt } from '../utils/shadowingSpeed';
 import SegmentedControl from './ui/SegmentedControl';
-import { watchSegmentEnd, seekSegmentStart, guardSegmentStart, prepareSegmentStart, PREPARE_TIMEOUT_MS } from '../utils/segmentEnd';
+import { watchSegmentEnd, seekSegmentStart, guardSegmentStart, prepareSegmentStart, pauseSafely, PREPARE_TIMEOUT_MS } from '../utils/segmentEnd';
 import { createPlaybackTrace, PlaybackTrace } from '../utils/playbackTrace';
 import { formatPlayRange } from '../utils/timeEdit';
 
@@ -158,6 +158,8 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
     const startGuardRef = useRef<(() => void) | null>(null);
     /** 播放診斷紀錄（暫時功能，問題解決後拿掉；擁有者 2026-11-10） */
     const traceRef = useRef<PlaybackTrace | null>(null);
+    /** 原音播放器已解鎖（iPhone 每個播放器只需在點擊當下播放過一次）：之後不再做靜音解鎖播放（docs/plans/ios-ended-fix.md） */
+    const unlockedRef = useRef(false);
     const trace = (msg: string) => traceRef.current?.mark(msg);
     const [traceCopied, setTraceCopied] = useState<string | null>(null);
     const [traceFallback, setTraceFallback] = useState<string | null>(null);
@@ -301,7 +303,7 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
         setShowTip(false);
         // 換句時一併停止教材原音（錄音中跳句時原音還在播放）
         if (audioRef.current) {
-            audioRef.current.pause();
+            pauseSafely(audioRef.current);   // iPhone：跳轉中暫停會讓播放器壞掉
         }
         if (recordedAudioRef.current) {
             recordedAudioRef.current.pause();
@@ -397,21 +399,24 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
         }
         recordSpeedRef.current = speed;   // 這次錄音的原音速度快照
         trace(`按下跟讀：第 ${displayPosition} 句 ${formatPlayRange(sentence.startTime, sentence.endTime)}，語速 ${speed}`);
-        // 原音在錄音開始後才播放：先在點擊當下靜音解鎖一次（iPhone 之後才允許播放）。
-        // 解鎖前先設定起點，iPhone 不要從 0 秒開始緩衝（docs/plans/ios-seek-fix.md）
+        // 原音在錄音開始後才播放：第一次按時在點擊當下靜音解鎖（iPhone 之後才允許播放）。
+        // 解鎖時「原地」播放，不設定起點：iPhone 在跳轉中被暫停會回到 0 秒並宣告已播完，
+        // 之後每次跳轉都落在 0、按播放就從頭播（擁有者 2026-11-10 診斷紀錄，docs/plans/ios-ended-fix.md）
         const org = audioRef.current;
-        let unlock: Promise<'ok' | 'rejected'> = Promise.resolve('rejected');
+        let unlock: Promise<'ok' | 'rejected' | 'skip'> = Promise.resolve('skip');
         let unlockEnded = false;
-        if (org) {
-            seekSegmentStart(org, sentence.startTime);
-            applyPlaybackSpeed(org, speed);
+        if (org && !unlockedRef.current) {
+            applyPlaybackSpeed(org, speed);   // 語速不是跳轉，可以先套用
             org.muted = true;
-            // 解鎖播放一開始播就暫停（已有資料）；還在載入時（超過 UNLOCK_WAIT_MS）就讓它靜音繼續載入，就位後才暫停
             unlock = Promise.resolve(org.play()).then(
-                () => { if (!unlockEnded) org.pause(); return 'ok' as const; },
+                () => {
+                    unlockedRef.current = true;
+                    if (!unlockEnded && !org.seeking) org.pause();   // 播起來就暫停（不在跳轉中）
+                    return 'ok' as const;
+                },
                 () => 'rejected' as const,
             );
-            trace('靜音解鎖 play()');
+            trace('靜音解鎖 play()（原地，不跳位置）');
         }
 
         setError(null);
@@ -436,23 +441,23 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                 Promise.race([unlock, new Promise<'slow'>((r) => setTimeout(() => r('slow'), UNLOCK_WAIT_MS))]),
             ]);
             trace(`解鎖結果：${unlockResult}`);
-            /** 結束靜音解鎖播放：暫停並取消靜音 */
+            /** 結束靜音解鎖播放：暫停並取消靜音（這時還沒設定起點，不會在跳轉中暫停） */
             const endUnlock = () => {
                 unlockEnded = true;
                 const el = audioRef.current;
                 if (!el) return;
-                if (!el.paused) el.pause();
-                el.muted = false;
+                pauseSafely(el);
+                if (!el.seeking) el.muted = false;   // 還在跳轉（極少見）：維持靜音，就位後再處理
             };
+            endUnlock();
             if (isStale() || !audioRef.current) {
-                endUnlock();
                 stopStarting();
                 return;
             }
             mic.resume();
 
-            // 原音先就位（停在句首、可以播放）才開始錄音（docs/plans/shadowing-stable-playback.md）。
-            // 解鎖播放還在載入時不先暫停（iPhone 暫停後可能不再載入）：靜音繼續，就位後才暫停
+            // 暫停中設定起點，等跳轉完成、確認停在句首才開始錄音（docs/plans/shadowing-stable-playback.md）；
+            // 播放器壞掉（已播完、跳轉落在 0）時 prepareSegmentStart 會重新載入一次（docs/plans/ios-ended-fix.md）
             seekSegmentStart(audioRef.current, sentence.startTime);
             trace('等待原音就位');
             const ready = await prepareSegmentStart(audioRef.current, sentence.startTime, {
@@ -460,14 +465,18 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                 isCancelled: isStale,
                 log: trace,
             });
-            endUnlock();
             if (ready !== 'ready' || !audioRef.current) {
+                if (audioRef.current) { pauseSafely(audioRef.current); audioRef.current.muted = false; }
                 stopStarting();
-                if (ready === 'timeout' && !isStale()) setError('原音載入失敗，請檢查網路後再試。');
+                if (ready === 'timeout' && !isStale()) setError('原音載入失敗，請檢查網路後再試。若一直失敗，請按下方「複製診斷紀錄」貼給開發者。');
                 return;
             }
-            // 解鎖播放可能在就位後又往前走了一點：暫停後再拉回句首（資料已在，跳轉很快；之後由起點確認把關）
-            seekSegmentStart(audioRef.current, sentence.startTime);
+            // 就位時不在跳轉中：還在播（解鎖延遲暫停被取消）就在這裡暫停並重新設定句首，確保安靜、從句首開始
+            if (!audioRef.current.paused) {
+                audioRef.current.pause();
+                seekSegmentStart(audioRef.current, sentence.startTime);
+            }
+            audioRef.current.muted = false;
 
             const mimeType = getSupportedMimeType();
             const mediaRecorder = new MediaRecorder(h.stream, mimeType ? { mimeType } : undefined);
@@ -580,7 +589,7 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
             // 麥克風失敗：結束靜音解鎖播放（不留下靜音中或播放中的原音）
             unlockEnded = true;
             if (audioRef.current) {
-                if (!audioRef.current.paused) audioRef.current.pause();
+                pauseSafely(audioRef.current);
                 audioRef.current.muted = false;
             }
             if (err instanceof MicReleasedError) return;
