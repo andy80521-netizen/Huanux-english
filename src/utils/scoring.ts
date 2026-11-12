@@ -112,6 +112,8 @@ interface Token {
     alts: string[];          // 可接受的寫法（全小寫）
     src: number;             // 來自原文第幾個字（以空白切分）
     kind?: 'filler' | 'numAnd';
+    /** 和前一個 token 之間只隔一個連字號（set-ups 的 ups）：只有這種才可以合併比對（擁有者 2026-11-12、Codex） */
+    joinPrev?: boolean;
 }
 
 const NUMBER_WORDS = new Set([...ONES, ...TENS.filter(Boolean), 'hundred', 'thousand', 'million']);
@@ -185,9 +187,16 @@ const numberTokens = (neg: string | undefined, intPart: string, frac: string | u
 const wordTokens = (segment: string, src: number, side: 'target' | 'user'): Token[] => {
     const tokens: Token[] = [];
     const cleaned = segment.replace(/&/g, ' and ').replace(/%/g, ' percent ').replace(/\be-mail/g, 'email');
-    for (const raw of cleaned.split(/[^a-z0-9']+/)) {
+    let prevEnd = -1;
+    for (const mm of cleaned.matchAll(/[a-z0-9']+/g)) {
+        const raw = mm[0];
+        const at = mm.index ?? 0;
+        const hyphenBefore = prevEnd >= 0 && cleaned.slice(prevEnd, at) === '-';
+        prevEnd = at + raw.length;
         const w = raw.replace(/^'+|'+$/g, '');
         if (!w) continue;
+        const first = tokens.length;
+        const mark = () => { if (hyphenBefore && tokens.length > first) tokens[first].joinPrev = true; };
         if (/\d/.test(w)) {
             tokens.push({ alts: [w.replace(/'/g, '')], src });   // 英數混合字（B12、1st、1990s）保留原樣比對
             continue;
@@ -204,12 +213,14 @@ const wordTokens = (segment: string, src: number, side: 'target' | 'user'): Toke
             continue;
         }
         parts.forEach(alts => tokens.push({ alts, src }));
+        mark();
     }
     return tokens;
 };
 
 export const tokenizeForCompare = (text: string, side: 'target' | 'user'): { tokens: Token[]; words: string[] } => {
-    const words = (text || '').replace(/[‘’ʼ`]/g, "'").replace(/[−–—\u2010\u2011]/g, '-').split(/\s+/).filter(Boolean);
+    // 減號與真正的連字號（‐ ‑）換成 -；破折號（– —）不是連字號，換成另一個分隔字元，不參與連字號合併（Codex）
+    const words = (text || '').replace(/[‘’ʼ`]/g, "'").replace(/[−\u2010\u2011]/g, '-').replace(/[–—]/g, '\u2E3A').split(/\s+/).filter(Boolean);
     const tokens: Token[] = [];
     words.forEach((word, src) => {
         const lower = word.toLowerCase();
@@ -233,6 +244,12 @@ export const tokenizeForCompare = (text: string, side: 'target' | 'user'): { tok
 };
 
 const same = (a: Token, b: Token) => a.alts.some(x => b.alts.includes(x));
+// 連字號寫法：一邊是 set-ups（同一個原字被連字號拆成兩段）、另一邊是 setups → 發音相同，算對（擁有者 2026-11-12）
+// 只合併「同一個原字」拆出來的兩段（a.src === b.src），分開寫的兩個字（now here／nowhere、may be／maybe）照舊算錯
+// 只合併一般字（不含口頭禪、數字中的 and），而且都要是純英文字母
+const joinable = (t: Token) => !t.kind && t.alts.every(x => /^[a-z]+$/.test(x));
+const joins = (single: Token, a: Token, b: Token) =>
+    b.joinPrev === true && a.src === b.src && joinable(single) && joinable(a) && joinable(b) && a.alts.some(x => b.alts.some(y => single.alts.includes(x + y)));
 const missingCost = (t: Token) => (t.kind === 'numAnd' ? 0 : 1);
 const extraCost = (u: Token) => (u.kind ? 0 : 1);   // 使用者多念的口頭禪、數字中的 and 不算錯
 const displayWord = (w: string) => w.replace(/^[(\[“"]+/, '').replace(/[)\]”".,!?;:]+$/, '') || w;
@@ -256,7 +273,9 @@ export const compareWords = (userText: string, targetText: string): WordComparis
             dp[i][j] = Math.min(
                 dp[i - 1][j - 1] + (same(t[i - 1], u[j - 1]) ? 0 : 1),
                 dp[i - 1][j] + missingCost(t[i - 1]),
-                dp[i][j - 1] + extraCost(u[j - 1])
+                dp[i][j - 1] + extraCost(u[j - 1]),
+                j >= 2 && joins(t[i - 1], u[j - 2], u[j - 1]) ? dp[i - 1][j - 2] : Infinity,   // 原句一個字＝念的兩個字
+                i >= 2 && joins(u[j - 1], t[i - 2], t[i - 1]) ? dp[i - 2][j - 1] : Infinity    // 原句兩個字＝念的一個字
             );
         }
     }
@@ -269,6 +288,10 @@ export const compareWords = (userText: string, targetText: string): WordComparis
     while (i > 0 || j > 0) {
         if (i > 0 && j > 0 && same(t[i - 1], u[j - 1]) && dp[i][j] === dp[i - 1][j - 1]) {
             ops.push({ kind: 'ok', ti: i - 1, uj: j - 1 }); i--; j--;
+        } else if (i > 0 && j >= 2 && joins(t[i - 1], u[j - 2], u[j - 1]) && dp[i][j] === dp[i - 1][j - 2]) {
+            ops.push({ kind: 'ok', ti: i - 1, uj: j - 1 }); i--; j -= 2;
+        } else if (i >= 2 && j > 0 && joins(u[j - 1], t[i - 2], t[i - 1]) && dp[i][j] === dp[i - 2][j - 1]) {
+            ops.push({ kind: 'ok', ti: i - 1, uj: j - 1 }, { kind: 'ok', ti: i - 2, uj: j - 1 }); i -= 2; j--;
         } else if (i > 0 && j > 0 && !same(t[i - 1], u[j - 1]) && dp[i][j] === dp[i - 1][j - 1] + 1) {
             ops.push({ kind: 'wrong', ti: i - 1, uj: j - 1 }); i--; j--;
         } else if (i > 0 && dp[i][j] === dp[i - 1][j] + missingCost(t[i - 1])) {
