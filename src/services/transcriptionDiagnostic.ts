@@ -8,7 +8,7 @@ import type { Material } from '../types';
 export interface DiagnosticProviderSummary {
     status: 'done' | 'error';
     model?: string;
-    wordsStatus?: 'ok' | 'missing' | 'unsupported-word' | 'unsupported-param' | null;
+    wordsStatus?: 'ok' | 'missing' | 'unsupported-word' | 'unsupported-param' | 'not-requested' | null;
     notes?: string[];
     error?: string | null;
     durationMs?: number | null;
@@ -46,7 +46,7 @@ export function reassembleProviderData(parts: ProviderPart[]): { segments: Segme
     return { segments, words };
 }
 
-const PROVIDERS = ['openai', 'groq'] as const;
+const PROVIDERS = ['openai', 'groq', 'openaiSegment'] as const;
 
 const basePath = (uid: string, materialId: string) => `artifacts/${appId}/users/${uid}/transcriptionDiagnostics/${materialId}`;
 const requireUid = () => {

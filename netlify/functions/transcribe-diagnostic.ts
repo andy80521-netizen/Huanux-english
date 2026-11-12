@@ -63,6 +63,8 @@ export default async (req: Request) => {
         fetchAudio: (url) => fetchDiagnosticAudio(url),
         openai: (audio) => (openaiKey ? callOpenAIDiagnostic(audio, openaiKey) : missing('OPENAI_API_KEY')),
         groq: (audio) => (groqKey ? callGroqDiagnostic(audio, groqKey) : missing('GROQ_API_KEY')),
+        // 與正式匯入相同（只要求 segment），確認整數秒是不是設定造成（擁有者 2026-11-12）
+        openaiSegment: (audio) => (openaiKey ? callOpenAIDiagnostic(audio, openaiKey, fetch, ['segment']) : missing('OPENAI_API_KEY')),
         write: (path, data, opts) => mergeDoc(idToken, path, data, !!opts?.replace),
         // 同一份教材同時觸發（兩個分頁、連按）時只有一個能執行：讀取、檢查冷卻、寫入 running 一次完成（Codex）
         claim: (running) => runOptimistic(idToken, async (t) => {

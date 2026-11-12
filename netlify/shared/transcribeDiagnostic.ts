@@ -20,7 +20,7 @@ type FetchLike = (url: string, init?: any) => Promise<Response>;
 
 export interface SegmentRow { t: string; s: number; e: number }
 export interface WordColumns { w: string[]; s: number[]; e: number[] }
-export type WordsStatus = 'ok' | 'missing' | 'unsupported-word' | 'unsupported-param';
+export type WordsStatus = 'ok' | 'missing' | 'unsupported-word' | 'unsupported-param' | 'not-requested';
 export interface ProviderResult {
     status: 'done' | 'error';
     model: string;
@@ -121,14 +121,16 @@ function parseWhisper(body: any): { segments: SegmentRow[]; words: WordColumns |
 
 const errText = (r: { status: number; body: any; text: string }) => `HTTP ${r.status}：${r.body?.error?.message || r.text || ''}`;
 
-export async function callOpenAIDiagnostic(audio: ArrayBuffer, key: string, fetchImpl: FetchLike = fetch): Promise<ProviderResult> {
+/** granularities 預設 segment＋word；['segment'] ＝與正式匯入相同的設定（確認整數秒的原因，擁有者 2026-11-12） */
+export async function callOpenAIDiagnostic(audio: ArrayBuffer, key: string, fetchImpl: FetchLike = fetch, granularities: string[] = ['segment', 'word']): Promise<ProviderResult> {
     const model = 'whisper-1';
     const t0 = Date.now();
     try {
-        const r = await post(OPENAI_TRANSCRIBE_URL, key, buildForm(audio, model, ['segment', 'word']), OPENAI_TIMEOUT_MS, fetchImpl);
+        const r = await post(OPENAI_TRANSCRIBE_URL, key, buildForm(audio, model, granularities), OPENAI_TIMEOUT_MS, fetchImpl);
         if (r.status !== 200) return { status: 'error', model, notes: [], error: sanitizeError(errText(r), [key]), durationMs: Date.now() - t0 };
         const { segments, words } = parseWhisper(r.body);
-        return { status: 'done', model, wordsStatus: words ? 'ok' : 'missing', segments, words, notes: [], durationMs: Date.now() - t0 };
+        const wordsStatus: WordsStatus = !granularities.includes('word') ? 'not-requested' : (words ? 'ok' : 'missing');
+        return { status: 'done', model, wordsStatus, segments, words, notes: [], durationMs: Date.now() - t0 };
     } catch (e: any) {
         return { status: 'error', model, notes: [], error: sanitizeError(e?.message || e, [key]), durationMs: Date.now() - t0 };
     }
@@ -256,6 +258,8 @@ export interface RunDiagnosticDeps {
     fetchAudio: (url: string) => Promise<ArrayBuffer>;
     openai: (audio: ArrayBuffer) => Promise<ProviderResult>;
     groq: (audio: ArrayBuffer) => Promise<ProviderResult>;
+    /** OpenAI 只要求 segment（與正式匯入相同）；沒提供就不執行 */
+    openaiSegment?: (audio: ArrayBuffer) => Promise<ProviderResult>;
     /** 寫入一份文件：預設合併；replace＝整份覆寫（分塊用，避免殘留上一輪的另一種資料，Codex） */
     write: (path: string, data: Record<string, any>, opts?: { replace?: boolean }) => Promise<void>;
     /**
@@ -290,8 +294,10 @@ export async function runDiagnostic(deps: RunDiagnosticDeps): Promise<'done' | '
         if ('error' in v) return await finishError(v.error);
         const audio = await deps.fetchAudio(v.audioUrl);
 
-        const settled = await Promise.allSettled([deps.openai(audio), deps.groq(audio)]);
-        const names = ['openai', 'groq'] as const;
+        const jobs: Array<[string, Promise<ProviderResult>]> = [['openai', deps.openai(audio)], ['groq', deps.groq(audio)]];
+        if (deps.openaiSegment) jobs.push(['openaiSegment', deps.openaiSegment(audio)]);
+        const settled = await Promise.allSettled(jobs.map(([, p]) => p));
+        const names = jobs.map(([n]) => n);
         const providers: Record<string, any> = {};
         for (let i = 0; i < names.length; i++) {
             const name = names[i];
