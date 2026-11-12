@@ -2,7 +2,7 @@
 
 - **級別**：中（新增伺服器診斷功能；不改資料結構、不新增套件；擁有者 2026-11-12 確認）
 - **PR**：#46
-- **狀態**：實作中（擁有者 2026-11-12 核准）
+- **狀態**：診斷功能完成，等擁有者 Merge 後取得 David Jones 的診斷資料；下一步標註工具（Artifact）與離線對照
 
 ## 目標
 匯入 mp3 後切出的句子時間「不太需要手動調整」。在改轉錄策略前，先能**量化現在準不準**，之後任何改動都用同一把尺比較。
@@ -113,3 +113,4 @@
 - 2026-11-12 建立規劃；委員會（Gemini、Nemotron、DeepSeek；Poolside 已下架）＋Codex（7 項）完成；擁有者核准
 - 2026-11-12 驗收測試 `a39145a`；實作：切句搬到 `netlify/shared/sentenceSegmentation.ts`、`transcribeDiagnostic.ts`＋背景函式 `transcribe-diagnostic`、`timestampEval.ts`、`wordSegmentation.ts`（D，離線用）、教材詳情頁 ⋯ →「時間軸診斷」對話框；check.sh 通過
 - 2026-11-12 審查第 1 輪：Codex 3 項真問題已修（分塊整份覆寫、runOptimistic 原子取得執行權、前端卡住 20 分鐘可重來）；Gemini 無意見
+- 2026-11-12 審查第 2 輪：Codex、Gemini 皆無意見；verify／guard 通過
