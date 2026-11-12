@@ -45,7 +45,9 @@ describe('切句搬到 netlify/shared/sentenceSegmentation.ts（行為不變）'
     expect(src).toMatch(/from ['"]\.\.\/shared\/sentenceSegmentation['"]/);
     expect(src).not.toMatch(/function mergeSegmentsIntoSentences/);
     expect(src).toMatch(/timestamp_granularities\[\]", "segment"/);
-    expect(src).not.toMatch(/"word"/);
+    // 擁有者 2026-11-12 同意修改：只要求 segment 時 OpenAI 回傳整數秒（診斷證實 230／230 段），正式匯入改為同時要求 word，但切句仍只用 segments
+    expect(src).toMatch(/timestamp_granularities\[\]", "word"/);
+    expect(src).toMatch(/mergeSegmentsIntoSentences\(data\.segments/);
   });
 });
 
