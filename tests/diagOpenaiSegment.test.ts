@@ -39,11 +39,12 @@ describe('診斷：OpenAI 只要求 segment（與正式匯入相同）', () => {
     expect(writes.some(w => /parts\/openaiSegment-0$/.test(w.path))).toBe(true);
   });
 
-  it('背景函式接上 openaiSegment（只要求 segment）；正式匯入不變', () => {
+  // 擁有者 2026-11-12 同意修改：診斷證實只要求 segment 時全是整數秒 → 正式匯入改為同時要求 word（切句仍只用 segments）
+  it('背景函式接上 openaiSegment（只要求 segment）；正式匯入改為 segment＋word', () => {
     const f = read('netlify/functions/transcribe-diagnostic.ts');
     expect(f).toMatch(/openaiSegment: \(audio\) =>/);
     expect(f).toMatch(/\['segment'\]/);
-    expect(read('netlify/functions/whisper-transcribe.ts')).not.toMatch(/"word"/);
+    expect(read('netlify/functions/whisper-transcribe.ts')).toMatch(/timestamp_granularities\[\]", "word"/);
   });
 
   it('前端下載與畫面包含第三組', () => {
