@@ -111,3 +111,4 @@
 
 ## 進度紀錄
 - 2026-11-12 建立規劃；委員會（Gemini、Nemotron、DeepSeek；Poolside 已下架）＋Codex（7 項）完成；擁有者核准
+- 2026-11-12 驗收測試 `a39145a`；實作：切句搬到 `netlify/shared/sentenceSegmentation.ts`、`transcribeDiagnostic.ts`＋背景函式 `transcribe-diagnostic`、`timestampEval.ts`、`wordSegmentation.ts`（D，離線用）、教材詳情頁 ⋯ →「時間軸診斷」對話框；check.sh 通過
