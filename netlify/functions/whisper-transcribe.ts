@@ -134,6 +134,9 @@ export default async (req: Request, context: Context) => {
     openAiFormData.append("model", "whisper-1");
     openAiFormData.append("response_format", "verbose_json");
     openAiFormData.append("timestamp_granularities[]", "segment");
+    // 只要求 segment 時 OpenAI 回傳整數秒（擁有者 2026-11-12 診斷：230／230 段）；同時要求 word 才有 0.01 秒精度
+    // 切句仍只用 segments（docs/plans/timestamp-baseline.md）
+    openAiFormData.append("timestamp_granularities[]", "word");
     openAiFormData.append("language", "en");   // 匯入只收英文 mp3（擁有者 2026-11-08 決定）
 
     // 呼叫 OpenAI Whisper API
