@@ -233,6 +233,12 @@ export const tokenizeForCompare = (text: string, side: 'target' | 'user'): { tok
 };
 
 const same = (a: Token, b: Token) => a.alts.some(x => b.alts.includes(x));
+// 連字號寫法：一邊是 set-ups（同一個原字被連字號拆成兩段）、另一邊是 setups → 發音相同，算對（擁有者 2026-11-12）
+// 只合併「同一個原字」拆出來的兩段（a.src === b.src），分開寫的兩個字（now here／nowhere、may be／maybe）照舊算錯
+// 只合併一般字（不含口頭禪、數字中的 and），而且都要是純英文字母
+const joinable = (t: Token) => !t.kind && t.alts.every(x => /^[a-z]+$/.test(x));
+const joins = (single: Token, a: Token, b: Token) =>
+    a.src === b.src && joinable(single) && joinable(a) && joinable(b) && a.alts.some(x => b.alts.some(y => single.alts.includes(x + y)));
 const missingCost = (t: Token) => (t.kind === 'numAnd' ? 0 : 1);
 const extraCost = (u: Token) => (u.kind ? 0 : 1);   // 使用者多念的口頭禪、數字中的 and 不算錯
 const displayWord = (w: string) => w.replace(/^[(\[“"]+/, '').replace(/[)\]”".,!?;:]+$/, '') || w;
@@ -256,7 +262,9 @@ export const compareWords = (userText: string, targetText: string): WordComparis
             dp[i][j] = Math.min(
                 dp[i - 1][j - 1] + (same(t[i - 1], u[j - 1]) ? 0 : 1),
                 dp[i - 1][j] + missingCost(t[i - 1]),
-                dp[i][j - 1] + extraCost(u[j - 1])
+                dp[i][j - 1] + extraCost(u[j - 1]),
+                j >= 2 && joins(t[i - 1], u[j - 2], u[j - 1]) ? dp[i - 1][j - 2] : Infinity,   // 原句一個字＝念的兩個字
+                i >= 2 && joins(u[j - 1], t[i - 2], t[i - 1]) ? dp[i - 2][j - 1] : Infinity    // 原句兩個字＝念的一個字
             );
         }
     }
@@ -269,6 +277,10 @@ export const compareWords = (userText: string, targetText: string): WordComparis
     while (i > 0 || j > 0) {
         if (i > 0 && j > 0 && same(t[i - 1], u[j - 1]) && dp[i][j] === dp[i - 1][j - 1]) {
             ops.push({ kind: 'ok', ti: i - 1, uj: j - 1 }); i--; j--;
+        } else if (i > 0 && j >= 2 && joins(t[i - 1], u[j - 2], u[j - 1]) && dp[i][j] === dp[i - 1][j - 2]) {
+            ops.push({ kind: 'ok', ti: i - 1, uj: j - 1 }); i--; j -= 2;
+        } else if (i >= 2 && j > 0 && joins(u[j - 1], t[i - 2], t[i - 1]) && dp[i][j] === dp[i - 2][j - 1]) {
+            ops.push({ kind: 'ok', ti: i - 1, uj: j - 1 }, { kind: 'ok', ti: i - 2, uj: j - 1 }); i -= 2; j--;
         } else if (i > 0 && j > 0 && !same(t[i - 1], u[j - 1]) && dp[i][j] === dp[i - 1][j - 1] + 1) {
             ops.push({ kind: 'wrong', ti: i - 1, uj: j - 1 }); i--; j--;
         } else if (i > 0 && dp[i][j] === dp[i - 1][j] + missingCost(t[i - 1])) {

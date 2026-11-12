@@ -19,10 +19,16 @@ describe('連字號／合寫：發音相同不扣分', () => {
     expect(compareWords('Christmas setups', 'Christmas set-ups').diff.map(d => d.type)).toEqual(['ok', 'ok']);
   });
 
-  it('分開寫與合寫（website／web site、anyone／any one）兩個方向都算相同', () => {
-    expect(errorsOf('a web site', 'a website')).toBe(0);
-    expect(errorsOf('a website', 'a web site')).toBe(0);
-    expect(errorsOf('any one of them', 'anyone of them')).toBe(0);
+  // 實作時發現既有驗收測試（tests 中「不放寬」）要求 now here／nowhere、may be／maybe 仍算錯 → 只合併連字號拆出來的兩段
+  it('連字號寫法兩個方向都算相同（cooperate／co-operate、reenter／re-enter）', () => {
+    expect(errorsOf('they co-operate', 'they cooperate')).toBe(0);
+    expect(errorsOf('they cooperate', 'they co-operate')).toBe(0);
+    expect(errorsOf('please re-enter', 'please reenter')).toBe(0);
+  });
+
+  it('分開寫的兩個字不合併（維持既有規則：now here／nowhere 算錯）', () => {
+    expect(errorsOf('a web site', 'a website')).toBeGreaterThan(0);
+    expect(errorsOf('now here', 'nowhere')).toBeGreaterThan(0);
   });
 
   it('合起來不完全相同就照常扣分（不會過度放寬）', () => {
