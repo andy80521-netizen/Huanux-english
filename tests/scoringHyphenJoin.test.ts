@@ -43,3 +43,22 @@ describe('連字號／合寫：發音相同不扣分', () => {
     expect(errorsOf('um I am here', "I'm here")).toBe(0);
   });
 });
+
+describe('審查第 1 輪（Codex）：只有真正的連字號才合併', () => {
+  it('逗號、斜線、破折號隔開的兩段不合併', () => {
+    for (const target of ['now,here', 'now/here', 'now—here', 'now–here', 'now.here']) {
+      expect(errorsOf('nowhere', target)).toBeGreaterThan(0);
+      expect(errorsOf(target, 'nowhere')).toBeGreaterThan(0);
+    }
+  });
+
+  it('Unicode 連字號（‐ U+2010、‑ U+2011）也算連字號', () => {
+    expect(errorsOf('Christmas setups', 'Christmas set‐ups')).toBe(0);
+    expect(errorsOf('Christmas set‑ups', 'Christmas setups')).toBe(0);
+  });
+
+  it('破折號連接的數字範圍照舊（10–20 ＝ ten twenty）', () => {
+    expect(errorsOf('ten twenty', '10–20')).toBe(0);
+    expect(errorsOf('ten twenty', '10-20')).toBe(0);
+  });
+});
