@@ -114,3 +114,6 @@
 - 2026-11-12 驗收測試 `a39145a`；實作：切句搬到 `netlify/shared/sentenceSegmentation.ts`、`transcribeDiagnostic.ts`＋背景函式 `transcribe-diagnostic`、`timestampEval.ts`、`wordSegmentation.ts`（D，離線用）、教材詳情頁 ⋯ →「時間軸診斷」對話框；check.sh 通過
 - 2026-11-12 審查第 1 輪：Codex 3 項真問題已修（分塊整份覆寫、runOptimistic 原子取得執行權、前端卡住 20 分鐘可重來）；Gemini 無意見
 - 2026-11-12 審查第 2 輪：Codex、Gemini 皆無意見；verify／guard 通過
+- 2026-11-12 擁有者附 David Jones 診斷資料：**11/09 匯入時 134 句全是整數秒**（結尾整數、開頭整數 −0.1）；今天診斷（segment＋word）OpenAI segment 精度 0.01 秒。以擁有者修過的 15 句當粗略參考：匯入時句尾平均誤差 0.38 秒（14／15 超過 0.2、全部偏早）；OpenAI 今日 segment＋現行切句 0.19 秒（2／15）；Groq segment＋現行切句 6.49 秒（Groq 一段含多句）；D（Groq 字）0.70 秒；D（OpenAI 字）無法直接用（OpenAI 的字沒有標點，需和 segment 文字對齊）
+- 2026-11-12 擁有者決定：先在診斷加「OpenAI 只要求 segment」確認整數秒的原因，再修正式匯入；已匯入的教材先不處理；人工標註暫停
+- 2026-11-12 小 PR：診斷加 `openaiSegment`（驗收測試 `517e941`）

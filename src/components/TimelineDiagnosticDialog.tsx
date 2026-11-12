@@ -14,12 +14,13 @@ import {
 const COOLDOWN_MS = 10 * 60_000;
 /** 和伺服器相同：執行中超過 20 分鐘視為卡住，可以重來（Codex） */
 const STALE_MS = 20 * 60_000;
-const PROVIDER_LABEL: Record<string, string> = { openai: 'OpenAI whisper-1', groq: 'Groq whisper-large-v3' };
+const PROVIDER_LABEL: Record<string, string> = { openai: 'OpenAI whisper-1', groq: 'Groq whisper-large-v3', openaiSegment: 'OpenAI（與匯入相同設定）' };
 const WORDS_LABEL: Record<string, string> = {
     ok: '有每個字的時間',
     missing: '沒有回傳每個字的時間',
     'unsupported-word': '不支援每個字的時間',
     'unsupported-param': '不認得時間顆粒度參數',
+    'not-requested': '只要求每段時間',
 };
 
 const TimelineDiagnosticDialog: React.FC<{ material: Material; onClose: () => void }> = ({ material, onClose }) => {
@@ -69,7 +70,7 @@ const TimelineDiagnosticDialog: React.FC<{ material: Material; onClose: () => vo
                 </div>
                 <p className="text-sm leading-relaxed text-muted">
                     把這份音檔同時交給 OpenAI 與 Groq 轉錄，取得每一段與每個字的原始時間，下載後附到對話給開發者分析。
-                    不會改動教材。每份教材 10 分鐘內只能診斷一次（9 分鐘音檔約 US$0.05）。
+                    不會改動教材。每份教材 10 分鐘內只能診斷一次（9 分鐘音檔約 US$0.10）。
                 </p>
 
                 {diag && (
