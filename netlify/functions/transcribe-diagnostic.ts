@@ -1,9 +1,9 @@
 // 時間軸診斷（Background Function，最多 15 分鐘）：同一份教材音檔同時取得 OpenAI 與 Groq 的原始時間
 // 只寫入 transcriptionDiagnostics，不改教材；規劃：docs/plans/timestamp-baseline.md（擁有者 2026-11-12 核准）
 import { verifyRealUserToken } from '../shared/auth';
-import { toFields, fieldsToObject, FS_BASE, APP_ID } from '../shared/firestoreRest';
+import { toFields, fieldsToObject, FS_BASE, APP_ID, runOptimistic } from '../shared/firestoreRest';
 import {
-    runDiagnostic, fetchDiagnosticAudio, callOpenAIDiagnostic, callGroqDiagnostic, diagnosticDocPath,
+    runDiagnostic, fetchDiagnosticAudio, callOpenAIDiagnostic, callGroqDiagnostic, diagnosticDocPath, canStartDiagnostic,
 } from '../shared/transcribeDiagnostic';
 
 export const config = { background: true };
@@ -18,10 +18,10 @@ async function readDoc(idToken: string, path: string): Promise<Record<string, an
     return fieldsToObject(doc.fields || {});
 }
 
-/** 合併寫入（文件不存在就建立）：只更新給定的欄位 */
-async function mergeDoc(idToken: string, path: string, data: Record<string, any>): Promise<void> {
-    const mask = Object.keys(data).map(k => `updateMask.fieldPaths=${encodeURIComponent(k)}`).join('&');
-    const res = await fetch(`${FS_BASE}/${path}?${mask}`, {
+/** 寫入（文件不存在就建立）：預設只更新給定的欄位；replace＝整份覆寫 */
+async function mergeDoc(idToken: string, path: string, data: Record<string, any>, replace = false): Promise<void> {
+    const mask = replace ? '' : Object.keys(data).map(k => `updateMask.fieldPaths=${encodeURIComponent(k)}`).join('&');
+    const res = await fetch(`${FS_BASE}/${path}${mask ? `?${mask}` : ''}`, {
         method: 'PATCH',
         headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ fields: toFields(data) }),
@@ -63,7 +63,15 @@ export default async (req: Request) => {
         fetchAudio: (url) => fetchDiagnosticAudio(url),
         openai: (audio) => (openaiKey ? callOpenAIDiagnostic(audio, openaiKey) : missing('OPENAI_API_KEY')),
         groq: (audio) => (groqKey ? callGroqDiagnostic(audio, groqKey) : missing('GROQ_API_KEY')),
-        write: (path, data) => mergeDoc(idToken, path, data),
+        write: (path, data, opts) => mergeDoc(idToken, path, data, !!opts?.replace),
+        // 同一份教材同時觸發（兩個分頁、連按）時只有一個能執行：讀取、檢查冷卻、寫入 running 一次完成（Codex）
+        claim: (running) => runOptimistic(idToken, async (t) => {
+            const path = diagnosticDocPath(APP_ID, uid, materialId);
+            const cur = await t.get(path);
+            if (!canStartDiagnostic(cur as any, Date.now())) return false;
+            if (cur) t.update(path, running); else t.create(path, running);
+            return true;
+        }),
     }).catch((e) => {
         console.error('[時間軸診斷] 失敗：', e?.message || e);
         return 'error';

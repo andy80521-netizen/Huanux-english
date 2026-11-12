@@ -369,3 +369,72 @@ describe('buildSentencesFromWords', () => {
     expect(read('netlify/functions/whisper-transcribe.ts')).not.toMatch(/wordSegmentation/);
   });
 });
+
+// ── 審查第 1 輪（Codex）──────────────────────────────────────
+describe('審查第 1 輪：分塊整份覆寫、原子取得執行權、卡住的診斷可重來', () => {
+  /** 模擬 Firestore：合併寫入只改給定欄位、replace 整份覆寫 */
+  const store = () => {
+    const docs = new Map<string, any>();
+    const write = async (path: string, data: any, opts?: { replace?: boolean }) => {
+      docs.set(path, opts?.replace ? { ...data } : { ...(docs.get(path) || {}), ...data });
+    };
+    return { docs, write };
+  };
+  const readBack = async (docs: Map<string, any>, name: string) => {
+    const d = await load('../netlify/shared/transcribeDiagnostic');
+    const main = docs.get('artifacts/huan-power-english/users/u1/transcriptionDiagnostics/m1');
+    const n = main.providers[name].parts;
+    const parts = Array.from({ length: n }, (_, i) => docs.get(`artifacts/huan-power-english/users/u1/transcriptionDiagnostics/m1/parts/${name}-${i}`));
+    return d.reassembleProviderData(parts);
+  };
+
+  it('兩輪分塊方式不同時，下載只會得到第二輪的資料', async () => {
+    const d = await load('../netlify/shared/transcribeDiagnostic');
+    const st = store();
+    const bigSegs = Array.from({ length: 30_000 }, (_, i) => ({ t: `synthetic segment ${i} with words.`, s: i, e: i + 0.9 }));
+    const run = (segments: any[], words: any) => d.runDiagnostic({
+      uid: 'u1', materialId: 'm1', now: () => Date.now(),
+      readMaterial: async () => ({ audioUrl: OWN_URL, audioSource: 'upload' }),
+      readDiagnostic: async () => null,
+      fetchAudio: async () => new ArrayBuffer(3000),
+      openai: async () => ({ status: 'done', model: 'whisper-1', wordsStatus: words ? 'ok' : 'missing', segments, words, notes: [] }),
+      groq: async () => ({ status: 'error', model: 'g', notes: [], error: 'x' }),
+      write: st.write,
+    });
+    await run(bigSegs, null);                 // 第一輪：segments 佔 2 塊以上
+    const secondSegs = [{ t: 'a.', s: 0, e: 1 }];
+    const secondWords = { w: ['a.'], s: [0], e: [1] };
+    await run(secondSegs, secondWords);       // 第二輪：openai-1 改存 words
+    expect(await readBack(st.docs, 'openai')).toEqual({ segments: secondSegs, words: secondWords });
+  });
+
+  it('claim 回傳 false（別人正在執行或冷卻中）→ 不呼叫 API、不寫入', async () => {
+    const d = await load('../netlify/shared/transcribeDiagnostic');
+    const openai = vi.fn();
+    const write = vi.fn();
+    const r = await d.runDiagnostic({
+      uid: 'u1', materialId: 'm1',
+      readMaterial: async () => ({ audioUrl: OWN_URL, audioSource: 'upload' }),
+      readDiagnostic: async () => null,
+      fetchAudio: async () => new ArrayBuffer(3000),
+      openai, groq: openai, write,
+      claim: async () => false,
+    });
+    expect(r).toBe('skipped');
+    expect(openai).not.toHaveBeenCalled();
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it('背景函式用 runOptimistic 原子取得執行權；分塊用整份覆寫', () => {
+    const f = read('netlify/functions/transcribe-diagnostic.ts');
+    expect(f).toMatch(/claim: \(running\) => runOptimistic\(/);
+    expect(f).toMatch(/canStartDiagnostic\(/);
+    expect(read('netlify/shared/transcribeDiagnostic.ts')).toMatch(/\{ replace: true \}/);
+  });
+
+  it('前端：執行中超過 20 分鐘視為卡住，可重新診斷與刪除', () => {
+    const v = read('src/components/TimelineDiagnosticDialog.tsx');
+    expect(v).toMatch(/STALE_MS = 20 \* 60_000/);
+    expect(v).toMatch(/const running = diag\?\.status === 'running' && !stale/);
+  });
+});

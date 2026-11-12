@@ -12,6 +12,8 @@ import {
 // 規劃：docs/plans/timestamp-baseline.md（擁有者 2026-11-12 核准）
 
 const COOLDOWN_MS = 10 * 60_000;
+/** 和伺服器相同：執行中超過 20 分鐘視為卡住，可以重來（Codex） */
+const STALE_MS = 20 * 60_000;
 const PROVIDER_LABEL: Record<string, string> = { openai: 'OpenAI whisper-1', groq: 'Groq whisper-large-v3' };
 const WORDS_LABEL: Record<string, string> = {
     ok: '有每個字的時間',
@@ -32,7 +34,8 @@ const TimelineDiagnosticDialog: React.FC<{ material: Material; onClose: () => vo
         return () => clearInterval(t);
     }, []);
 
-    const running = diag?.status === 'running';
+    const stale = diag?.status === 'running' && typeof diag.startedAt === 'number' && now - diag.startedAt > STALE_MS;
+    const running = diag?.status === 'running' && !stale;
     const coolingDown = diag?.status === 'done' && typeof diag.startedAt === 'number' && now - diag.startedAt < COOLDOWN_MS;
 
     const run = async (kind: 'start' | 'download' | 'delete', fn: () => Promise<void>, done?: string) => {
@@ -72,9 +75,9 @@ const TimelineDiagnosticDialog: React.FC<{ material: Material; onClose: () => vo
                 {diag && (
                     <div className="rounded-2xl border border-line bg-surface-2 p-4 text-sm" role="status">
                         <p className="font-medium text-ink">
-                            {running ? '診斷中，通常 1～3 分鐘…' : diag.status === 'done' ? '診斷完成' : `診斷失敗：${diag.error || '未知錯誤'}`}
+                            {running ? '診斷中，通常 1～3 分鐘…' : stale ? '上次診斷沒有完成，可以重新診斷' : diag.status === 'done' ? '診斷完成' : `診斷失敗：${diag.error || '未知錯誤'}`}
                         </p>
-                        {!running && diag.providers && (
+                        {!running && !stale && diag.providers && (
                             <ul className="mt-2 flex flex-col gap-1 text-[13px] text-muted">
                                 {(Object.entries(diag.providers) as Array<[string, DiagnosticProviderSummary]>).map(([name, p]) => (
                                     <li key={name} className="break-words">

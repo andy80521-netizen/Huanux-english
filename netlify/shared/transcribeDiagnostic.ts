@@ -256,8 +256,13 @@ export interface RunDiagnosticDeps {
     fetchAudio: (url: string) => Promise<ArrayBuffer>;
     openai: (audio: ArrayBuffer) => Promise<ProviderResult>;
     groq: (audio: ArrayBuffer) => Promise<ProviderResult>;
-    /** 寫入（合併）一份文件 */
-    write: (path: string, data: Record<string, any>) => Promise<void>;
+    /** 寫入一份文件：預設合併；replace＝整份覆寫（分塊用，避免殘留上一輪的另一種資料，Codex） */
+    write: (path: string, data: Record<string, any>, opts?: { replace?: boolean }) => Promise<void>;
+    /**
+     * 原子化取得執行權（Codex）：在同一個樂觀並行操作裡讀取、檢查冷卻、寫入 running。
+     * 回傳 false＝不能執行。沒提供時退回「讀取＋寫入」（只用於測試）。
+     */
+    claim?: (running: Record<string, any>) => Promise<boolean>;
 }
 
 export async function runDiagnostic(deps: RunDiagnosticDeps): Promise<'done' | 'error' | 'skipped'> {
@@ -265,11 +270,15 @@ export async function runDiagnostic(deps: RunDiagnosticDeps): Promise<'done' | '
     const now = deps.now ?? Date.now;
     const base = diagnosticDocPath(appId, deps.uid, deps.materialId);
 
-    const existing = await deps.readDiagnostic().catch(() => null);
-    if (!canStartDiagnostic(existing, now())) return 'skipped';
-
     const startedAt = now();
-    await deps.write(base, { status: 'running', startedAt, finishedAt: null, error: null, providers: {} });
+    const running = { status: 'running', startedAt, finishedAt: null, error: null, providers: {} };
+    if (deps.claim) {
+        if (!(await deps.claim(running))) return 'skipped';
+    } else {
+        const existing = await deps.readDiagnostic().catch(() => null);
+        if (!canStartDiagnostic(existing, now())) return 'skipped';
+        await deps.write(base, running);
+    }
     const finishError = async (error: string) => {
         await deps.write(base, { status: 'error', startedAt, finishedAt: now(), error: sanitizeError(error) }).catch(() => {});
         return 'error' as const;
@@ -299,7 +308,7 @@ export async function runDiagnostic(deps: RunDiagnosticDeps): Promise<'done' | '
                 try {
                     const parts = chunkProviderData({ segments: r.segments, words: r.words });
                     for (let p = 0; p < parts.length; p++) {
-                        await deps.write(`${base}/parts/${name}-${p}`, { provider: name, index: p, ...parts[p] });
+                        await deps.write(`${base}/parts/${name}-${p}`, { provider: name, index: p, ...parts[p] }, { replace: true });
                     }
                     summary.parts = parts.length;
                 } catch (e: any) {
