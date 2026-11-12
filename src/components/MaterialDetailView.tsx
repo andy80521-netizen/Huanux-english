@@ -3,7 +3,7 @@ import { watchSegmentEnd, seekSegmentStart, guardSegmentStart, pauseSafely, reco
 import { saveSentenceTime } from '../services/materialTimeEdit';
 import { formatPlayRange } from '../utils/timeEdit';
 import { Material, CoverStyle } from '../types';
-import { ChevronLeft, Play, Pause, Mic, Loader2, Sparkles, Trash2, RotateCcw, BookOpen, X, Search, RefreshCw, Clock3 } from 'lucide-react';
+import { ChevronLeft, Play, Pause, Mic, Loader2, Sparkles, Trash2, RotateCcw, BookOpen, X, Search, RefreshCw, Clock3, MoreHorizontal } from 'lucide-react';
 import SentenceTimeEditor from './SentenceTimeEditor';
 import { auth, db, appId } from '../firebase';
 import { doc, onSnapshot, collection, setDoc, updateDoc, getDoc } from 'firebase/firestore';
@@ -20,6 +20,7 @@ import RetellView from './RetellView';
 import { RetellSegment, RetellTargetPattern } from '../services/retell';
 import Button from './ui/Button';
 import IconButton from './ui/IconButton';
+import TimelineDiagnosticDialog from './TimelineDiagnosticDialog';
 import ProgressBar from './ui/ProgressBar';
 import SegmentedControl from './ui/SegmentedControl';
 import { materialProgress, MASTERY_MAX } from '../utils/materialProgress';
@@ -117,6 +118,8 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
     const segWatchRef = useRef<SegmentEndWatch | null>(null);
     // 修正時間（docs/plans/import-timestamp-accuracy.md PR-G）：正在編輯的句子、編輯器裡正在播放的範圍
     const [editingTimeId, setEditingTimeId] = useState<string | null>(null);
+    // 時間軸診斷（docs/plans/timestamp-baseline.md）
+    const [showDiagnostic, setShowDiagnostic] = useState(false);
     // 調整時間未儲存提醒（擁有者 2026-11-10：儲存／不儲存；docs/plans/shadowing-stable-playback.md）
     const [unsavedTime, setUnsavedTime] = useState<{ id: string; startTime: number; endTime: number; valid: boolean } | null>(null);
     const [unsavedAction, setUnsavedAction] = useState<{ run: () => void } | null>(null);
@@ -464,6 +467,12 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
                         <IconButton aria-label="返回教材列表" onClick={() => guardUnsaved(onBack)}>
                             <ChevronLeft size={22} aria-hidden="true" />
                         </IconButton>
+                        <div className="flex items-center">
+                        {material.audioSource === 'upload' && (
+                            <IconButton aria-label="更多" title="時間軸診斷" onClick={() => setShowDiagnostic(true)} className="text-muted">
+                                <MoreHorizontal size={20} strokeWidth={1.8} aria-hidden="true" />
+                            </IconButton>
+                        )}
                         <IconButton
                             aria-label={deletedIndices.length > 0 ? `垃圾桶，${deletedIndices.length} 句已刪除` : '垃圾桶'}
                             title="垃圾桶"
@@ -477,6 +486,7 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
                                 </span>
                             )}
                         </IconButton>
+                        </div>
                     </div>
 
                     {/* 封面 */}
@@ -702,6 +712,8 @@ export default function MaterialDetailView({ materialId, onBack }: { materialId:
                     </div>
                 </section>
             </div>
+
+            {showDiagnostic && <TimelineDiagnosticDialog material={material} onClose={() => setShowDiagnostic(false)} />}
 
             {/* 調整時間未儲存提醒 */}
             {unsavedAction && (
