@@ -717,6 +717,11 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
             mediaRecorder.onstop = () => {
                 cleanupAudio();
                 restoreOriginalVolume();
+                // 自動跟讀這次已被停止（停止與 onstop 之間的競態）：不評分（審查第 1 輪，Codex）
+                if (autoKey && cancelToken !== startCancelRef.current) {
+                    trace('自動：錄音結束時已停止 → 不評分');
+                    return;
+                }
                 let speechSec = 0;
                 if (lastSoundTimeRef.current > 0 && recordingStartTimeRef.current > 0) {
                     speechSec = Math.max(0, (lastSoundTimeRef.current - recordingStartTimeRef.current) / 1000);
@@ -887,11 +892,11 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
         trace(`自動跟讀結束（${reason}）`);
         if (phase !== 'practicing' && phase !== 'waiting') return;
         startCancelRef.current += 1;
-        if (startingRef.current || mediaRecorderRef.current?.state === 'recording') {
-            abortRecording();
-            if (audioRef.current) pauseSafely(audioRef.current);
-            setPracticeState('idle');
-        }
+        // 不看錄音狀態一律中止：緩衝結束剛呼叫 stop()、onstop 還沒執行時，錄音已是 inactive，
+        // 一樣要拿掉排入佇列的 onstop，否則仍會送評分（審查第 1 輪，Codex）
+        abortRecording();
+        if (audioRef.current) pauseSafely(audioRef.current);
+        setPracticeState('idle');
     };
 
     const handleRetry = () => {

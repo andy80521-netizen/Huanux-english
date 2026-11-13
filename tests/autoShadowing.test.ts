@@ -320,4 +320,17 @@ describe('元件接線（ShadowingPracticeView）', () => {
     expect(s).toContain('秒後下一句');
     expect(s).toMatch(/AutoShadowingSummary|自動跟讀結果/);
   });
+
+  it('審查第 1 輪（Codex）：停止與 onstop 之間的競態 → 不評分', () => {
+    const s = src();
+    const stop = s.slice(s.indexOf('const stopAuto'));
+    const stopBody = stop.slice(0, stop.indexOf('\n    };'));
+    // 不再只在 recording 時才中止（stop() 之後 recorder 已是 inactive）
+    expect(stopBody).not.toMatch(/state === 'recording'\)\s*\{\s*abortRecording/);
+    expect(stopBody).toMatch(/abortRecording\(\)/);
+    const onstop = s.slice(s.indexOf('mediaRecorder.onstop = () => {'));
+    const guard = onstop.indexOf('cancelToken !== startCancelRef.current');
+    expect(guard).toBeGreaterThan(-1);
+    expect(guard).toBeLessThan(onstop.indexOf('runScoring('));
+  });
 });
