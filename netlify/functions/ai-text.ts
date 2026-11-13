@@ -472,23 +472,29 @@ export default async (req: Request) => {
             };
         } else if (task === 'analyzeSentence') {
             // 句子全面解析（docs/plans/sentence-analysis.md）：一次產生 A～G，整體 50 秒截止
+            if (typeof payload?.sentenceText === 'string' && payload.sentenceText.length > 1000) {
+                return json(400, { error: '句子太長，無法解析（上限 1000 字）' });
+            }
             if (!validAnalyzePayload(payload)) {
                 return json(400, { error: '輸入格式不正確' });
             }
             const prompt = buildAnalyzeSentencePrompt(payload);
-            const { text, model } = await callQualityTextTimed(task, prompt, 0.3, {
-                deadlineMs: ANALYSIS_DEADLINE_MS,
-                groqTimeoutMs: ANALYSIS_GROQ_TIMEOUT_MS,
-                maxTokens: ANALYSIS_MAX_TOKENS,
-            });
-            if (!text) throw new Error('無法從 AI 取得內容');
-            let analysis;
+            // 正規化當成驗證：Groq 截斷或格式不合格 → 同一個截止時間內改用 Gemini（docs/plans/review-fixes-50-51.md #1）
+            const parse = (t: string) => normalizeSentenceAnalysis(cleanAndParseJSON(t), payload.sentenceText);
+            let text: string;
+            let model: string;
             try {
-                analysis = normalizeSentenceAnalysis(cleanAndParseJSON(text), payload.sentenceText);
+                ({ text, model } = await callQualityTextTimed(task, prompt, 0.3, {
+                    deadlineMs: ANALYSIS_DEADLINE_MS,
+                    groqTimeoutMs: ANALYSIS_GROQ_TIMEOUT_MS,
+                    maxTokens: ANALYSIS_MAX_TOKENS,
+                    validate: (t) => { if (!t) throw new Error('沒有內容'); parse(t); },
+                }));
             } catch (e: any) {
+                if (Number(e?.status) === 503) throw e;
                 throw new Error('解析結果不完整，請再試一次（' + e.message + '）');
             }
-            result = { analysis, model, version: ANALYSIS_VERSION };
+            result = { analysis: parse(text), model, version: ANALYSIS_VERSION };
         } else if (task === 'transcribe') {
             if (
                 !payload ||

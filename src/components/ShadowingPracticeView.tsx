@@ -275,6 +275,8 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
     // ── 自動跟讀（docs/plans/auto-shadowing.md）：流程控制在 utils/autoShadowing.ts，這裡只送事件、執行回呼 ──
     /** 準備中停止用：和 scoringTokenRef 分開，評分中停止時結果照常顯示（Codex） */
     const startCancelRef = useRef(0);
+    /** 這次錄音的麥克風中斷監聽（docs/plans/review-fixes-50-51.md #3）；cleanupAudio 移除 */
+    const micLostCleanupRef = useRef<(() => void) | null>(null);
     /** 這次錄音「有聲音」累計的毫秒數（判斷沒有聲音） */
     const voicedMsRef = useRef(0);
     const lastFrameAtRef = useRef(0);
@@ -314,6 +316,8 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
     const restoreOriginalVolume = () => setOriginalVolume(1);
 
     const cleanupAudio = () => {
+        micLostCleanupRef.current?.();
+        micLostCleanupRef.current = null;
         isBufferPhaseRef.current = false;
         endWatchRef.current?.();
         endWatchRef.current = null;
@@ -476,8 +480,14 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
         const onVisibility = () => {
             if (document.visibilityState === 'hidden') stopAuto('hidden');
         };
+        // iPhone 有時只送 pagehide、不送 visibilitychange（docs/plans/review-fixes-50-51.md #11）
+        const onPageHide = () => stopAuto('hidden');
         document.addEventListener('visibilitychange', onVisibility);
-        return () => document.removeEventListener('visibilitychange', onVisibility);
+        window.addEventListener('pagehide', onPageHide);
+        return () => {
+            document.removeEventListener('visibilitychange', onVisibility);
+            window.removeEventListener('pagehide', onPageHide);
+        };
     }, [autoActive]);   // eslint-disable-line react-hooks/exhaustive-deps
 
     // 離開跟讀畫面 → 結束自動模式、清掉倒數與錄音播放監看
@@ -598,7 +608,11 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
     };
 
     const handleStart = async () => {
-        if (startingRef.current) return;   // 正在準備麥克風時連按：不開第二次
+        if (startingRef.current) {   // 正在準備麥克風時連按：不開第二次
+            // 自動模式這一句因此沒有開始 → 停止，不會卡在「練習中」（docs/plans/review-fixes-50-51.md #13）
+            if (autoRef.current?.currentAttempt()) stopAuto('prepare');
+            return;
+        }
         // 自動跟讀的這一次作答（手動為 null）：評分、沒有聲音、錄音播完都帶著它回報
         const autoKey = autoRef.current?.currentAttempt() ?? null;
         // 要看的句子在畫面上半部：開始跟讀時捲回最上方
@@ -715,6 +729,25 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                 recordStartAtRef.current = performance.now();
             };
 
+            // 錄音中麥克風音軌意外結束（來電、被系統收走）：不當成正常錄完，中止、不評分（Codex，docs/plans/review-fixes-50-51.md #3）
+            const micTrack = h.stream.getAudioTracks()[0];
+            let micLost = false;
+            const onMicLost = () => {
+                if (micLost || mediaRecorderRef.current !== mediaRecorder) return;
+                micLost = true;
+                trace('麥克風音軌中斷 → 中止這次錄音、不評分');
+                const wasAuto = !!autoKey && !!autoRef.current?.isActive();
+                if (wasAuto) stopAuto('mic');   // 顯示「點一下繼續」
+                abortRecording();
+                if (audioRef.current) pauseSafely(audioRef.current);
+                setPracticeState('idle');
+                setMicPreparing(false);
+                if (!wasAuto) setError('麥克風中斷了，請再試一次');
+            };
+            micTrack?.addEventListener('ended', onMicLost);
+            mediaRecorder.onerror = onMicLost;
+            micLostCleanupRef.current = () => micTrack?.removeEventListener('ended', onMicLost);
+
             mediaRecorder.onstop = () => {
                 cleanupAudio();
                 restoreOriginalVolume();
@@ -723,6 +756,8 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                     trace('自動：錄音結束時已停止 → 不評分');
                     return;
                 }
+                // 錄音器先收到停止、音軌 ended 還沒送到：一樣當成麥克風中斷
+                if (micTrack && micTrack.readyState === 'ended') { onMicLost(); return; }
                 let speechSec = 0;
                 if (lastSoundTimeRef.current > 0 && recordingStartTimeRef.current > 0) {
                     speechSec = Math.max(0, (lastSoundTimeRef.current - recordingStartTimeRef.current) / 1000);
@@ -1339,6 +1374,8 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                                 </div>
                             )}
 
+                            {/* 擁有者決定（docs/plans/review-fixes-50-51.md）：自動跟讀進行中隱藏「聽聽看」，要聽就先按停止 */}
+                            {!autoActive && (
                             <section aria-labelledby="listen-h" className="flex flex-col gap-3.5 rounded-[20px] border border-line bg-surface p-[18px]">
                                 <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
                                     <h3 id="listen-h" className="text-[15px] font-bold text-ink">聽聽看</h3>
@@ -1381,6 +1418,7 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                                     })}
                                 </div>
                             </section>
+                            )}
 
                             <div className="flex flex-col gap-2">
                                 <p className="flex flex-wrap items-baseline justify-between gap-x-3 text-xs text-muted">

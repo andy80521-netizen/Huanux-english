@@ -93,6 +93,16 @@ async function callGroq(
   reasoningEffort: 'low' | 'medium' | 'high',
   opts: { timeoutMs?: number; maxTokens?: number } = {}
 ): Promise<string> {
+  return (await callGroqDetailed(prompt, temperature, reasoningEffort, opts)).text;
+}
+
+/** 同 callGroq，另外回傳 finish_reason（length＝輸出被截斷） */
+async function callGroqDetailed(
+  prompt: string,
+  temperature: number,
+  reasoningEffort: 'low' | 'medium' | 'high',
+  opts: { timeoutMs?: number; maxTokens?: number } = {}
+): Promise<{ text: string; finishReason: string }> {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) throw new Error('尚未設定 GROQ_API_KEY');
   const controller = new AbortController();
@@ -119,7 +129,7 @@ async function callGroq(
     if (typeof text !== 'string' || !text.trim()) {
       throw new Error('Groq 沒有回傳內容');
     }
-    return text;
+    return { text, finishReason: String(data?.choices?.[0]?.finish_reason || '') };
   } finally {
     clearTimeout(timer);
   }
@@ -144,32 +154,54 @@ export async function callQualityText(label: string, prompt: string, temperature
   return response.text || '';
 }
 
+/** callQualityTextTimed 的 Gemini 呼叫（測試可替換）：在 deadlineAt 前回傳文字與模型名 */
+export type TimedGeminiCall = (label: string, prompt: string, temperature: number, deadline: GeminiDeadline) => Promise<{ text: string; model?: string }>;
+
+const defaultTimedGemini: TimedGeminiCall = async (label, prompt, temperature, deadline) => {
+  let usedModel = '';
+  const response = await callGeminiFreeThenPaid(label, (ai, model) => {
+    usedModel = model;
+    return ai.models.generateContent({ model, contents: prompt, config: { temperature } });   // Gemini 的思考 token 也算在輸出上限內，不設上限以免截斷 JSON
+  }, QUALITY_GEMINI_MODELS, deadline);
+  return { text: response.text || '', model: usedModel };
+};
+
 /**
  * 同 callQualityText，但有整體截止時間，並回傳實際使用的模型（句子解析，docs/plans/sentence-analysis.md）。
- * Groq 用較短的逾時與輸出上限；失敗後 Gemini 只在剩餘時間足夠時才試，避免被平台的 60 秒上限直接中斷。
+ * Groq 用較短的逾時與輸出上限；Groq 失敗、輸出被截斷或 validate 不通過 → 用**同一個截止時間**改用 Gemini，
+ * Gemini 的結果也要通過 validate（docs/plans/review-fixes-50-51.md #1）
  */
 export async function callQualityTextTimed(
   label: string,
   prompt: string,
   temperature: number,
-  opts: { deadlineMs: number; groqTimeoutMs: number; maxTokens: number; minRemainingMs?: number; reasoningEffort?: 'low' | 'medium' | 'high' }
+  opts: {
+    deadlineMs: number;
+    groqTimeoutMs: number;
+    maxTokens: number;
+    minRemainingMs?: number;
+    reasoningEffort?: 'low' | 'medium' | 'high';
+    /** 內容不合格就丟出例外（例如 JSON 解析＋正規化） */
+    validate?: (text: string) => void;
+    gemini?: TimedGeminiCall;
+  }
 ): Promise<{ text: string; model: string }> {
   const deadlineAt = Date.now() + opts.deadlineMs;
+  const validate = opts.validate ?? (() => {});
   if (process.env.GROQ_API_KEY && prompt.length <= GROQ_MAX_PROMPT_CHARS) {
     const startTime = Date.now();
     try {
       const timeoutMs = Math.min(opts.groqTimeoutMs, Math.max(0, deadlineAt - Date.now()));
-      const text = await callGroq(prompt, temperature, opts.reasoningEffort ?? 'low', { timeoutMs, maxTokens: opts.maxTokens });
+      const r = await callGroqDetailed(prompt, temperature, opts.reasoningEffort ?? 'low', { timeoutMs, maxTokens: opts.maxTokens });
+      if (r.finishReason === 'length') throw new Error('Groq 輸出被截斷');
+      validate(r.text);
       console.log(`[ai-text] ${label} 成功：Groq ${GROQ_MODEL} ${Date.now() - startTime}ms`);
-      return { text, model: GROQ_MODEL };
+      return { text: r.text, model: GROQ_MODEL };
     } catch (err: any) {
-      console.warn(`[ai-text] ${label} Groq 失敗，改用 Gemini`, String(err?.message || err).slice(0, 300));
+      console.warn(`[ai-text] ${label} Groq 不可用（${String(err?.message || err).slice(0, 200)}），改用 Gemini`);
     }
   }
-  let usedModel = '';
-  const response = await callGeminiFreeThenPaid(label, (ai, model) => {
-    usedModel = model;
-    return ai.models.generateContent({ model, contents: prompt, config: { temperature } });   // Gemini 的思考 token 也算在輸出上限內，不設上限以免截斷 JSON
-  }, QUALITY_GEMINI_MODELS, { deadlineAt, minRemainingMs: opts.minRemainingMs ?? 8000 });
-  return { text: response.text || '', model: usedModel };
+  const g = await (opts.gemini ?? defaultTimedGemini)(label, prompt, temperature, { deadlineAt, minRemainingMs: opts.minRemainingMs ?? 8000 });
+  validate(g.text);
+  return { text: g.text, model: g.model || '' };
 }

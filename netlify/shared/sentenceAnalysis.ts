@@ -6,9 +6,9 @@
 export const ANALYSIS_VERSION = 1;
 /** 整體截止時間（Netlify 同步函式上限 60 秒，留 10 秒給網路與存檔） */
 export const ANALYSIS_DEADLINE_MS = 50_000;
-/** 這個任務的 Groq 逾時與輸出上限（含推理 token；不放大，避免漫談拖到超時） */
+/** 這個任務的 Groq 逾時與輸出上限（含推理 token） */
 export const ANALYSIS_GROQ_TIMEOUT_MS = 25_000;
-export const ANALYSIS_MAX_TOKENS = 2500;
+export const ANALYSIS_MAX_TOKENS = 4096;   // 截斷時改用 Gemini（docs/plans/review-fixes-50-51.md #1）
 
 const MAX_CHUNKS = 8;
 const SHORT_SENTENCE_WORDS = 8;

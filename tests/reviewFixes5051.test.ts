@@ -131,9 +131,10 @@ describe('#4 解析請求前端截止時間', () => {
 });
 
 describe('#5 未存結果記下原因；再存一次每種結果都有回饋', () => {
-  it('服務層存 { rec, result }；教材已刪除不放進未存結果（#9）', () => {
+  it('服務層記下未存結果與原因（擁有者 2026-11-13 決定：結果與原因分兩個表，PR #51 舊測試不改）；教材已刪除不放進未存結果（#9）', () => {
     const s = read('src/services/sentenceAnalysis.ts');
-    expect(s).toMatch(/new Map<string, \{ rec: SentenceAnalysisRecord; result: /);
+    expect(s).toMatch(/const unsavedReasons = new Map<string, UnsavedResult>\(\)/);
+    expect(s).toMatch(/unsavedReasons\.set\(key, /);
     const fn = s.slice(s.indexOf('export function analyzeAndSaveSentence'));
     expect(fn.slice(0, 2000)).toMatch(/'missing-material'/);
   });
