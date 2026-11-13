@@ -10,6 +10,7 @@ import IconButton from './ui/IconButton';
 import ProgressBar from './ui/ProgressBar';
 import { materialProgress } from '../utils/materialProgress';
 import { deleteMaterialSightings } from '../services/sightings';
+import { deleteMaterialWithAnalyses } from '../services/sentenceAnalysis';
 
 export default function MaterialListView({ onAddClick, onMaterialClick }: { onAddClick: () => void, onMaterialClick: (m: Material) => void }) {
     const [materials, setMaterials] = useState<Material[]>([]);
@@ -59,7 +60,8 @@ export default function MaterialListView({ onAddClick, onMaterialClick }: { onAd
             const targetMaterial = materials.find(m => m.id === deleteModal.materialId);
 
             // Delete Firestore doc
-            await deleteDoc(doc(db, `artifacts/${appId}/users/${uid}/materials`, deleteModal.materialId));
+            // 教材與每句的句子解析一起刪除（docs/plans/sentence-analysis.md）
+            await deleteMaterialWithAnalyses(deleteModal.materialId);
 
             // 刪除這份教材的已學句型比對結果與重逢紀錄
             await deleteMaterialSightings(deleteModal.materialId);

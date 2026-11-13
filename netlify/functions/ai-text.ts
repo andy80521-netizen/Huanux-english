@@ -1,6 +1,10 @@
 import { ThinkingLevel } from '@google/genai';
 import { verifyRealUser } from '../shared/auth';
-import { callGeminiFreeThenPaid, callQualityText, TRANSCRIBE_GEMINI_MODELS } from '../shared/aiKeys';
+import { callGeminiFreeThenPaid, callQualityText, callQualityTextTimed, TRANSCRIBE_GEMINI_MODELS } from '../shared/aiKeys';
+import {
+    ANALYSIS_VERSION, ANALYSIS_DEADLINE_MS, ANALYSIS_GROQ_TIMEOUT_MS, ANALYSIS_MAX_TOKENS,
+    buildAnalyzeSentencePrompt, normalizeSentenceAnalysis, validAnalyzePayload
+} from '../shared/sentenceAnalysis';
 import { validCuePayload, validCueCheckPayload, sanitizePracticeCue, sanitizeCueCheckAnswer } from '../shared/practiceCue';
 import { transcriptFromGeminiResponse } from '../shared/transcribe';
 import {
@@ -117,7 +121,8 @@ export default async (req: Request) => {
         'classifyPatterns',
         'segmentMaterial',
         'reviewRetell',
-        'reviewExtraction'
+        'reviewExtraction',
+        'analyzeSentence'
     ];
     if (!task || typeof task !== 'string' || !ALLOWED_TASKS.includes(task)) {
         return json(400, { error: '不支援的工作' });
@@ -465,6 +470,25 @@ export default async (req: Request) => {
                 contentScore: clampScore(parsed?.contentScore),
                 languageScore: clampScore(parsed?.languageScore)
             };
+        } else if (task === 'analyzeSentence') {
+            // 句子全面解析（docs/plans/sentence-analysis.md）：一次產生 A～G，整體 50 秒截止
+            if (!validAnalyzePayload(payload)) {
+                return json(400, { error: '輸入格式不正確' });
+            }
+            const prompt = buildAnalyzeSentencePrompt(payload);
+            const { text, model } = await callQualityTextTimed(task, prompt, 0.3, {
+                deadlineMs: ANALYSIS_DEADLINE_MS,
+                groqTimeoutMs: ANALYSIS_GROQ_TIMEOUT_MS,
+                maxTokens: ANALYSIS_MAX_TOKENS,
+            });
+            if (!text) throw new Error('無法從 AI 取得內容');
+            let analysis;
+            try {
+                analysis = normalizeSentenceAnalysis(cleanAndParseJSON(text), payload.sentenceText);
+            } catch (e: any) {
+                throw new Error('解析結果不完整，請再試一次（' + e.message + '）');
+            }
+            result = { analysis, model, version: ANALYSIS_VERSION };
         } else if (task === 'transcribe') {
             if (
                 !payload ||

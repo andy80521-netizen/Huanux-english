@@ -144,3 +144,5 @@
 ## 進度紀錄
 - 2026-11-13 建立規劃草案，送委員會第一輪
 - 2026-11-13 委員會第一輪＋針對性質詢完成，整合提案待擁有者審核
+- 2026-11-13 擁有者核准；驗收測試 commit `151d7ac`（29 項）；實作：`netlify/shared/sentenceAnalysis.ts`、`aiKeys.ts`（`callGeminiFreeThenPaid` 選用截止時間、`callQualityTextTimed`）、`ai-text` 任務 `analyzeSentence`、`src/utils/sentenceAnalysis.ts`、`src/services/sentenceAnalysis.ts`、`SentenceAnalysisPanel`、跟讀畫面接線、刪除教材改 `deleteMaterialWithAnalyses`；check.sh 通過（1239 測試）
+  - 細節：Gemini 備援不限 1 個模型，改為「剩餘時間不到 8 秒就不再試」（較寬鬆、一樣不會超過 50 秒）

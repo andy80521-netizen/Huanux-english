@@ -7,6 +7,7 @@ import { playAfterRecordingStarts } from '../utils/recordingTiming';
 import { useMicSession, waitForMicLive, micSampler, logMicLive, MicReleasedError, KEEP_MIC_OPEN } from '../utils/micSession';
 import { calculateShadowingScores, isShadowingPass, PracticeScores, SHADOWING_PASS_CONTENT, SHADOWING_PASS_TOTAL } from '../utils/scoring';
 import WordDiffView from './WordDiffView';
+import SentenceAnalysisPanel from './SentenceAnalysisPanel';
 import { getSupportedMimeType } from '../utils/mediaRecorder';
 import { auth, db, appId } from '../firebase';
 import { doc, runTransaction } from 'firebase/firestore';
@@ -1098,6 +1099,8 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
     const passed = scoreResult ? isShadowingPass(scoreResult) : false;
     const showSentence = practiceState !== 'scored';
     const jumpLocked = practiceState === 'scoring';
+    // 句子解析（docs/plans/sentence-analysis.md）：看句子或看結果時才顯示；錄音、緩衝、評分、準備麥克風、自動跟讀中不顯示
+    const showAnalysis = !micPreparing && !autoActive && (practiceState === 'idle' || practiceState === 'scored' || practiceState === 'scoreError' || practiceState === 'silent');
     const autoReason = !autoActive ? autoView?.stopReason ?? null : null;
     const showAutoSummary = !!autoView && !!autoReason && autoReason !== 'navigate' && autoReason !== 'mic' && autoReason !== 'none-left';
     const autoReviewing = autoActive && (practiceState === 'scored' || practiceState === 'silent');
@@ -1195,6 +1198,7 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                             <p className="mt-5 text-base leading-[1.75] text-muted break-words lg:text-[17px]">
                                 {sentence.translation}
                             </p>
+                            {showAnalysis && <SentenceAnalysisPanel material={material} sentence={sentence} sentenceIndex={sentenceIndex} />}
 
                             {practiceState === 'idle' && (
                                 <div className="mt-10 flex max-w-sm flex-col gap-2.5">
@@ -1274,6 +1278,7 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                     {practiceState === 'scored' && scoreResult && (
                         <section className="flex max-w-[640px] flex-col gap-7" aria-label="評分結果">
                             <WordDiffView diff={scoreResult.diff} />
+                            {showAnalysis && <SentenceAnalysisPanel material={material} sentence={sentence} sentenceIndex={sentenceIndex} />}
 
                             <div className="flex flex-wrap items-end gap-x-8 gap-y-5">
                                 <div className="relative flex flex-col">

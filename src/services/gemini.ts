@@ -524,6 +524,17 @@ export interface RetellFeedback {
   languageScore: number;
 }
 
+/** 句子全面解析（docs/plans/sentence-analysis.md）：一次產生 A～G；結果由 services/sentenceAnalysis.ts 存檔 */
+export async function analyzeSentence(payload: {
+    sentenceText: string;
+    sentenceTranslation: string;
+    materialTitle: string;
+    prevText: string;
+    nextText: string;
+}): Promise<{ analysis: import('../utils/sentenceAnalysis').SentenceAnalysis; model?: string; version: number }> {
+    return callAiText('analyzeSentence', payload);
+}
+
 export async function segmentMaterial(sentences: string[]): Promise<{ title: string; start: number; end: number }[]> {
     const data = await callAiText<{ segments: { title: string; start: number; end: number }[] }>('segmentMaterial', { sentences });
     return data.segments;

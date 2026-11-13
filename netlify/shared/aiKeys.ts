@@ -9,10 +9,29 @@ export const TRANSCRIBE_GEMINI_MODELS = { free: ['gemini-3.6-flash'], paid: PAID
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+/** 選用的整體截止時間（句子解析，docs/plans/sentence-analysis.md）：剩餘時間不到 minRemainingMs 就不再試下一個模型、回 503；不傳時行為不變 */
+export interface GeminiDeadline { deadlineAt: number; minRemainingMs: number }
+
+const busyError = () => {
+  const error: any = new Error('AI 服務暫時忙碌，請稍後再試');
+  error.status = 503;
+  return error;
+};
+
+/** 在截止時間前沒回來就放棄（回 503）；呼叫本身不會被中止，但不再等它 */
+function withDeadline<T>(p: Promise<T>, deadline?: GeminiDeadline): Promise<T> {
+  if (!deadline) return p;
+  const ms = Math.max(0, deadline.deadlineAt - Date.now());
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(busyError()), ms); });
+  return Promise.race([p, timeout]).finally(() => clearTimeout(timer));
+}
+
 export async function callGeminiFreeThenPaid<T>(
   label: string,
   call: (ai: GoogleGenAI, model: string) => Promise<T>,
-  models?: { free: string[]; paid: string[] }
+  models?: { free: string[]; paid: string[] },
+  deadline?: GeminiDeadline
 ): Promise<T> {
   // 不指定 models 時使用文字模型清單；語音等其他用途可傳入自己的模型清單
   const groups = [
@@ -24,9 +43,13 @@ export async function callGeminiFreeThenPaid<T>(
     if (!group.apiKey) continue;
     const ai = new GoogleGenAI({ apiKey: group.apiKey });
     for (const model of group.models) {
+      if (deadline && deadline.deadlineAt - Date.now() < deadline.minRemainingMs) {
+        console.warn(`[ai-text] ${label} 剩餘時間不夠，不再嘗試 ${model}`);
+        throw busyError();
+      }
       const startTime = Date.now();
       try {
-        const result = await call(ai, model);
+        const result = await withDeadline(call(ai, model), deadline);
         const duration = Date.now() - startTime;
         console.log(`[ai-text] ${label} 成功：${group.tier} ${model} ${duration}ms`);
         return result;
@@ -42,6 +65,7 @@ export async function callGeminiFreeThenPaid<T>(
         const isNotFound = Number(status) === 404 || String(status) === '404' || /\b404\b|NOT_FOUND/i.test(msg);
         const shouldRetry = isRetryableGeminiError(err) || isNotFound;
 
+        if (deadline && Number(err?.status) === 503 && deadline.deadlineAt - Date.now() <= 0) throw err;   // 截止時間到了
         if (shouldRetry) {
           console.warn(`[ai-text] ${label} ${model} 失敗，換下一個`, err?.message);
           await sleep(500);
@@ -52,9 +76,7 @@ export async function callGeminiFreeThenPaid<T>(
     }
   }
 
-  const error: any = new Error('AI 服務暫時忙碌，請稍後再試');
-  error.status = 503;
-  throw error;
+  throw busyError();
 }
 
 // ===== 重視品質的短輸入工作（造句檢查、出題、單句萃取、示範例句、複述回饋）=====
@@ -65,11 +87,16 @@ const GROQ_MODEL = 'openai/gpt-oss-120b';
 const GROQ_MAX_PROMPT_CHARS = 6000;   // Groq 免費方案每分鐘 8K token，太長的提示詞直接跳過 Groq
 const GROQ_TIMEOUT_MS = 20000;
 
-async function callGroq(prompt: string, temperature: number, reasoningEffort: 'low' | 'medium' | 'high'): Promise<string> {
+async function callGroq(
+  prompt: string,
+  temperature: number,
+  reasoningEffort: 'low' | 'medium' | 'high',
+  opts: { timeoutMs?: number; maxTokens?: number } = {}
+): Promise<string> {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) throw new Error('尚未設定 GROQ_API_KEY');
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), GROQ_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? GROQ_TIMEOUT_MS);
   try {
     const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
@@ -79,7 +106,7 @@ async function callGroq(prompt: string, temperature: number, reasoningEffort: 'l
         messages: [{ role: 'user', content: prompt }],
         temperature,
         reasoning_effort: reasoningEffort,
-        max_completion_tokens: 4096
+        max_completion_tokens: opts.maxTokens ?? 4096
       }),
       signal: controller.signal
     });
@@ -115,4 +142,34 @@ export async function callQualityText(label: string, prompt: string, temperature
     QUALITY_GEMINI_MODELS
   );
   return response.text || '';
+}
+
+/**
+ * 同 callQualityText，但有整體截止時間，並回傳實際使用的模型（句子解析，docs/plans/sentence-analysis.md）。
+ * Groq 用較短的逾時與輸出上限；失敗後 Gemini 只在剩餘時間足夠時才試，避免被平台的 60 秒上限直接中斷。
+ */
+export async function callQualityTextTimed(
+  label: string,
+  prompt: string,
+  temperature: number,
+  opts: { deadlineMs: number; groqTimeoutMs: number; maxTokens: number; minRemainingMs?: number; reasoningEffort?: 'low' | 'medium' | 'high' }
+): Promise<{ text: string; model: string }> {
+  const deadlineAt = Date.now() + opts.deadlineMs;
+  if (process.env.GROQ_API_KEY && prompt.length <= GROQ_MAX_PROMPT_CHARS) {
+    const startTime = Date.now();
+    try {
+      const timeoutMs = Math.min(opts.groqTimeoutMs, Math.max(0, deadlineAt - Date.now()));
+      const text = await callGroq(prompt, temperature, opts.reasoningEffort ?? 'low', { timeoutMs, maxTokens: opts.maxTokens });
+      console.log(`[ai-text] ${label} 成功：Groq ${GROQ_MODEL} ${Date.now() - startTime}ms`);
+      return { text, model: GROQ_MODEL };
+    } catch (err: any) {
+      console.warn(`[ai-text] ${label} Groq 失敗，改用 Gemini`, String(err?.message || err).slice(0, 300));
+    }
+  }
+  let usedModel = '';
+  const response = await callGeminiFreeThenPaid(label, (ai, model) => {
+    usedModel = model;
+    return ai.models.generateContent({ model, contents: prompt, config: { temperature } });   // Gemini 的思考 token 也算在輸出上限內，不設上限以免截斷 JSON
+  }, QUALITY_GEMINI_MODELS, { deadlineAt, minRemainingMs: opts.minRemainingMs ?? 8000 });
+  return { text: response.text || '', model: usedModel };
 }
