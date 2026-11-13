@@ -20,6 +20,47 @@ const materialPath = (uid: string, materialId: string) => `artifacts/${appId}/us
 const memory = new Map<string, SentenceAnalysisRecord>();
 const memoryKey = (materialId: string, sentenceId: string) => `${materialId}__${sentenceId}`;
 
+/** AI 成功但沒存起來的結果（面板收起或錄音中卸載也不會丟掉；再試一次只重存，審查第 1 輪 Codex） */
+const unsavedMemory = new Map<string, SentenceAnalysisRecord>();
+/** 進行中的解析（同一句不重複送出；面板重新掛載時接回同一個請求） */
+const inflight = new Map<string, Promise<AnalyzeOutcome>>();
+
+export type AnalyzeOutcome = { rec: SentenceAnalysisRecord; result: 'saved' | 'missing-material' | 'missing-sentence' | 'changed' | 'saveFailed' };
+
+export function unsavedSentenceAnalysis(materialId: string, sentenceId: string): SentenceAnalysisRecord | null {
+    return unsavedMemory.get(memoryKey(materialId, sentenceId)) ?? null;
+}
+
+export function inflightSentenceAnalysis(materialId: string, sentenceId: string): Promise<AnalyzeOutcome> | null {
+    return inflight.get(memoryKey(materialId, sentenceId)) ?? null;
+}
+
+/** 呼叫 AI 並存檔；同一句進行中就回傳同一個請求。AI 失敗會丟出；存檔失敗回傳 saveFailed（結果保留在 unsavedMemory） */
+export function analyzeAndSaveSentence(
+    materialId: string,
+    sentenceId: string,
+    input: AnalysisInput & { materialTitle: string },
+): Promise<AnalyzeOutcome> {
+    const key = memoryKey(materialId, sentenceId);
+    const running = inflight.get(key);
+    if (running) return running;
+    const job = (async (): Promise<AnalyzeOutcome> => {
+        const rec = await requestSentenceAnalysis(materialId, sentenceId, input);
+        try {
+            const result = await saveSentenceAnalysis(rec);
+            if (result !== 'saved') unsavedMemory.set(key, rec);
+            return { rec, result };
+        } catch (e) {
+            console.warn('[句子解析] 存檔失敗', e);
+            unsavedMemory.set(key, rec);
+            return { rec, result: 'saveFailed' };
+        }
+    })();
+    inflight.set(key, job);
+    job.then(() => inflight.delete(key), () => inflight.delete(key));
+    return job;
+}
+
 export function cachedSentenceAnalysis(materialId: string, sentenceId: string): SentenceAnalysisRecord | null {
     return memory.get(memoryKey(materialId, sentenceId)) ?? null;
 }
@@ -79,7 +120,10 @@ export async function saveSentenceAnalysis(rec: SentenceAnalysisRecord): Promise
         tx.set(analysisRef, JSON.parse(JSON.stringify(rec)));   // 清掉 undefined（Firestore 不接受）
         return 'saved' as const;
     });
-    if (outcome === 'saved') memory.set(memoryKey(rec.materialId, rec.sentenceId), rec);
+    if (outcome === 'saved') {
+        memory.set(memoryKey(rec.materialId, rec.sentenceId), rec);
+        unsavedMemory.delete(memoryKey(rec.materialId, rec.sentenceId));
+    }
     return outcome;
 }
 
@@ -110,7 +154,7 @@ export async function deleteMaterialWithAnalyses(materialId: string): Promise<vo
         }
         tx.delete(materialRef);
     });
-    for (const key of [...memory.keys()]) if (key.startsWith(`${materialId}__`)) memory.delete(key);
+    for (const m of [memory, unsavedMemory]) for (const key of [...m.keys()]) if (key.startsWith(`${materialId}__`)) m.delete(key);
     if (leftovers.length === 0) return;
     try {
         for (let i = 0; i < leftovers.length; i += 400) {

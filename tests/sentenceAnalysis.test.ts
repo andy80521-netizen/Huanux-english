@@ -311,4 +311,21 @@ describe('接線', () => {
     expect(retry.slice(0, retry.indexOf('\n    };'))).not.toMatch(/analyzeSentence\(/);
     expect(retry.slice(0, retry.indexOf('\n    };'))).toMatch(/saveSentenceAnalysis\(/);
   });
+
+  it('審查第 1 輪（Codex）：StrictMode 重新初始化時掛載旗標設回 true', () => {
+    const p = read('src/components/SentenceAnalysisPanel.tsx');
+    expect(p).toMatch(/useEffect\(\(\) => \{\s*mountedRef\.current = true;/);
+  });
+
+  it('審查第 1 輪（Codex）：沒存起來的結果與進行中的請求放在服務層，面板卸載（錄音中）也不會丟掉、不會重複送出', () => {
+    const svc = read('src/services/sentenceAnalysis.ts');
+    expect(svc).toMatch(/export function analyzeAndSaveSentence/);
+    expect(svc).toMatch(/const running = inflight\.get\(key\);\s*if \(running\) return running;/);
+    expect(svc).toMatch(/unsavedMemory\.set\(key, rec\)/);
+    const p = read('src/components/SentenceAnalysisPanel.tsx');
+    expect(p).toMatch(/unsavedSentenceAnalysis\(/);
+    expect(p).toMatch(/inflightSentenceAnalysis\(/);
+    expect(p).not.toMatch(/requestSentenceAnalysis\(/);
+  });
 });
+

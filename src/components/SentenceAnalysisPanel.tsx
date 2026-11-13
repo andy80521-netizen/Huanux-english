@@ -2,7 +2,10 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ChevronDown, Loader2, Sparkles, RotateCcw } from 'lucide-react';
 import { Material, MaterialSentence } from '../types';
 import Button from './ui/Button';
-import { cachedSentenceAnalysis, loadSentenceAnalysis, requestSentenceAnalysis, saveSentenceAnalysis } from '../services/sentenceAnalysis';
+import {
+    cachedSentenceAnalysis, loadSentenceAnalysis, saveSentenceAnalysis, analyzeAndSaveSentence,
+    unsavedSentenceAnalysis, inflightSentenceAnalysis, AnalyzeOutcome,
+} from '../services/sentenceAnalysis';
 import { SentenceAnalysisRecord, analysisFreshness, neighborTexts } from '../utils/sentenceAnalysis';
 
 // 句子全面解析（影子跟讀）：預設收合；展開才讀存檔，沒有才顯示「解析這一句」
@@ -41,17 +44,25 @@ export default function SentenceAnalysisPanel({ material, sentence, sentenceInde
     // 換句或離開後，舊請求不更新畫面（結果仍存到它自己那一句）
     const sentenceKeyRef = useRef(`${material.id}__${sentence.id}`);
     const mountedRef = useRef(true);
-    useEffect(() => () => { mountedRef.current = false; }, []);
+    // StrictMode 會先跑一次清理再重新初始化：初始化時一定要設回 true（審查第 1 輪，Codex）
     useEffect(() => {
-        sentenceKeyRef.current = `${material.id}__${sentence.id}`;
+        mountedRef.current = true;
+        return () => { mountedRef.current = false; };
+    }, []);
+    useEffect(() => {
+        const key = `${material.id}__${sentence.id}`;
+        sentenceKeyRef.current = key;
         setOpen(false);
         setStatus('closed');
         setRecord(cachedSentenceAnalysis(material.id, sentence.id));
-        setAnalyzing(false);
         setError(null);
-        setUnsaved(null);
         setNotice(null);
-    }, [material.id, sentence.id]);
+        // 錄音中面板會卸載：沒存起來的結果與進行中的請求都在服務層，重新掛載時接回來（審查第 1 輪，Codex）
+        setUnsaved(unsavedSentenceAnalysis(material.id, sentence.id));
+        const running = inflightSentenceAnalysis(material.id, sentence.id);
+        setAnalyzing(!!running);
+        if (running) running.then((o) => applyOutcome(o, key), (e) => applyFailure(e, key));
+    }, [material.id, sentence.id]);   // eslint-disable-line react-hooks/exhaustive-deps
 
     const isCurrent = (key: string) => mountedRef.current && sentenceKeyRef.current === key;
     const { prevText, nextText } = neighborTexts(material.sentences, sentenceIndex);
@@ -76,38 +87,33 @@ export default function SentenceAnalysisPanel({ material, sentence, sentenceInde
         }
     };
 
-    const save = async (rec: SentenceAnalysisRecord, key: string) => {
-        try {
-            const r = await saveSentenceAnalysis(rec);
-            if (!isCurrent(key)) return;
-            if (r === 'saved') {
-                setRecord(rec);
-                setUnsaved(null);
-                setStatus('ready');
-            } else {
-                setUnsaved(rec);
-                setNotice(r === 'missing-material' ? '這份教材已被刪除，解析沒有存起來' : '句子已變更或已刪除，解析沒有存起來，請重新解析');
-            }
-        } catch (e) {
-            console.warn('[句子解析] 存檔失敗', e);
-            if (isCurrent(key)) setUnsaved(rec);
+    const applyOutcome = (o: AnalyzeOutcome, key: string) => {
+        if (!isCurrent(key)) return;
+        setAnalyzing(false);
+        if (o.result === 'saved') {
+            setRecord(o.rec);
+            setUnsaved(null);
+            setStatus('ready');
+            return;
         }
+        setUnsaved(o.rec);
+        if (o.result === 'missing-material') setNotice('這份教材已被刪除，解析沒有存起來');
+        else if (o.result !== 'saveFailed') setNotice('句子已變更或已刪除，解析沒有存起來，請重新解析');
+    };
+    const applyFailure = (e: any, key: string) => {
+        if (!isCurrent(key)) return;
+        setAnalyzing(false);
+        setError(e?.message || '解析失敗');
     };
 
-    const runAnalyze = async () => {
+    const runAnalyze = () => {
         if (analyzing) return;
         const key = sentenceKeyRef.current;
         setAnalyzing(true);
         setError(null);
         setNotice(null);
-        try {
-            const rec = await requestSentenceAnalysis(material.id, sentence.id, { ...current, materialTitle: material.title || '' });
-            await save(rec, key);
-        } catch (e: any) {
-            if (isCurrent(key)) setError(e?.message || '解析失敗');
-        } finally {
-            if (isCurrent(key)) setAnalyzing(false);
-        }
+        analyzeAndSaveSentence(material.id, sentence.id, { ...current, materialTitle: material.title || '' })
+            .then((o) => applyOutcome(o, key), (e) => applyFailure(e, key));
     };
 
     const retrySave = async () => {
