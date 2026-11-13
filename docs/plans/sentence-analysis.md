@@ -2,7 +2,7 @@
 
 - **級別**：大（新增重要 AI 提示詞＋新的 Firestore 集合；擁有者 2026-11-13 確認）
 - **PR**：#51
-- **狀態**：實作中（擁有者 2026-11-13 核准）
+- **狀態**：待擁有者試用（審查 2 輪完成）
 
 ## 目標
 影子跟讀畫面在英文句子與中文翻譯下方新增「句子解析」區塊（預設收合）。第一次展開時按「解析這一句」呼叫 AI，產生這一句的完整解析並存起來；之後再看直接讀存好的內容，不再花費。
@@ -146,3 +146,4 @@
 - 2026-11-13 委員會第一輪＋針對性質詢完成，整合提案待擁有者審核
 - 2026-11-13 擁有者核准；驗收測試 commit `151d7ac`（29 項）；實作：`netlify/shared/sentenceAnalysis.ts`、`aiKeys.ts`（`callGeminiFreeThenPaid` 選用截止時間、`callQualityTextTimed`）、`ai-text` 任務 `analyzeSentence`、`src/utils/sentenceAnalysis.ts`、`src/services/sentenceAnalysis.ts`、`SentenceAnalysisPanel`、跟讀畫面接線、刪除教材改 `deleteMaterialWithAnalyses`；check.sh 通過（1239 測試）
   - 細節：Gemini 備援不限 1 個模型，改為「剩餘時間不到 8 秒就不再試」（較寬鬆、一樣不會超過 50 秒）
+- 2026-11-13 審查第 1 輪：Codex 2 項（StrictMode 掛載旗標、錄音中卸載丟掉未存結果與進行中請求）已修正並補測試；Gemini 無意見。第 2 輪皆無意見。下一步：擁有者 iPhone 試用、量測解析耗時（若常超過 30 秒再考慮拆分）
