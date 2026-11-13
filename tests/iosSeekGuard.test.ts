@@ -166,7 +166,8 @@ describe('接線：所有直接跳位置的播放入口都確認起點', () => {
   // 之後每次跳轉都停在 0、按播放就從頭播（docs/plans/ios-ended-fix.md）→ 改成解鎖時不跳位置，解鎖結束後才設定起點
   it('跟讀：解鎖時不跳位置，解鎖結束後才設定起點', () => {
     const src = read('src/components/ShadowingPracticeView.tsx');
-    const body = src.slice(src.indexOf('const handleStart'), src.indexOf('const enterBufferPhase'));
+    // 擁有者 2026-11-13 同意：點擊當下的解鎖抽成 unlockInGesture()（自動跟讀共用，docs/plans/auto-shadowing.md），範圍起點改為它；斷言不變
+    const body = src.slice(src.indexOf('const unlockInGesture'), src.indexOf('const enterBufferPhase'));
     expect(body).not.toContain('seekSegmentStart(org, sentence.startTime)');
     const unlockAt = body.indexOf('org.play()');
     const awaitAt = body.indexOf('await Promise.all(');
