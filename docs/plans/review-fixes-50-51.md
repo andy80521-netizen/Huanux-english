@@ -48,8 +48,46 @@
   - 後端：截止時間（`withDeadline`、`callGeminiFreeThenPaid` 的 deadline）、提示詞注入、輸入驗證、成本
 - 每項請給：嚴重度、觸發條件、後果、建議修法（具體到檔案／函式）
 
-## 需要擁有者決定的問題（委員會後整理）
-（待整理）
+
+## 委員會＋Codex 審查結果整合（2026-11-13，待擁有者核准）
+成員：Gemini 3.8 Flash、Nemotron、DeepSeek 有回覆；Poolside 已下架。Codex：7 項（4 🟠、3 🟡）。
+Claude 初步 6 點：Codex 與三位委員**全部確認成立**。
+
+### 要修的項目（依嚴重度）
+| # | 嚴重度 | 問題 | 誰提出 | 修法（檔案／函式） |
+|---|---|---|---|---|
+| 1 | 🟠 | Groq 截斷或 JSON 不合格不會改用 Gemini | Claude、Codex、全體 | `callGroq` 回報 `finish_reason`；`callQualityTextTimed` 新增選用 `validate(text)`：Groq 截斷或驗證失敗 → 用**同一個截止時間**改用 Gemini；Gemini 結果也驗證；`ANALYSIS_MAX_TOKENS` 提高到 4096 |
+| 2 | 🟠 | 讀出存檔沒驗證結構 → 白屏 | Claude、Codex、全體 | `src/utils/sentenceAnalysis.ts` 新增 `sanitizeStoredAnalysis`（存檔專用，保留已存的 chunks，不重新切）；壞資料回 null＝當作沒有解析、可重新解析；**不寫回** Firestore |
+| 3 | 🟠 | 錄音中麥克風音軌意外結束，當成正常錄完送評分，自動跟讀照樣前進 | **Codex（新）** | `handleStart` 為本次音軌掛 `ended`、錄音器掛 `error`：中止、不評分；自動模式 `stopAuto('mic')`（顯示「點一下繼續」），手動顯示「麥克風中斷了，請再試一次」；`cleanupAudio` 移除監聽 |
+| 4 | 🟠 | 解析請求網路斷掉時永遠卡在「解析中」 | **Codex、DeepSeek（新）** | `analyzeAndSaveSentence` 前端 65 秒截止（超過就失敗、清掉進行中紀錄）；只在紀錄仍是同一個請求時才清（不會清掉之後的重試） |
+| 5 | 🟡 | 「再存一次」沒有回饋；不能重存的原因在重新掛載後消失 | Claude、Codex、全體 | 服務層存 `{ rec, result }`；`retrySave` 處理每種結果與例外；不能重存（句子變了、刪了）只給「重新解析」 |
+| 6 | 🟡 | 錯誤訊息誤導（沒登入、編號異常、句子超過 1000 字） | Claude、Codex、全體 | 服務層丟出可分類的錯誤；面板分別提示；後端長句回「句子太長，無法解析（上限 1000 字）」 |
+| 7 | 🟡 | 格式版本號前後端各一份 | Claude、全體 | 前端常數移到 `src/utils/sentenceAnalysis.ts`；測試比對兩邊相等（前後端不能互相 import，不做共用檔） |
+| 8 | 🟡 | 記憶體快取沒綁帳號 | Claude、全體 | 三個 Map 的 key 加上 uid |
+| 9 | 🟡 | 刪除教材時進行中的解析回來後留下孤兒「未存結果」 | **DeepSeek（新）** | 教材已刪除（`missing-material`）不放進未存結果 |
+| 10 | 🟡 | 刪除教材後清重逢紀錄或音檔失敗，畫面說「刪除失敗」但教材其實已刪 | **DeepSeek（新，原有問題）** | `MaterialListView.handleDelete`：後續清理各自 try/catch，只提示「教材已刪除，部分檔案清理失敗」 |
+| 11 | 🟡 | iPhone 有時只送 `pagehide` 不送 `visibilitychange`，自動跟讀殘留 | **DeepSeek（新）** | 自動模式期間也監聽 `pagehide` → `stopAuto('hidden')` |
+| 12 | 🟡 | 解析面板沒有錯誤防護，任何顯示錯誤都會讓整個跟讀畫面白屏 | Gemini、Nemotron | 只包住解析面板的小型 ErrorBoundary（顯示「解析內容格式異常，可以重新解析」），不改其他畫面 |
+| 13 | ⚪ | 小修：收合再展開仍顯示舊錯誤；重新解析前沒清掉舊的未存結果；刪除計畫沒去重；自動模式 `handleStart` 因「準備中」提早結束時流程會卡住 | DeepSeek、Gemini | 各自一行修正；`handleStart` 在自動模式提早結束時 `stopAuto('prepare')` |
+
+### 駁回的意見
+- **iPhone 跳句後無法播放，第一句已精熟時改成請使用者再點一次**（Gemini）：點「自動跟讀」那一下已解鎖原音、錄音播放器與麥克風；之後**每一句**本來就不是點擊觸發，跳句不是特例；而且違反擁有者「已精熟自動略過」的決定。改列 👀 實機驗證
+- **錄音播放換 src 後 iPhone 會擋**（Gemini）：手動跟讀早就這樣自動播放錄音，擁有者在 iPhone 用正常；被擋也有保險計時開始倒數
+- **呼叫次數上限、成本守門**（Nemotron）：只有擁有者使用，按了才解析
+- **前後端共用版本常數檔**（Nemotron）：前後端分開建置、目前沒有互相 import，改用測試比對
+- **`withDeadline` 改 AbortController**（Nemotron）：Gemini SDK 呼叫不一定能中止；放棄等待已足夠，函式回應後平台會凍結
+- **截止時間降到 45 秒**（DeepSeek）：驗證身分與讀取 JSON 只要幾百毫秒，50 秒仍留 10 秒
+- **`sentenceReady` 重複、摘要依句子去重、advance 找不到句子**（Nemotron、DeepSeek）：已由階段檢查擋住；刪除句子是軟刪除，仍在陣列裡
+- **提示詞注入 `</material>`**（Nemotron）：`asData` 已把 `<` `>` 全部換掉
+- **交易刪除一半成功**（Nemotron）：交易是全部成功或全部失敗
+- **Gemini 設定輸出上限**（Nemotron）：思考 token 也算，設了反而容易截斷 JSON（已有驗證＋備援）
+
+## 需要擁有者決定的問題
+1. **自動跟讀中按「聽聽看」**：目前會直接結束自動模式、不顯示摘要（DeepSeek 指出體驗不好）
+   - A（建議）：自動跟讀進行中**隱藏**「聽聽看」（要聽就先按停止）
+   - B：保留，按下去先停止並顯示摘要，再播放
+2. **自動跟讀評分卡住（轉文字服務很久沒回）要不要加逾時**（DeepSeek）：建議**這次不做**——評分流程是手動與自動共用，改動範圍大；卡住時可以按停止
+3. **錯誤防護範圍**：建議**只包住解析面板**；整個跟讀畫面的錯誤防護之後另外評估
 
 ## 驗收條件（草案，依委員會結果修訂）
 1. Groq 截斷或 JSON 不合格 → 改用 Gemini，仍在 50 秒內 ✅
@@ -74,3 +112,4 @@
 
 ## 進度紀錄
 - 2026-11-13 建立審查規劃，送委員會第一輪
+- 2026-11-13 委員會＋Codex 回覆，整合成修改規劃，待擁有者核准
