@@ -236,3 +236,13 @@ describe('#11 #12 #13 頁面關閉、錯誤防護、小修、聽聽看', () => {
     expect(s).toMatch(/\{!autoActive && \(\s*<section aria-labelledby="listen-h"/);
   });
 });
+
+describe('審查第 1 輪（Codex）：意群保留完整原句切片', () => {
+  it('超過 300 字的意群不截斷；總長超過原句上限才整段不顯示', async () => {
+    const { sanitizeStoredAnalysis } = await import('../src/utils/sentenceAnalysis');
+    const long = 'word '.repeat(80).trim();   // 399 字
+    expect(sanitizeStoredAnalysis({ overview: 'x', chunks: [long, 'end.'] })!.chunks).toEqual([long, 'end.']);
+    expect(sanitizeStoredAnalysis({ overview: 'x', chunks: ['a'.repeat(600), 'b'.repeat(600)] })!.chunks).toEqual([]);
+    expect(sanitizeStoredAnalysis({ overview: 'x', chunks: ['The council has', 'decided'] })!.chunks).toEqual(['The council has', 'decided']);
+  });
+});

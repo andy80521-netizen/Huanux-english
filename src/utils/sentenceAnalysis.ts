@@ -33,6 +33,13 @@ const str = (v: unknown, max: number): string => (typeof v === 'string' ? v.trim
 const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
 const isObj = (v: unknown): v is Record<string, any> => !!v && typeof v === 'object' && !Array.isArray(v);
 
+/** 意群保留完整的原句切片：不逐段截斷（審查第 1 輪 Codex）；非字串項目丟掉；總長超過原句上限 → 整段不顯示 */
+function sanitizeChunks(v: unknown): string[] {
+    const list = arr(v).filter((c): c is string => typeof c === 'string' && c.trim() !== '').slice(0, 8);
+    const total = list.reduce((n, c) => n + c.length + 1, 0);
+    return total <= 1001 ? list : [];
+}
+
 /**
  * 讀出存檔後先整理成安全格式（docs/plans/review-fixes-50-51.md #2）：
  * 非陣列當空、字串截斷、不合格的項目丟掉；保留已存的意群（不重新切）。沒有「一句話看懂」→ null（當作沒有解析）
@@ -50,7 +57,7 @@ export function sanitizeStoredAnalysis(raw: unknown): SentenceAnalysis | null {
     }
     return {
         overview,
-        chunks: arr(raw.chunks).filter((c): c is string => typeof c === 'string' && c.trim() !== '').map(c => c.slice(0, 300)).slice(0, 8),
+        chunks: sanitizeChunks(raw.chunks),
         structure,
         grammar: arr(raw.grammar).filter(isObj).map(g => ({ point: str(g.point, 80), explanation: str(g.explanation, 300) })).filter(g => g.point && g.explanation).slice(0, 3),
         vocabulary: arr(raw.vocabulary).filter(isObj)
