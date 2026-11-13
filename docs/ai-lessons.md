@@ -71,6 +71,7 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 - **iPhone（WebKit）跳轉中呼叫 `pause()` 會讓播放器回到 0 秒並宣告 ended**，之後跳轉都落在 0、按播放從頭播（PR #45，擁有者貼回的診斷紀錄證實）。規則：不要在 `seeking` 時暫停（用 `pauseSafely`）、靜音解鎖不跳位置；PR #35～#43 的推測都沒抓到這點，直到加了 `playbackTrace` 才找到
 - **OpenAI whisper-1 只要求 `timestamp_granularities[]=segment` 時，segment 時間是整數秒**（2026-11-12 診斷：230／230 段）；同時要求 `word` 才有約 0.01 秒精度。匯入時間不準的主因不是切句，是這個參數（PR #48）。改轉錄參數前先用「時間軸診斷」比較原始回應
 - 自動跟讀（PR #50）：流程控制在 `src/utils/autoShadowing.ts`（純函式、世代＋作答編號），元件只送事件。**停止錄音一律無條件拿掉 `onstop`**：`MediaRecorder.stop()` 之後、`onstop` 執行前，狀態已是 inactive，只在 `state === 'recording'` 時中止會漏掉已排入佇列的評分（Codex）。準備中取消用 `startCancelRef`，不可遞增 `scoringTokenRef`（評分中停止時結果要照常顯示）
+- 句子解析（PR #51）：Netlify 同步函式上限目前是 60 秒（官方文件），不是 10 秒；`callGeminiFreeThenPaid` 原本沒有整體截止時間，長任務要傳 `deadline`。AI 不可回傳原句文字（意群只回切點編號、從原句切）。React StrictMode 下 `useEffect(() => () => { ref = false })` 會讓旗標永遠是 false：初始化時要設回 true（Codex）。會因錄音而卸載的面板，進行中的請求與未存結果要放在服務層（Codex）
 ## 防作弊機制的已知限制（2026-10-25 多輪攻擊測試後）
 - 「把斷言改弱」「mock 掉被測程式」「程式偵測測試環境」只能列為 ⚠️ 注意事項，無法自動判定是否作弊，要靠審查者與完成報告說明
 - Claude 若繞過 `gh_ai.py` 直接用 `gh api` 留言，留言會被當成擁有者的發言（Claude 使用擁有者帳號）；只能靠規則遵守
@@ -187,3 +188,7 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 | 自動跟讀（PR #50，規劃） | Gemini／Nemotron／DeepSeek | 1 | 0 | 「沒有聲音」改看錄音音量（Nemotron、DeepSeek，與 Codex 相同）；其餘與草案相同 |
 | 自動跟讀（PR #50，審查） | Codex | 1 | 0 | 緩衝結束 stop() 後、onstop 前按停止仍會送評分 |
 | 自動跟讀（PR #50，審查） | Gemini（3.8 Flash 逾時，Flash Lite） | 0 | 0 | 無意見 |
+| 句子解析（PR #51，規劃） | Codex | 5 | 0 | 同步上限是 60 秒、意群不可讓 AI 改寫原句、快取失效條件、晚到寫入與刪除教材、最低內容契約、提示詞注入 |
+| 句子解析（PR #51，規劃＋質詢） | Gemini Flash Lite／Nemotron／DeepSeek／Grok | 4 | 6 | 意群用切點編號、交易內讀教材才寫、同一筆交易刪除、A 不複述翻譯；駁回：教材軟刪除排程清理、規則頻率限制、自動重切、Admin SDK 寫入、F 二次審核、背景函式 |
+| 句子解析（PR #51，審查） | Codex | 2 | 0 | StrictMode 掛載旗標、錄音中卸載丟掉未存結果 |
+| 句子解析（PR #51，審查） | Gemini | 0 | 0 | 兩輪無意見 |
