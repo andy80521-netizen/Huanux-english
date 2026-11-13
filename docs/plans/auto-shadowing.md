@@ -174,4 +174,6 @@
 - 2026-11-13 擁有者提出需求：自動跟讀，分數 5 秒後下一句，直到按停止
 
 ## 進度紀錄
+- 2026-11-13 驗收測試 commit `615d7d0`（26 項）；實作 `src/utils/autoShadowing.ts` 並接線 `ShadowingPracticeView`；擁有者同意修改 2 個舊測試的檢查範圍起點（`tests/iosEndedFix.test.ts`、`tests/iosSeekGuard.test.ts`：`const handleStart` → `const unlockInGesture`，斷言不變）；check.sh 通過（1209 測試）
+  - 與規劃的差異：評分失敗時沒有做「繼續自動跟讀」按鈕（可重試評分後按下一句、再按自動跟讀）；「點一下繼續」會開始新的一輪（摘要重新計算）；聽聽看、再念一次結束自動模式時不跳摘要
 - 2026-11-13 建立規劃；委員會（Gemini、Nemotron、DeepSeek）＋Codex 第一輪（3 項 🔴、2 項 🟠）完成並修正規劃，待擁有者審閱

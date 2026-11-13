@@ -144,7 +144,8 @@ describe('prepareSegmentStart：播放器壞掉時自動重新載入', () => {
 
 describe('跟讀流程：每個播放器只解鎖一次，解鎖不跳位置', () => {
   const src = () => read('src/components/ShadowingPracticeView.tsx');
-  const body = () => src().slice(src().indexOf('const handleStart'), src().indexOf('const enterBufferPhase'));
+  // 擁有者 2026-11-13 同意：點擊當下的解鎖抽成 unlockInGesture()（自動跟讀共用，docs/plans/auto-shadowing.md），範圍起點改為它；斷言不變
+  const body = () => src().slice(src().indexOf('const unlockInGesture'), src().indexOf('const enterBufferPhase'));
 
   it('記住已解鎖（unlockedRef），解鎖過就不再靜音播放', () => {
     expect(src()).toMatch(/const unlockedRef = useRef\(false\)/);

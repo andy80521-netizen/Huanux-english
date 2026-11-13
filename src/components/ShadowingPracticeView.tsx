@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Material, MaterialSentence } from '../types';
-import { ChevronLeft, Mic, AlertCircle, RotateCcw, Send, Loader2, Headphones, Check, Play, Pause, Layers, Volume1 } from 'lucide-react';
+import { ChevronLeft, Mic, AlertCircle, RotateCcw, Send, Loader2, Headphones, Check, Play, Pause, Layers, Volume1, Repeat, Square, SkipForward } from 'lucide-react';
 import { transcribeRecordingDetailed } from '../services/gemini';
 import { transcriberLabel } from '../utils/transcriber';
 import { playAfterRecordingStarts } from '../utils/recordingTiming';
@@ -25,6 +25,7 @@ import SegmentedControl from './ui/SegmentedControl';
 import { watchSegmentEnd, seekSegmentStart, guardSegmentStart, prepareSegmentStart, pauseSafely, PREPARE_TIMEOUT_MS } from '../utils/segmentEnd';
 import { createPlaybackTrace, PlaybackTrace } from '../utils/playbackTrace';
 import { formatPlayRange } from '../utils/timeEdit';
+import { createAutoSession, AutoSession, AutoView, AutoStopReason, AutoSummary, SILENT_VOICED_MS } from '../utils/autoShadowing';
 
 /** 按下跟讀的靜音解鎖播放最多等幾毫秒，之後一律暫停、拉回起點（docs/plans/shadowing-stable-playback.md） */
 const UNLOCK_WAIT_MS = 1500;
@@ -97,7 +98,99 @@ const HeadphoneTip: React.FC<{ onStart: (dontShowAgain: boolean) => void; onCanc
     );
 };
 
-type PracticeState = 'idle' | 'recording' | 'buffer' | 'finished' | 'scoring' | 'scored' | 'scoreError';
+const AUTO_STOP_TEXT: Partial<Record<AutoStopReason, string>> = {
+    end: '已經跟讀到最後一句',
+    user: '已停止自動跟讀',
+    silent: '連續 2 句沒有偵測到聲音，自動跟讀已停止',
+    hidden: '畫面被關閉或切到其他 App，自動跟讀已停止',
+    prepare: '原音播放失敗，自動跟讀已停止',
+    scoreError: '評分失敗，自動跟讀已停止。可以按「重試評分」',
+};
+
+/** 自動跟讀結果（結束時顯示）；沒通過的句子可以點過去重練 */
+const AutoShadowingSummary: React.FC<{
+    reason: AutoStopReason;
+    summary: AutoSummary;
+    sentences: MaterialSentence[];
+    positionOf: (index: number) => number;
+    onJump?: (index: number) => void;
+    onClose: () => void;
+}> = ({ reason, summary, sentences, positionOf, onJump, onClose }) => {
+    const closeRef = useRef<HTMLButtonElement>(null);
+    const onCloseRef = useRef(onClose);
+    onCloseRef.current = onClose;
+    useEffect(() => {
+        closeRef.current?.focus();
+        const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onCloseRef.current(); };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, []);
+    const stats: Array<[string, string]> = [
+        ['練習', `${summary.practiced} 句`],
+        ['通過', `${summary.passed} 句`],
+        ['平均總分', summary.average === null ? '—' : `${summary.average} 分`],
+        ['熟練度增加', `${summary.gained} 句`],
+    ];
+    return (
+        <div className="fixed inset-0 z-100 flex items-end justify-center bg-black/40 backdrop-blur-xs sm:items-center sm:p-4" onClick={onClose}>
+            <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="auto-summary-h"
+                onClick={(e) => e.stopPropagation()}
+                className="flex max-h-[85vh] w-full max-w-md flex-col gap-4 overflow-y-auto rounded-t-[28px] border border-line bg-surface px-6 pt-7 pb-[max(2rem,env(safe-area-inset-bottom))] shadow-[0_24px_48px_-12px_rgb(0_0_0/0.25)] animate-rise-in sm:rounded-3xl sm:pb-7"
+            >
+                <h2 id="auto-summary-h" className="text-xl font-bold text-ink">自動跟讀結果</h2>
+                {AUTO_STOP_TEXT[reason] && <p className="text-sm text-muted">{AUTO_STOP_TEXT[reason]}</p>}
+                <dl className="grid grid-cols-2 gap-3">
+                    {stats.map(([k, v]) => (
+                        <div key={k} className="rounded-2xl bg-surface-2 px-4 py-3">
+                            <dt className="text-xs text-muted">{k}</dt>
+                            <dd className="mt-1 font-reading text-xl tabular-nums text-ink">{v}</dd>
+                        </div>
+                    ))}
+                </dl>
+                {summary.silent > 0 && <p className="text-sm text-muted">沒有偵測到聲音：{summary.silent} 句（沒有評分）</p>}
+                {summary.pending > 0 && (
+                    <p role="status" className="flex items-center gap-2 text-sm text-muted">
+                        <Loader2 size={16} className="animate-spin" aria-hidden="true" />評分中…（{summary.pending} 句）
+                    </p>
+                )}
+                {summary.failed.length > 0 && (
+                    <div className="flex flex-col gap-2">
+                        <p className="text-sm font-medium text-ink">沒通過的句子</p>
+                        <ul className="flex flex-col gap-1.5">
+                            {summary.failed.map(f => {
+                                const s = sentences[f.index];
+                                const label = `第 ${positionOf(f.index)} 句・${f.total} 分`;
+                                return (
+                                    <li key={f.id}>
+                                        {onJump && s && !s.deleted ? (
+                                            <button
+                                                type="button"
+                                                onClick={() => { onClose(); onJump(f.index); }}
+                                                className="flex min-h-11 w-full flex-col items-start rounded-xl border border-line px-3 py-2 text-left hover:bg-surface-2 focus-visible:outline-2 focus-visible:outline-accent"
+                                            >
+                                                <span className="text-xs text-muted">{label}</span>
+                                                <span lang="en" className="line-clamp-1 text-sm text-ink">{s.text}</span>
+                                            </button>
+                                        ) : (
+                                            <span className="text-sm text-muted">{label}</span>
+                                        )}
+                                    </li>
+                                );
+                            })}
+                        </ul>
+                    </div>
+                )}
+                <Button ref={closeRef} size="lg" fullWidth onClick={onClose}>知道了</Button>
+            </div>
+        </div>
+    );
+};
+
+/** silent：自動跟讀中整段錄音沒有聲音（不送評分，docs/plans/auto-shadowing.md） */
+type PracticeState = 'idle' | 'recording' | 'buffer' | 'finished' | 'scoring' | 'scored' | 'scoreError' | 'silent';
 
 interface ShadowingPracticeViewProps {
     material: Material;
@@ -168,7 +261,7 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
     const recordedAudioRef = useRef<HTMLAudioElement>(null);
     const playbackUrlRef = useRef<string | null>(null);
     // 一次錄音的快照（含錄音當下的原音速度）：評分、重試評分、聽聽看都讀它（docs/plans/shadowing-speed.md）
-    const lastRecordingRef = useRef<({ blob: Blob } & ShadowingAttempt) | null>(null);
+    const lastRecordingRef = useRef<({ blob: Blob; autoKey?: string | null } & ShadowingAttempt) | null>(null);
     // 原音語速：記住設定；每次按開始跟讀時拍下快照
     const [speed, setSpeed] = useState<ShadowingSpeed>(() => loadSpeed(getStorage));
     const recordSpeedRef = useRef<number>(1);
@@ -177,6 +270,40 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
     const requestAnimationFrameRef = useRef<number>(0);
     const audioChunksRef = useRef<Blob[]>([]);
     const timerRef = useRef<NodeJS.Timeout | null>(null);
+
+    // ── 自動跟讀（docs/plans/auto-shadowing.md）：流程控制在 utils/autoShadowing.ts，這裡只送事件、執行回呼 ──
+    /** 準備中停止用：和 scoringTokenRef 分開，評分中停止時結果照常顯示（Codex） */
+    const startCancelRef = useRef(0);
+    /** 這次錄音「有聲音」累計的毫秒數（判斷沒有聲音） */
+    const voicedMsRef = useRef(0);
+    const lastFrameAtRef = useRef(0);
+    /** 錄音開始到停止的毫秒數（自己的錄音播放保險時間用） */
+    const recordedMsRef = useRef(0);
+    /** 靜音解鎖播放進行中：點「自動跟讀」與接著的開始共用同一次解鎖，不重複播放 */
+    const unlockPendingRef = useRef<{ unlock: Promise<'ok' | 'rejected' | 'skip'>; ended: boolean } | null>(null);
+    /** 自己的錄音播完 → 通知自動流程：取消監聽與保險計時 */
+    const playbackDoneCleanupRef = useRef<(() => void) | null>(null);
+    const startFnRef = useRef<() => void>(() => {});
+    const sentencesRef = useRef(material.sentences);
+    sentencesRef.current = material.sentences;
+    const onJumpRef = useRef(onJump);
+    onJumpRef.current = onJump;
+    const [autoView, setAutoView] = useState<AutoView | null>(null);
+    const [tipForAuto, setTipForAuto] = useState(false);
+    const autoRef = useRef<AutoSession | null>(null);
+    if (!autoRef.current) {
+        autoRef.current = createAutoSession({
+            getSentences: () => sentencesRef.current,
+            goTo: (index) => onJumpRef.current?.(index),
+            start: () => startFnRef.current(),
+            onChange: setAutoView,
+        });
+    }
+    const autoActive = !!autoView?.active;
+    const clearPlaybackWatch = () => {
+        playbackDoneCleanupRef.current?.();
+        playbackDoneCleanupRef.current = null;
+    };
 
     /** 設定原音音量；這台裝置不能調（iPhone／iPad）時不做事 */
     const setOriginalVolume = (v: number) => {
@@ -297,6 +424,9 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
 
     // Reset state when sentence changes
     useEffect(() => {
+        // 自動跟讀：不是自動流程要去的句子（手動跳句）→ 結束自動模式
+        autoRef.current?.sentenceChanged(sentence.id);
+        clearPlaybackWatch();
         scoringTokenRef.current += 1;
         playerRef.current?.stop();
         restoreOriginalVolume();
@@ -332,6 +462,46 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
         silenceTimerRef.current = 0;
         audioChunksRef.current = [];
     }, [sentenceIndex]);
+
+    // 自動跟讀：換句重設完成、回到 idle → 等待中的句子開始（每句只開始一次，由 autoShadowing 保證）
+    useEffect(() => {
+        if (practiceState !== 'idle' || startingRef.current) return;
+        autoRef.current?.sentenceReady(sentence.id);
+    }, [sentence.id, practiceState]);
+
+    // 自動跟讀：鎖屏、切 App → 結束（各階段都和按停止相同，Codex）；只在自動模式期間監聽（stopAuto 只用 ref，不怕舊閉包）
+    useEffect(() => {
+        if (!autoActive) return;
+        const onVisibility = () => {
+            if (document.visibilityState === 'hidden') stopAuto('hidden');
+        };
+        document.addEventListener('visibilitychange', onVisibility);
+        return () => document.removeEventListener('visibilitychange', onVisibility);
+    }, [autoActive]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+    // 離開跟讀畫面 → 結束自動模式、清掉倒數與錄音播放監看
+    useEffect(() => () => {
+        autoRef.current?.stop('navigate');
+        playbackDoneCleanupRef.current?.();
+    }, []);
+
+    // 自動跟讀期間不讓螢幕自動鎖定（Screen Wake Lock；不支援的瀏覽器照常使用）
+    useEffect(() => {
+        if (!autoActive) return;
+        let lock: { release: () => Promise<void> } | null = null;
+        let done = false;
+        const nav = navigator as Navigator & { wakeLock?: { request: (type: 'screen') => Promise<{ release: () => Promise<void> }> } };
+        if (nav.wakeLock) {
+            nav.wakeLock.request('screen')
+                .then((l) => { if (done) l.release().catch(() => {}); else lock = l; })
+                .catch(() => { /* 不支援或被拒：不影響功能 */ });
+        }
+        return () => {
+            done = true;
+            lock?.release().catch(() => {});
+            lock = null;
+        };
+    }, [autoActive]);
 
     // 真正離開這個畫面時才遞增（下面那個 effect 會在 recordedBlobUrl 改變時重跑，不能放在那裡，否則每次錄音結束都會被當成已離開）
     useEffect(() => {
@@ -369,8 +539,13 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
             sum += dataArray[i];
         }
         const averageVolume = sum / bufferLength;
+        // 自動跟讀判斷「沒有聲音」：累計有聲音的時間（每格最多算 100ms，避免分頁暫停後一次算太多）
+        const frameAt = performance.now();
+        const frameMs = lastFrameAtRef.current > 0 ? Math.min(100, frameAt - lastFrameAtRef.current) : 0;
+        lastFrameAtRef.current = frameAt;
 
         if (averageVolume >= 20) {
+            voicedMsRef.current += frameMs;
             lastSoundTimeRef.current = Date.now();
             silenceTimerRef.current = 0;
         } else {
@@ -388,36 +563,50 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
         requestAnimationFrameRef.current = requestAnimationFrame(monitorVolume);
     };
 
-    const handleStart = async () => {
-        if (startingRef.current) return;   // 正在準備麥克風時連按：不開第二次
-        // 要看的句子在畫面上半部：開始跟讀時捲回最上方
-        mainScrollRef.current?.scrollTo({ top: 0, behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
-        // iPhone 只允許「使用者點擊當下」啟動播放，所以必須在任何 await 之前先解鎖錄音播放器
+    /**
+     * iPhone 只允許「使用者點擊當下」啟動播放與喚醒麥克風：一律在任何 await 之前呼叫。
+     * 手動「開始跟讀」與「自動跟讀」都用它（自動模式之後的句子沒有點擊，靠這一次解鎖，docs/plans/auto-shadowing.md）。
+     * 原音解鎖時「原地」播放，不設定起點：iPhone 在跳轉中被暫停會回到 0 秒並宣告已播完，
+     * 之後每次跳轉都落在 0、按播放就從頭播（擁有者 2026-11-10 診斷紀錄，docs/plans/ios-ended-fix.md）。
+     * 回傳這次（或進行中）的解鎖；呼叫端結束解鎖時把 ended 設為 true，延遲回來的 play() 就不會再暫停。
+     */
+    const unlockInGesture = (): { unlock: Promise<'ok' | 'rejected' | 'skip'>; ended: boolean } => {
         if (recordedAudioRef.current) {
             recordedAudioRef.current.src = SILENT_AUDIO;
             recordedAudioRef.current.play().then(() => recordedAudioRef.current?.pause()).catch(() => {});
         }
-        recordSpeedRef.current = speed;   // 這次錄音的原音速度快照
-        trace(`按下跟讀：第 ${displayPosition} 句 ${formatPlayRange(sentence.startTime, sentence.endTime)}，語速 ${speed}`);
-        // 原音在錄音開始後才播放：第一次按時在點擊當下靜音解鎖（iPhone 之後才允許播放）。
-        // 解鎖時「原地」播放，不設定起點：iPhone 在跳轉中被暫停會回到 0 秒並宣告已播完，
-        // 之後每次跳轉都落在 0、按播放就從頭播（擁有者 2026-11-10 診斷紀錄，docs/plans/ios-ended-fix.md）
+        mic.resume();
         const org = audioRef.current;
-        let unlock: Promise<'ok' | 'rejected' | 'skip'> = Promise.resolve('skip');
-        let unlockEnded = false;
+        if (unlockPendingRef.current && !unlockPendingRef.current.ended) return unlockPendingRef.current;
+        const state: { unlock: Promise<'ok' | 'rejected' | 'skip'>; ended: boolean } = { unlock: Promise.resolve('skip'), ended: false };
         if (org && !unlockedRef.current) {
             applyPlaybackSpeed(org, speed);   // 語速不是跳轉，可以先套用
             org.muted = true;
-            unlock = Promise.resolve(org.play()).then(
+            state.unlock = Promise.resolve(org.play()).then(
                 () => {
                     unlockedRef.current = true;
-                    if (!unlockEnded && !org.seeking) org.pause();   // 播起來就暫停（不在跳轉中）
+                    if (!state.ended && !org.seeking) org.pause();   // 播起來就暫停（不在跳轉中）
                     return 'ok' as const;
                 },
                 () => 'rejected' as const,
             );
+            unlockPendingRef.current = state;
             trace('靜音解鎖 play()（原地，不跳位置）');
         }
+        return state;
+    };
+
+    const handleStart = async () => {
+        if (startingRef.current) return;   // 正在準備麥克風時連按：不開第二次
+        // 自動跟讀的這一次作答（手動為 null）：評分、沒有聲音、錄音播完都帶著它回報
+        const autoKey = autoRef.current?.currentAttempt() ?? null;
+        // 要看的句子在畫面上半部：開始跟讀時捲回最上方
+        mainScrollRef.current?.scrollTo({ top: 0, behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+        recordSpeedRef.current = speed;   // 這次錄音的原音速度快照
+        trace(`按下跟讀${autoKey ? '（自動）' : ''}：第 ${displayPosition} 句 ${formatPlayRange(sentence.startTime, sentence.endTime)}，語速 ${speed}`);
+        // 原音在錄音開始後才播放：第一次按時在點擊當下靜音解鎖（iPhone 之後才允許播放）
+        const gesture = unlockInGesture();
+        const unlock = gesture.unlock;
 
         setError(null);
         setTraceCopied(null);
@@ -427,8 +616,10 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
         startingRef.current = true;
         setMicPreparing(true);
         // 等待麥克風權限期間可能已換句或離開（桌機可點右側句子）：每個 await 之後都檢查，過期就結束，不啟動舊句子的錄音
+        // 自動跟讀準備中按停止：startCancelRef 遞增（不動 scoringTokenRef）
         const startToken = scoringTokenRef.current;
-        const isStale = () => startToken !== scoringTokenRef.current;
+        const cancelToken = startCancelRef.current;
+        const isStale = () => startToken !== scoringTokenRef.current || cancelToken !== startCancelRef.current;
         const stopStarting = () => {
             startingRef.current = false;
             setMicPreparing(false);
@@ -443,7 +634,8 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
             trace(`解鎖結果：${unlockResult}`);
             /** 結束靜音解鎖播放：暫停並取消靜音（這時還沒設定起點，不會在跳轉中暫停） */
             const endUnlock = () => {
-                unlockEnded = true;
+                gesture.ended = true;
+                if (unlockPendingRef.current === gesture) unlockPendingRef.current = null;
                 const el = audioRef.current;
                 if (!el) return;
                 pauseSafely(el);
@@ -455,6 +647,25 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                 return;
             }
             mic.resume();
+            // 自動跟讀：這一句沒有點擊，麥克風被系統暫停（AudioContext 不是 running）時最多等 1 秒恢復；
+            // 恢復不了就停止，請使用者點一下繼續（Codex 🔴，docs/plans/auto-shadowing.md）
+            if (autoKey) {
+                const micRunning = () => h.ctx.state === 'running';
+                if (!micRunning()) {
+                    trace(`自動：麥克風 ${h.ctx.state}，嘗試恢復`);
+                    await Promise.race([
+                        h.ctx.resume().catch(() => { /* 被拒：下面判斷 */ }),
+                        new Promise((r) => setTimeout(r, 1000)),
+                    ]);
+                    if (isStale()) { stopStarting(); return; }
+                    if (!micRunning()) {
+                        trace(`自動：麥克風仍是 ${h.ctx.state} → 停止`);
+                        stopStarting();
+                        stopAuto('mic');
+                        return;
+                    }
+                }
+            }
 
             // 暫停中設定起點，等跳轉完成、確認停在句首才開始錄音（docs/plans/shadowing-stable-playback.md）；
             // 播放器壞掉（已播完、跳轉落在 0）時 prepareSegmentStart 會重新載入一次（docs/plans/ios-ended-fix.md）
@@ -468,7 +679,10 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
             if (ready !== 'ready' || !audioRef.current) {
                 if (audioRef.current) { pauseSafely(audioRef.current); audioRef.current.muted = false; }
                 stopStarting();
-                if (ready === 'timeout' && !isStale()) setError('原音載入失敗，請檢查網路後再試。若一直失敗，請按下方「複製診斷紀錄」貼給開發者。');
+                if (ready === 'timeout' && !isStale()) {
+                    setError('原音載入失敗，請檢查網路後再試。若一直失敗，請按下方「複製診斷紀錄」貼給開發者。');
+                    if (autoKey) stopAuto('prepare');
+                }
                 return;
             }
             // 就位時不在跳轉中：還在播（解鎖延遲暫停被取消）就在這裡暫停並重新設定句首，確保安靜、從句首開始
@@ -487,6 +701,8 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
             lastSoundTimeRef.current = 0;
             silenceTimerRef.current = 0;
             isBufferPhaseRef.current = false;
+            voicedMsRef.current = 0;
+            lastFrameAtRef.current = 0;
 
             mediaRecorder.ondataavailable = (e) => {
                 if (e.data.size > 0) {
@@ -506,14 +722,23 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                     speechSec = Math.max(0, (lastSoundTimeRef.current - recordingStartTimeRef.current) / 1000);
                 }
                 setUserSpeechSec(speechSec);
+                recordedMsRef.current = recordStartAtRef.current !== null ? performance.now() - recordStartAtRef.current : 0;
+
+                // 自動跟讀：整段錄音有聲音的時間不到 SILENT_VOICED_MS → 沒有聲音，不送轉文字、不寫分數（docs/plans/auto-shadowing.md）
+                if (autoKey && autoRef.current?.currentAttempt() === autoKey && voicedMsRef.current < SILENT_VOICED_MS) {
+                    trace(`自動：沒有偵測到聲音（${Math.round(voicedMsRef.current)}ms）`);
+                    setPracticeState('silent');
+                    autoRef.current.attemptSilent(autoKey);
+                    return;
+                }
 
                 const blob = new Blob(audioChunksRef.current, { type: mediaRecorder.mimeType || 'audio/webm' });
                 const url = URL.createObjectURL(blob);
                 setRecordedBlobUrl(url);
 
                 const attempt: ShadowingAttempt = { speechSec, speed: recordSpeedRef.current };
-                lastRecordingRef.current = { blob, ...attempt };
-                runScoring(blob, attempt);
+                lastRecordingRef.current = { blob, autoKey, ...attempt };
+                runScoring(blob, attempt, autoKey);
             };
 
             // Set up audio to play exactly at startTime
@@ -538,7 +763,15 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                 leadMs: PLAYBACK_LEAD_MS,
                 isCancelled,
                 // 麥克風真的收音後才播原音（iPhone 暖機期間錄到的是零，跟著原音開口的第一個字會被吃掉）
-                waitLive: async () => logMicLive('影子跟讀', await waitForMicLive({ sample: micSampler(h), isCancelled }), pressedAt),
+                waitLive: async () => {
+                    const live = await waitForMicLive({ sample: micSampler(h), isCancelled });
+                    logMicLive('影子跟讀', live, pressedAt);
+                    // 自動跟讀：麥克風沒有真的收到音訊 → 中止這次（不評分）、停止並請使用者點一下繼續（Codex 🔴）
+                    if (live === 'timeout' && autoKey && !isCancelled()) {
+                        trace('自動：麥克風收音確認逾時 → 停止');
+                        stopAuto('mic');
+                    }
+                },
                 play: () => {
                     setMicPreparing(false);
                     if (!audioRef.current) return;
@@ -564,6 +797,7 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                             abortRecording();
                             setPracticeState('idle');
                             setError("無法播放教材音訊，請確認裝置音量設定。");
+                            if (autoKey) stopAuto('prepare');
                         });
                     // 確認真的從句子開頭播（位置確實在前進才判斷）；錄音中不重新載入，失敗就停止並請使用者複製診斷紀錄
                     startGuardRef.current?.();
@@ -573,6 +807,7 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                         abortRecording();
                         setPracticeState('idle');
                         setError(`原音沒有從這一句的開頭開始播（${diag}）。請按下方「複製診斷紀錄」貼給開發者。`);
+                        if (autoKey) stopAuto('prepare');
                     }, { allowReload: false, log: trace });
                     // 準時停在句尾；鎖屏或切 App 時直接暫停原音，一樣進入緩衝倒數（擁有者決定）
                     endWatchRef.current?.();
@@ -587,7 +822,8 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
             startingRef.current = false;
             setMicPreparing(false);
             // 麥克風失敗：結束靜音解鎖播放（不留下靜音中或播放中的原音）
-            unlockEnded = true;
+            gesture.ended = true;
+            if (unlockPendingRef.current === gesture) unlockPendingRef.current = null;
             if (audioRef.current) {
                 pauseSafely(audioRef.current);
                 audioRef.current.muted = false;
@@ -597,6 +833,7 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
             if (isStale()) return;
             cleanupAudio();
             setError("無法取得麥克風權限，請確認瀏覽器已允許使用麥克風。");
+            if (autoKey) stopAuto('mic');
         }
     };
 
@@ -636,7 +873,29 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
         a.pause();
     };
 
+    /**
+     * 結束自動跟讀（各階段的處理，Codex 🔴）：
+     * 準備中 → 取消這次開始；錄音中、緩衝中 → 中止錄音、不評分、原音暫停；
+     * 評分中、看結果、倒數中 → 只結束自動模式，評分照常完成並存檔、結果照常顯示（不動 scoringTokenRef）
+     */
+    const stopAuto = (reason: AutoStopReason) => {
+        const session = autoRef.current;
+        if (!session || !session.isActive()) return;
+        const phase = session.phase();
+        session.stop(reason);
+        clearPlaybackWatch();
+        trace(`自動跟讀結束（${reason}）`);
+        if (phase !== 'practicing' && phase !== 'waiting') return;
+        startCancelRef.current += 1;
+        if (startingRef.current || mediaRecorderRef.current?.state === 'recording') {
+            abortRecording();
+            if (audioRef.current) pauseSafely(audioRef.current);
+            setPracticeState('idle');
+        }
+    };
+
     const handleRetry = () => {
+        stopAuto('navigate');   // 手動再念一次：結束自動模式
         playerRef.current?.stop();
         restoreOriginalVolume();
         if (recordedAudioRef.current) {
@@ -665,9 +924,10 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
         setError(null);
     };
 
-    const runScoring = async (blob: Blob, attempt: ShadowingAttempt) => {
+    const runScoring = async (blob: Blob, attempt: ShadowingAttempt, autoKey: string | null = null) => {
         setPracticeState('scoring');
         setError(null);
+        autoRef.current?.attemptSubmitted(autoKey);
         const token = scoringTokenRef.current;
         // 已換句或離開：結果仍寫入這次錄音所屬的句子，但不更新目前的畫面
         const isStale = () => token !== scoringTokenRef.current;
@@ -710,6 +970,8 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                 if (!latest.some(s => s.id === sentence.id)) return;
                 tx.update(ref, { sentences: latest.map(s => (s.id === sentence.id ? { ...s, mastery: newMastery, lastScores } : s)) });
             });
+            // 自動跟讀摘要：熟練度交易成功才計入（停止或換句後完成的也算；重試評分只算一次）
+            autoRef.current?.attemptScored(autoKey, { passed, total: scores.total, gained: gain });
 
             // 這句含有已學句型且達到累加熟練度的條件：記錄一次「親口念過」（不影響任何熟練度）
             if (passed && sightingPatternIds && sightingPatternIds.length > 0) {
@@ -730,13 +992,31 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                 recordedAudioRef.current.currentTime = 0;
                 // 播放真的開始才同步成「我的錄音」播放中（被瀏覽器擋下時不顯示成播放中）
                 const startToken = scoringTokenRef.current;
-                recordedAudioRef.current.play()
+                const rec = recordedAudioRef.current;
+                // 自動跟讀：自己的錄音播完才開始倒數（擁有者決定）；播放被擋或超過「錄音長度＋3 秒」也開始，不會卡住
+                const done = () => {
+                    clearPlaybackWatch();
+                    autoRef.current?.playbackDone(autoKey);
+                };
+                if (autoKey && autoRef.current?.isActive()) {
+                    clearPlaybackWatch();
+                    const fallback = window.setTimeout(done, Math.max(0, recordedMsRef.current) + 3000);
+                    rec.addEventListener('ended', done, { once: true });
+                    playbackDoneCleanupRef.current = () => {
+                        window.clearTimeout(fallback);
+                        rec.removeEventListener('ended', done);
+                    };
+                }
+                rec.play()
                     .then(() => { if (startToken === scoringTokenRef.current) playerRef.current?.markPlaying('mine'); })
-                    .catch(() => {});
+                    .catch(() => { if (autoKey) done(); });
+            } else if (autoKey) {
+                autoRef.current?.playbackDone(autoKey);
             }
             
         } catch (err: any) {
             console.error("Scoring error:", err);
+            autoRef.current?.attemptFailed(autoKey);
             if (isStale()) return;
             setError(err.message || "評分過程中發生錯誤，請重試。");
             setPracticeState('scoreError');
@@ -746,10 +1026,33 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
     // 開始跟讀：第一次先顯示耳機提醒；提醒卡上的「開始跟讀」在同一次點擊裡同步開始
     const handleStartClick = () => {
         if (shouldShowHeadphoneTip(getStorage)) {
+            setTipForAuto(false);
             setShowTip(true);
             return;
         }
         handleStart();
+    };
+    startFnRef.current = () => { void handleStart(); };
+
+    // 自動跟讀：在這次點擊裡解鎖播放器與麥克風（之後的句子沒有點擊）；目前這句要練就在同一次點擊裡開始，
+    // 已精熟或已刪除就跳到後面第一句要練的（docs/plans/auto-shadowing.md，擁有者決定：已精熟自動略過）
+    const handleAutoStart = (fromTip = false) => {
+        const session = autoRef.current;
+        if (!session || startingRef.current) return;
+        if (!fromTip && shouldShowHeadphoneTip(getStorage)) { setTipForAuto(true); setShowTip(true); return; }
+        const gesture = unlockInGesture();
+        setError(null);
+        const { startNow } = session.begin(sentenceIndex);
+        if (startNow) session.sentenceReady(sentence.id);
+        else if (!session.isActive()) endGestureUnlock(gesture);   // 後面沒有要練的句子：收掉這次解鎖
+    };
+
+    /** 解鎖之後沒有接著開始跟讀：結束靜音解鎖播放、取消靜音 */
+    const endGestureUnlock = (gesture: { ended: boolean }) => {
+        gesture.ended = true;
+        if (unlockPendingRef.current === gesture) unlockPendingRef.current = null;
+        const el = audioRef.current;
+        if (el) { pauseSafely(el); el.muted = false; }
     };
 
     // 結果頁動效：總分從 0 跑到實際分數；約 300ms 後補上金色的熟練度增加段。減少動態效果時直接顯示結果
@@ -790,6 +1093,10 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
     const passed = scoreResult ? isShadowingPass(scoreResult) : false;
     const showSentence = practiceState !== 'scored';
     const jumpLocked = practiceState === 'scoring';
+    const autoReason = !autoActive ? autoView?.stopReason ?? null : null;
+    const showAutoSummary = !!autoView && !!autoReason && autoReason !== 'navigate' && autoReason !== 'mic' && autoReason !== 'none-left';
+    const autoReviewing = autoActive && (practiceState === 'scored' || practiceState === 'silent');
+    const positionOf = (index: number) => activeIndices.indexOf(index) + 1;
 
     return (
         <div className={`h-full ${onJump ? 'lg:grid lg:grid-cols-[minmax(0,1fr)_320px]' : ''}`}>
@@ -809,8 +1116,18 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                     onStart={(dontShowAgain) => {
                         if (dontShowAgain) dismissHeadphoneTip(getStorage);
                         setShowTip(false);
-                        handleStart();
+                        if (tipForAuto) handleAutoStart(true); else handleStart();
                     }}
+                />
+            )}
+            {showAutoSummary && autoView && autoReason && (
+                <AutoShadowingSummary
+                    reason={autoReason}
+                    summary={autoView.summary}
+                    sentences={material.sentences}
+                    positionOf={positionOf}
+                    onJump={onJump}
+                    onClose={() => autoRef.current?.clearResult()}
                 />
             )}
 
@@ -833,6 +1150,31 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                 </div>
 
                 <main className="flex flex-1 flex-col px-6 pt-10 sm:px-10 lg:px-14 lg:pt-14">
+                    {autoActive && (
+                        <div className="mb-6 flex max-w-[640px] items-center justify-between gap-3 rounded-2xl bg-accent-soft py-2 pr-2 pl-4">
+                            <p className="flex items-center gap-2 text-sm font-medium text-ink">
+                                <Repeat size={16} className="text-accent" aria-hidden="true" />
+                                自動跟讀中・第 {displayPosition} 句
+                            </p>
+                            <Button variant="secondary" size="sm" onClick={() => stopAuto('user')} aria-label="停止自動跟讀" icon={<Square size={14} aria-hidden="true" />} className="bg-surface">
+                                停止
+                            </Button>
+                        </div>
+                    )}
+                    {autoReason === 'mic' && (
+                        <div role="alert" className="mb-6 flex max-w-[640px] flex-wrap items-center justify-between gap-3 rounded-2xl border border-line bg-surface px-4 py-3">
+                            <p className="text-sm text-ink">麥克風暫停了，自動跟讀已停止</p>
+                            <Button size="sm" onClick={() => { autoRef.current?.clearResult(); handleAutoStart(); }} icon={<Mic size={16} aria-hidden="true" />}>
+                                點一下繼續
+                            </Button>
+                        </div>
+                    )}
+                    {autoReason === 'none-left' && (
+                        <div role="status" className="mb-6 flex max-w-[640px] items-center justify-between gap-3 rounded-2xl border border-line bg-surface px-4 py-3">
+                            <p className="text-sm text-ink">從這一句往後的句子都已精熟，沒有要自動跟讀的句子</p>
+                            <Button variant="ghost" size="sm" onClick={() => autoRef.current?.clearResult()}>知道了</Button>
+                        </div>
+                    )}
                     {error && (
                         <div role="alert" className="mb-6 flex items-start gap-3 rounded-xl bg-danger/10 px-4 py-3.5 text-sm text-danger">
                             <AlertCircle size={18} className="mt-0.5 shrink-0" aria-hidden="true" />
@@ -916,6 +1258,10 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
 
                         {practiceState === 'scoreError' && (
                             <p className="mt-10 text-sm text-muted">評分失敗，可以重試評分或重新錄一次</p>
+                        )}
+
+                        {practiceState === 'silent' && (
+                            <p className="mt-10 text-[15px] font-medium text-ink">沒有偵測到聲音，這一句不評分</p>
                         )}
                     </div>
 
@@ -1013,7 +1359,7 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                                                 type="button"
                                                 aria-pressed={on}
                                                 aria-label={ariaLabel}
-                                                onClick={() => playerRef.current?.toggle(mode)}
+                                                onClick={() => { stopAuto('navigate'); playerRef.current?.toggle(mode); }}
                                                 className={`flex min-h-11 items-center justify-center gap-1.5 rounded-full px-2 text-[13px] transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${
                                                     on ? 'bg-accent font-medium text-on-accent' : 'border border-line text-ink hover:bg-surface-2'
                                                 }`}
@@ -1040,15 +1386,58 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
 
                     {/* 操作 */}
                     <div className="mt-auto pt-10 pb-6 lg:pb-10">
-                        {practiceState === 'idle' && (
+                        {practiceState === 'idle' && autoActive && (
+                            <p role="status" className="flex items-center gap-2 text-[15px] text-muted">
+                                <Loader2 size={18} className="animate-spin" aria-hidden="true" />準備麥克風與原音…
+                            </p>
+                        )}
+                        {practiceState === 'idle' && !autoActive && (
                             <div className="flex max-w-[640px] flex-col gap-4 lg:flex-row-reverse lg:items-center lg:justify-end lg:gap-6">
                                 <p className="flex items-start gap-2.5 text-[13px] leading-relaxed text-muted lg:max-w-sm">
                                     <Headphones size={17} className="mt-0.5 shrink-0" aria-hidden="true" />
                                     <span>請戴上耳機練習。跟讀時會同時播放原音和錄音，沒戴耳機時麥克風會錄到原音，導致評分失準。</span>
                                 </p>
-                                <Button size="lg" onClick={handleStartClick} disabled={micPreparing} icon={<Mic size={22} aria-hidden="true" />} className="w-full lg:w-auto lg:shrink-0">
-                                    {micPreparing ? '準備麥克風…' : '開始跟讀'}
+                                <div className="flex flex-col gap-2.5 lg:shrink-0">
+                                    <Button size="lg" onClick={handleStartClick} disabled={micPreparing} icon={<Mic size={22} aria-hidden="true" />} className="w-full lg:w-auto">
+                                        {micPreparing ? '準備麥克風…' : '開始跟讀'}
+                                    </Button>
+                                    {onJump && activeIndices.length > 0 && (
+                                        <Button variant="secondary" size="md" onClick={() => handleAutoStart()} disabled={micPreparing} icon={<Repeat size={18} aria-hidden="true" />} className="w-full lg:w-auto">
+                                            自動跟讀
+                                        </Button>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
+                        {autoReviewing && autoView && (
+                            <div className="flex max-w-[640px] flex-col gap-3">
+                                <p aria-live="polite" className="text-[15px] font-medium text-ink">
+                                    {autoView.phase === 'countdown'
+                                        ? <><span className="font-reading text-2xl tabular-nums text-accent">{autoView.countdown}</span> 秒後下一句</>
+                                        : '正在播放你的錄音，播完後倒數 5 秒'}
+                                </p>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <Button variant="secondary" size="lg" onClick={() => stopAuto('user')} aria-label="停止自動跟讀" icon={<Square size={16} aria-hidden="true" />} className="px-4">
+                                        停止
+                                    </Button>
+                                    <Button size="lg" onClick={() => autoRef.current?.skipNow()} icon={<SkipForward size={18} aria-hidden="true" />} className="px-4">
+                                        立即下一句
+                                    </Button>
+                                </div>
+                            </div>
+                        )}
+
+                        {practiceState === 'silent' && !autoActive && (
+                            <div className="grid max-w-[640px] grid-cols-2 gap-3">
+                                <Button variant="secondary" size="lg" onClick={handleRetry} icon={<RotateCcw size={18} aria-hidden="true" />} className="px-4">
+                                    再念一次
                                 </Button>
+                                {!isLastSentence && (
+                                    <Button size="lg" onClick={onNext} className="px-4">
+                                        下一句
+                                    </Button>
+                                )}
                             </div>
                         )}
 
@@ -1061,7 +1450,7 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                                     size="lg"
                                     onClick={() => {
                                         if (lastRecordingRef.current) {
-                                            runScoring(lastRecordingRef.current.blob, lastRecordingRef.current);
+                                            runScoring(lastRecordingRef.current.blob, lastRecordingRef.current, lastRecordingRef.current.autoKey ?? null);
                                         }
                                     }}
                                     icon={<Send size={18} aria-hidden="true" />}
@@ -1072,7 +1461,7 @@ export default function ShadowingPracticeView({ material, sentenceIndex, onBack,
                             </div>
                         )}
 
-                        {practiceState === 'scored' && (
+                        {practiceState === 'scored' && !autoActive && (
                             <div className="grid max-w-[640px] grid-cols-2 gap-3">
                                 <Button variant="secondary" size="lg" onClick={handleRetry} icon={<RotateCcw size={18} aria-hidden="true" />} className="px-4">
                                     再念一次
