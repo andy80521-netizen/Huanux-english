@@ -63,8 +63,15 @@ export default function MaterialListView({ onAddClick, onMaterialClick }: { onAd
             // 教材與每句的句子解析一起刪除（docs/plans/sentence-analysis.md）
             await deleteMaterialWithAnalyses(deleteModal.materialId);
 
+            // 教材已刪除：之後的清理失敗只提示，不說「刪除失敗」（docs/plans/review-fixes-50-51.md #10）
+            let cleanupFailed = false;
             // 刪除這份教材的已學句型比對結果與重逢紀錄
-            await deleteMaterialSightings(deleteModal.materialId);
+            try {
+                await deleteMaterialSightings(deleteModal.materialId);
+            } catch (sightErr) {
+                console.error("Sightings cleanup error:", sightErr);
+                cleanupFailed = true;
+            }
             
             // Delete Storage file (mp3)
             const storageRef = ref(storage, `artifacts/${appId}/users/${uid}/materials/${deleteModal.materialId}.mp3`);
@@ -74,6 +81,7 @@ export default function MaterialListView({ onAddClick, onMaterialClick }: { onAd
                 // If the file doesn't exist, we can ignore the storage error
                 if (storageErr.code !== 'storage/object-not-found') {
                     console.error("Storage delete error:", storageErr);
+                    cleanupFailed = true;
                 }
             }
 
@@ -85,9 +93,11 @@ export default function MaterialListView({ onAddClick, onMaterialClick }: { onAd
                 } catch (coverErr: any) {
                     if (coverErr.code !== 'storage/object-not-found') {
                         console.error("Cover delete error:", coverErr);
+                        cleanupFailed = true;
                     }
                 }
             }
+            if (cleanupFailed) setError('教材已刪除，部分檔案清理失敗（不影響使用）');
         } catch (err: any) {
             console.error("Error deleting material: ", err);
             setError("刪除失敗，請稍後再試: " + err.message);

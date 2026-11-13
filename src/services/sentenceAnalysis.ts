@@ -1,80 +1,161 @@
 // 句子全面解析：讀取、呼叫 AI、交易寫入、刪除教材時一併刪除
-// 規劃：docs/plans/sentence-analysis.md（擁有者 2026-11-13 核准）
+// 規劃：docs/plans/sentence-analysis.md（擁有者 2026-11-13 核准）；修正：docs/plans/review-fixes-50-51.md
 import { doc, getDoc, runTransaction, writeBatch } from 'firebase/firestore';
 import { auth, db, appId } from '../firebase';
 import { analyzeSentence } from './gemini';
 import {
-    SentenceAnalysisRecord, AnalysisInput, analysisDocId, decideAnalysisWrite, planMaterialDelete,
+    SentenceAnalysisRecord, AnalysisInput, analysisDocId, decideAnalysisWrite, planMaterialDelete, sanitizeStoredAnalysis,
 } from '../utils/sentenceAnalysis';
+
+/** 前端最多等這麼久（後端 50 秒截止＋網路）；手機斷網時不會永遠卡在「解析中」（#4） */
+export const ANALYSIS_CLIENT_TIMEOUT_MS = 65_000;
+const MAX_SENTENCE_CHARS = 1000;
+
+/** 可分類的錯誤（#6）：面板依 code 顯示對應提示 */
+export class SentenceAnalysisError extends Error {
+    constructor(public code: 'auth' | 'id' | 'tooLong' | 'timeout', message: string) {
+        super(message);
+        this.name = 'SentenceAnalysisError';
+    }
+}
 
 const requireUid = () => {
     const uid = auth.currentUser?.uid;
-    if (!uid) throw new Error('請先登入');
+    if (!uid) throw new SentenceAnalysisError('auth', '請先登入');
     return uid;
 };
+const docIdOf = (materialId: string, sentenceId: string) => {
+    try {
+        return analysisDocId(materialId, sentenceId);
+    } catch {
+        throw new SentenceAnalysisError('id', '教材或句子編號格式不正確');
+    }
+};
 const analysisPath = (uid: string, materialId: string, sentenceId: string) =>
-    `artifacts/${appId}/users/${uid}/sentenceAnalyses/${analysisDocId(materialId, sentenceId)}`;
+    `artifacts/${appId}/users/${uid}/sentenceAnalyses/${docIdOf(materialId, sentenceId)}`;
 const materialPath = (uid: string, materialId: string) => `artifacts/${appId}/users/${uid}/materials/${materialId}`;
 
-/** 這次開啟 App 期間讀過或剛解析的結果（同一句在 idle 與結果頁兩處顯示時不再讀一次） */
+// 這次開啟 App 期間的記憶體快取；key 含 uid，同分頁換帳號不會讀到別人的（#8）
+const memoryKey = (uid: string, materialId: string, sentenceId: string) => `${uid}__${materialId}__${sentenceId}`;
+const keyFor = (materialId: string, sentenceId: string) => {
+    const uid = auth.currentUser?.uid;
+    return uid ? memoryKey(uid, materialId, sentenceId) : null;
+};
+/** 讀過或剛解析的結果（同一句在 idle 與結果頁兩處顯示時不再讀一次） */
 const memory = new Map<string, SentenceAnalysisRecord>();
-const memoryKey = (materialId: string, sentenceId: string) => `${materialId}__${sentenceId}`;
 
-/** AI 成功但沒存起來的結果（面板收起或錄音中卸載也不會丟掉；再試一次只重存，審查第 1 輪 Codex） */
+export type SaveResult = 'saved' | 'missing-material' | 'missing-sentence' | 'changed';
+export type AnalyzeOutcome = { rec: SentenceAnalysisRecord; result: SaveResult | 'saveFailed' };
+export type UnsavedResult = 'saveFailed' | 'missing-sentence' | 'changed';
+
+/** AI 成功但沒存起來的結果（面板卸載也保留；審查第 1 輪 Codex）。教材已刪除不放進來（#9） */
 const unsavedMemory = new Map<string, SentenceAnalysisRecord>();
+/** 沒存起來的原因（#5；擁有者決定與結果分開存）：重新掛載後仍能顯示正確提示 */
+const unsavedReasons = new Map<string, UnsavedResult>();
+const rememberUnsaved = (key: string, rec: SentenceAnalysisRecord, result: UnsavedResult) => {
+    unsavedMemory.set(key, rec);
+    unsavedReasons.set(key, result);
+};
+const forgetUnsaved = (key: string) => {
+    unsavedMemory.delete(key);
+    unsavedReasons.delete(key);
+};
 /** 進行中的解析（同一句不重複送出；面板重新掛載時接回同一個請求） */
 const inflight = new Map<string, Promise<AnalyzeOutcome>>();
 
-export type AnalyzeOutcome = { rec: SentenceAnalysisRecord; result: 'saved' | 'missing-material' | 'missing-sentence' | 'changed' | 'saveFailed' };
-
-export function unsavedSentenceAnalysis(materialId: string, sentenceId: string): SentenceAnalysisRecord | null {
-    return unsavedMemory.get(memoryKey(materialId, sentenceId)) ?? null;
+export function unsavedSentenceAnalysis(materialId: string, sentenceId: string): { rec: SentenceAnalysisRecord; result: UnsavedResult } | null {
+    const k = keyFor(materialId, sentenceId);
+    const rec = k ? unsavedMemory.get(k) : undefined;
+    return k && rec ? { rec, result: unsavedReasons.get(k) ?? 'saveFailed' } : null;
 }
 
 export function inflightSentenceAnalysis(materialId: string, sentenceId: string): Promise<AnalyzeOutcome> | null {
-    return inflight.get(memoryKey(materialId, sentenceId)) ?? null;
+    const k = keyFor(materialId, sentenceId);
+    return (k && inflight.get(k)) || null;
 }
 
-/** 呼叫 AI 並存檔；同一句進行中就回傳同一個請求。AI 失敗會丟出；存檔失敗回傳 saveFailed（結果保留在 unsavedMemory） */
+export function cachedSentenceAnalysis(materialId: string, sentenceId: string): SentenceAnalysisRecord | null {
+    const k = keyFor(materialId, sentenceId);
+    return (k && memory.get(k)) || null;
+}
+
+/** 記下或清掉未存結果（面板「再存一次」後同步） */
+export function setUnsavedSentenceAnalysis(rec: SentenceAnalysisRecord, result: SaveResult | 'saveFailed'): void {
+    const k = keyFor(rec.materialId, rec.sentenceId);
+    if (!k) return;
+    if (result === 'saved' || result === 'missing-material') forgetUnsaved(k);
+    else rememberUnsaved(k, rec, result);
+}
+
+/** 呼叫 AI 並存檔；同一句進行中就回傳同一個請求。AI 失敗或逾時會丟出；存檔失敗回傳 saveFailed（結果保留） */
 export function analyzeAndSaveSentence(
     materialId: string,
     sentenceId: string,
     input: AnalysisInput & { materialTitle: string },
 ): Promise<AnalyzeOutcome> {
-    const key = memoryKey(materialId, sentenceId);
+    const uid = requireUid();
+    docIdOf(materialId, sentenceId);
+    if (input.text.length > MAX_SENTENCE_CHARS) return Promise.reject(new SentenceAnalysisError('tooLong', '這句太長，無法解析（上限 1000 字）'));
+    const key = memoryKey(uid, materialId, sentenceId);
     const running = inflight.get(key);
     if (running) return running;
     const job = (async (): Promise<AnalyzeOutcome> => {
-        const rec = await requestSentenceAnalysis(materialId, sentenceId, input);
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const timeout = new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new SentenceAnalysisError('timeout', '解析逾時，請再試一次')), ANALYSIS_CLIENT_TIMEOUT_MS);
+        });
+        let rec: SentenceAnalysisRecord;
+        try {
+            rec = await Promise.race([requestSentenceAnalysis(materialId, sentenceId, input), timeout]);
+        } finally {
+            clearTimeout(timer);
+        }
         try {
             const result = await saveSentenceAnalysis(rec);
-            if (result !== 'saved') unsavedMemory.set(key, rec);
+            // 教材已刪除：不留下孤兒的未存結果（#9）；句子變了或刪了：記下原因（#5）
+            if (result === 'missing-sentence' || result === 'changed') {
+                unsavedMemory.set(key, rec);
+                unsavedReasons.set(key, result);
+            } else if (result === 'missing-material') forgetUnsaved(key);
             return { rec, result };
         } catch (e) {
             console.warn('[句子解析] 存檔失敗', e);
             unsavedMemory.set(key, rec);
+            unsavedReasons.set(key, 'saveFailed');
             return { rec, result: 'saveFailed' };
         }
     })();
     inflight.set(key, job);
-    job.then(() => inflight.delete(key), () => inflight.delete(key));
+    // 只在紀錄仍是這個請求時才清（不會清掉之後的重試，Codex）
+    const clear = () => { if (inflight.get(key) === job) inflight.delete(key); };
+    job.then(clear, clear);
     return job;
 }
 
-export function cachedSentenceAnalysis(materialId: string, sentenceId: string): SentenceAnalysisRecord | null {
-    return memory.get(memoryKey(materialId, sentenceId)) ?? null;
-}
-
-/** 讀存好的解析；沒有回傳 null */
+/** 讀存好的解析；沒有或格式壞掉回傳 null（壞資料不寫回，讓使用者重新解析；#2） */
 export async function loadSentenceAnalysis(materialId: string, sentenceId: string): Promise<SentenceAnalysisRecord | null> {
-    const hit = memory.get(memoryKey(materialId, sentenceId));
-    if (hit) return hit;
     const uid = requireUid();
+    const key = memoryKey(uid, materialId, sentenceId);
+    const hit = memory.get(key);
+    if (hit) return hit;
     const snap = await getDoc(doc(db, analysisPath(uid, materialId, sentenceId)));
     if (!snap.exists()) return null;
-    const rec = snap.data() as SentenceAnalysisRecord;
-    if (!rec?.analysis || typeof rec.analysis.overview !== 'string') return null;
-    memory.set(memoryKey(materialId, sentenceId), rec);
+    const data = snap.data() as Partial<SentenceAnalysisRecord> | undefined;
+    const analysis = sanitizeStoredAnalysis(data?.analysis);
+    if (!data || !analysis) return null;
+    const rec: SentenceAnalysisRecord = {
+        materialId,
+        sentenceId,
+        text: typeof data.text === 'string' ? data.text : '',
+        translation: typeof data.translation === 'string' ? data.translation : '',
+        prevText: typeof data.prevText === 'string' ? data.prevText : '',
+        nextText: typeof data.nextText === 'string' ? data.nextText : '',
+        version: Number(data.version) || 0,
+        model: typeof data.model === 'string' ? data.model : '',
+        createdAt: Number(data.createdAt) || 0,
+        analysis,
+    };
+    memory.set(key, rec);
     return rec;
 }
 
@@ -91,6 +172,8 @@ export async function requestSentenceAnalysis(
         prevText: input.prevText.slice(0, 1000),
         nextText: input.nextText.slice(0, 1000),
     });
+    const analysis = sanitizeStoredAnalysis(r?.analysis);
+    if (!analysis) throw new Error('解析結果格式不正確');
     return {
         materialId,
         sentenceId,
@@ -101,7 +184,7 @@ export async function requestSentenceAnalysis(
         version: r.version,
         model: r.model || '',
         createdAt: Date.now(),
-        analysis: r.analysis,
+        analysis,
     };
 }
 
@@ -109,7 +192,7 @@ export async function requestSentenceAnalysis(
  * 存檔：交易內讀教材，教材與句子仍在、原句沒變才寫入（擋住晚到寫入，Codex）。
  * 回傳 'saved' 或不寫入的原因；網路或權限錯誤會丟出（呼叫端顯示「沒有存起來」，再試一次只重存）
  */
-export async function saveSentenceAnalysis(rec: SentenceAnalysisRecord): Promise<'saved' | 'missing-material' | 'missing-sentence' | 'changed'> {
+export async function saveSentenceAnalysis(rec: SentenceAnalysisRecord): Promise<SaveResult> {
     const uid = requireUid();
     const materialRef = doc(db, materialPath(uid, rec.materialId));
     const analysisRef = doc(db, analysisPath(uid, rec.materialId, rec.sentenceId));
@@ -120,9 +203,10 @@ export async function saveSentenceAnalysis(rec: SentenceAnalysisRecord): Promise
         tx.set(analysisRef, JSON.parse(JSON.stringify(rec)));   // 清掉 undefined（Firestore 不接受）
         return 'saved' as const;
     });
+    const key = memoryKey(uid, rec.materialId, rec.sentenceId);
     if (outcome === 'saved') {
-        memory.set(memoryKey(rec.materialId, rec.sentenceId), rec);
-        unsavedMemory.delete(memoryKey(rec.materialId, rec.sentenceId));
+        memory.set(key, rec);
+        forgetUnsaved(key);
     }
     return outcome;
 }
@@ -154,7 +238,8 @@ export async function deleteMaterialWithAnalyses(materialId: string): Promise<vo
         }
         tx.delete(materialRef);
     });
-    for (const m of [memory, unsavedMemory]) for (const key of [...m.keys()]) if (key.startsWith(`${materialId}__`)) m.delete(key);
+    const prefix = `${uid}__${materialId}__`;
+    for (const m of [memory, unsavedMemory, unsavedReasons]) for (const key of [...m.keys()]) if (key.startsWith(prefix)) m.delete(key);
     if (leftovers.length === 0) return;
     try {
         for (let i = 0; i < leftovers.length; i += 400) {
@@ -163,6 +248,6 @@ export async function deleteMaterialWithAnalyses(materialId: string): Promise<vo
             await batch.commit();
         }
     } catch (err) {
-        console.warn('[句子解析] 教材已刪除，但部分解析沒有刪掉（不影響使用）', err);
+        console.error('[句子解析] 教材已刪除，但部分解析沒有刪掉（不影響使用）', leftovers.length, err);
     }
 }

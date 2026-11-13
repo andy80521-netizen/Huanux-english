@@ -1,6 +1,9 @@
 // 句子全面解析（前端純函式）：快取新舊、前後句、文件 ID、寫入前檢查、刪除計畫
 // 規劃：docs/plans/sentence-analysis.md（擁有者 2026-11-13 核准）
 
+/** 解析格式版本：必須與 netlify/shared/sentenceAnalysis.ts 相同（測試比對，docs/plans/review-fixes-50-51.md #7） */
+export const ANALYSIS_VERSION = 1;
+
 /** 與 netlify/shared/sentenceAnalysis.ts 的 SentenceAnalysis 相同（前後端分開建置，各自宣告） */
 export interface SentenceAnalysis {
     overview: string;
@@ -24,6 +27,54 @@ export interface SentenceAnalysisRecord {
     model: string;
     createdAt: number;
     analysis: SentenceAnalysis;
+}
+
+const str = (v: unknown, max: number): string => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
+const isObj = (v: unknown): v is Record<string, any> => !!v && typeof v === 'object' && !Array.isArray(v);
+
+/** 意群保留完整的原句切片：不逐段截斷（審查第 1 輪 Codex）；非字串項目丟掉；總長超過原句上限 → 整段不顯示 */
+function sanitizeChunks(v: unknown): string[] {
+    const list = arr(v).filter((c): c is string => typeof c === 'string' && c.trim() !== '').slice(0, 8);
+    const total = list.reduce((n, c) => n + c.length + 1, 0);
+    return total <= 1001 ? list : [];
+}
+
+/**
+ * 讀出存檔後先整理成安全格式（docs/plans/review-fixes-50-51.md #2）：
+ * 非陣列當空、字串截斷、不合格的項目丟掉；保留已存的意群（不重新切）。沒有「一句話看懂」→ null（當作沒有解析）
+ */
+export function sanitizeStoredAnalysis(raw: unknown): SentenceAnalysis | null {
+    if (!isObj(raw)) return null;
+    const overview = str(raw.overview, 400);
+    if (!overview) return null;
+    let structure: SentenceAnalysis['structure'] = null;
+    if (isObj(raw.structure) && str(raw.structure.main, 300)) {
+        structure = {
+            main: str(raw.structure.main, 300),
+            parts: arr(raw.structure.parts).filter(isObj).map(p => ({ text: str(p.text, 200), role: str(p.role, 200) })).filter(p => p.text && p.role).slice(0, 3),
+        };
+    }
+    return {
+        overview,
+        chunks: sanitizeChunks(raw.chunks),
+        structure,
+        grammar: arr(raw.grammar).filter(isObj).map(g => ({ point: str(g.point, 80), explanation: str(g.explanation, 300) })).filter(g => g.point && g.explanation).slice(0, 3),
+        vocabulary: arr(raw.vocabulary).filter(isObj)
+            .map(v => ({ word: str(v.word, 60), pos: str(v.pos, 20), meaning: str(v.meaning, 120), collocation: str(v.collocation, 120) }))
+            .filter(v => v.word && v.meaning).slice(0, 4),
+        patterns: arr(raw.patterns).filter(isObj)
+            .filter(p => p.category === 'structural' || p.category === 'phrase' || p.category === 'collocation')
+            .map(p => ({
+                category: p.category as 'structural' | 'phrase' | 'collocation',
+                text: str(p.text, 200),
+                meaningZh: str(p.meaningZh, 200),
+                usage: str(p.usage, 300),
+                examples: arr(p.examples).filter(isObj).map(e => ({ en: str(e.en, 300), zh: str(e.zh, 300) })).filter(e => e.en && e.zh).slice(0, 2),
+            }))
+            .filter(p => p.text && p.meaningZh).slice(0, 3),
+        pronunciation: arr(raw.pronunciation).map(x => str(x, 200)).filter(Boolean).slice(0, 3),
+    };
 }
 
 export type AnalysisInput = Pick<SentenceAnalysisRecord, 'text' | 'translation' | 'prevText' | 'nextText'>;
@@ -81,6 +132,6 @@ export const ANALYSIS_TX_MAX = 450;
 
 /** 刪除教材：句數不多時教材與每句的解析在同一筆交易刪除；太多時教材刪除成功後再分批刪 */
 export function planMaterialDelete(materialId: string, sentenceIds: string[]): { inTransaction: boolean; analysisIds: string[] } {
-    const analysisIds = sentenceIds.filter(id => ID_RE.test(id || '')).map(id => analysisDocId(materialId, id));
+    const analysisIds = [...new Set(sentenceIds)].filter(id => ID_RE.test(id || '')).map(id => analysisDocId(materialId, id));
     return { inTransaction: analysisIds.length <= ANALYSIS_TX_MAX, analysisIds };
 }
