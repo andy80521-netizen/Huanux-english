@@ -72,6 +72,7 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 - **OpenAI whisper-1 只要求 `timestamp_granularities[]=segment` 時，segment 時間是整數秒**（2026-11-12 診斷：230／230 段）；同時要求 `word` 才有約 0.01 秒精度。匯入時間不準的主因不是切句，是這個參數（PR #48）。改轉錄參數前先用「時間軸診斷」比較原始回應
 - 自動跟讀（PR #50）：流程控制在 `src/utils/autoShadowing.ts`（純函式、世代＋作答編號），元件只送事件。**停止錄音一律無條件拿掉 `onstop`**：`MediaRecorder.stop()` 之後、`onstop` 執行前，狀態已是 inactive，只在 `state === 'recording'` 時中止會漏掉已排入佇列的評分（Codex）。準備中取消用 `startCancelRef`，不可遞增 `scoringTokenRef`（評分中停止時結果要照常顯示）
 - 句子解析（PR #51）：Netlify 同步函式上限目前是 60 秒（官方文件），不是 10 秒；`callGeminiFreeThenPaid` 原本沒有整體截止時間，長任務要傳 `deadline`。AI 不可回傳原句文字（意群只回切點編號、從原句切）。React StrictMode 下 `useEffect(() => () => { ref = false })` 會讓旗標永遠是 false：初始化時要設回 true（Codex）。會因錄音而卸載的面板，進行中的請求與未存結果要放在服務層（Codex）
+- 漏洞修正（PR #52）：AI 回應「HTTP 200 但截斷或格式壞掉」也要走備援（`callQualityTextTimed` 的 `validate`；Groq 看 `finish_reason`）。讀出存檔一律先整理格式（App 沒有 ErrorBoundary，壞資料會白屏）。原句切片類資料不可逐段截斷。錄音中麥克風音軌 `ended` 會讓 MediaRecorder 正常 stop：要另外偵測、不評分（Codex）。前端長請求要有截止時間，清 inflight 時確認仍是同一個請求
 ## 防作弊機制的已知限制（2026-10-25 多輪攻擊測試後）
 - 「把斷言改弱」「mock 掉被測程式」「程式偵測測試環境」只能列為 ⚠️ 注意事項，無法自動判定是否作弊，要靠審查者與完成報告說明
 - Claude 若繞過 `gh_ai.py` 直接用 `gh api` 留言，留言會被當成擁有者的發言（Claude 使用擁有者帳號）；只能靠規則遵守
@@ -192,3 +193,7 @@ Claude 每完成一個功能就更新這份文件；開工前先讀。累積約 
 | 句子解析（PR #51，規劃＋質詢） | Gemini Flash Lite／Nemotron／DeepSeek／Grok | 4 | 6 | 意群用切點編號、交易內讀教材才寫、同一筆交易刪除、A 不複述翻譯；駁回：教材軟刪除排程清理、規則頻率限制、自動重切、Admin SDK 寫入、F 二次審核、背景函式 |
 | 句子解析（PR #51，審查） | Codex | 2 | 0 | StrictMode 掛載旗標、錄音中卸載丟掉未存結果 |
 | 句子解析（PR #51，審查） | Gemini | 0 | 0 | 兩輪無意見 |
+| 漏洞審查（PR #52，規劃） | Codex | 4 | 0 | 確認 Claude 6 點；新增麥克風音軌中斷、前端請求逾時 |
+| 漏洞審查（PR #52，規劃） | Gemini／Nemotron／DeepSeek | 8 | 10 | DeepSeek 最有用（孤兒未存結果、刪除清理提示、pagehide、聽聽看）；Gemini 的 iPhone 跳句手勢、錄音換 src 與 Nemotron 多項已防住的問題駁回 |
+| 漏洞審查（PR #52，審查） | Codex | 1 | 0 | 意群逐段截斷 |
+| 漏洞審查（PR #52，審查） | Gemini | 1 | 1 | 逾時提示兩層括號；閉包抓上一句為誤判 |
