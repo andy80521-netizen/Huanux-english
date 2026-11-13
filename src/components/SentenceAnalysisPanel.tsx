@@ -142,7 +142,8 @@ function SentenceAnalysisPanelInner({ material, sentence, sentenceIndex }: Props
     const applyFailure = (e: any, key: string) => {
         if (!isCurrent(key)) return;
         setAnalyzing(false);
-        setError(e?.message || '解析失敗');
+        // 逾時、太長、沒登入等已是完整提示，直接顯示；其他錯誤包成「解析失敗，再試一次（…）」（審查第 2 輪，Gemini）
+        setError(e instanceof SentenceAnalysisError ? e.message : `解析失敗，再試一次（${e?.message || '未知錯誤'}）`);
     };
 
     const runAnalyze = () => {
@@ -223,7 +224,7 @@ function SentenceAnalysisPanelInner({ material, sentence, sentenceIndex }: Props
 
                     {error && (
                         <div role="alert" className="flex flex-col items-start gap-2">
-                            <p className="text-sm text-danger">{error.startsWith('還是沒有存起來') ? error : `解析失敗，再試一次（${error}）`}</p>
+                            <p className="text-sm text-danger">{error}</p>
                         </div>
                     )}
 

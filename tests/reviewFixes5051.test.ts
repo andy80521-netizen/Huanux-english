@@ -246,3 +246,13 @@ describe('審查第 1 輪（Codex）：意群保留完整原句切片', () => {
     expect(sanitizeStoredAnalysis({ overview: 'x', chunks: ['The council has', 'decided'] })!.chunks).toEqual(['The council has', 'decided']);
   });
 });
+
+describe('審查第 2 輪（Gemini）：逾時等完整提示不再包兩層', () => {
+  it('SentenceAnalysisError 直接顯示訊息；其他錯誤才包成「解析失敗，再試一次（…）」', () => {
+    const p = read('src/components/SentenceAnalysisPanel.tsx');
+    const f = p.slice(p.indexOf('const applyFailure'));
+    const body = f.slice(0, f.indexOf('\n    };'));
+    expect(body).toMatch(/e instanceof SentenceAnalysisError \? e\.message/);
+    expect(p).not.toMatch(/`解析失敗，再試一次（\$\{error\}）`/);
+  });
+});
